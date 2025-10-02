@@ -6,26 +6,27 @@ Lynx is a URL shortener backend API written in Rust with support for multiple st
 
 - 🔗 **URL Shortening**: Create short codes for long URLs with optional custom codes
 - 🗄️ **Extensible Storage**: Support for both SQLite and PostgreSQL backends
-- 🔐 **Access Control**: API key-based authentication for management operations
+- 🔐 **Access Control**: Optional API key-based authentication for management operations
 - 🚀 **Dual Server Architecture**: Separate ports for API management and client redirects
 - 📊 **Analytics**: Track click counts for each shortened URL
-- ⏰ **Expiration**: Optional expiration dates for shortened URLs
-- 🔄 **CRUD Operations**: Full create, read, update, and delete support
+- 🔒 **Immutable URLs**: URLs are immutable and can only be deactivated, not deleted or modified
+- 🔄 **Deactivation**: URLs can be deactivated and reactivated (e.g., for policy violations)
 
 ## Architecture
 
 Lynx runs two separate HTTP servers:
 
-1. **API Server** (default: port 8080): For creating, updating, and managing shortened URLs
-   - Protected by API key authentication
-   - Full CRUD operations
+1. **API Server** (default: port 8080): For creating and managing shortened URLs
+   - Optional API key authentication (can be disabled)
+   - Create URLs with auto-generated or custom codes
+   - Deactivate/reactivate URLs
    - List and search capabilities
 
 2. **Redirect Server** (default: port 3000): For client-facing URL redirects
    - No authentication required
    - Fast redirects
    - Click tracking
-   - Handles expired links
+   - Handles deactivated links
 
 This separation allows you to:
 - Expose the redirect server publicly while keeping the API server internal
@@ -63,6 +64,7 @@ cp .env.example .env
 - `API_PORT`: API server port (default: `8080`)
 - `REDIRECT_HOST`: Redirect server host (default: `127.0.0.1`)
 - `REDIRECT_PORT`: Redirect server port (default: `3000`)
+- `DISABLE_AUTH`: Set to `true` to completely disable authentication (default: `false`)
 - `API_KEYS`: Comma-separated list of API keys (leave empty for development mode)
 
 ## Running
@@ -81,7 +83,7 @@ Or run the binary directly:
 
 ### API Server (Port 8080)
 
-All endpoints require an `X-API-Key` header (unless running in development mode with no API keys configured).
+All endpoints require an `X-API-Key` header (unless authentication is disabled via `DISABLE_AUTH=true` or running in development mode with no API keys configured).
 
 #### Health Check
 ```bash
@@ -96,8 +98,7 @@ X-API-Key: your-api-key
 
 {
   "url": "https://example.com/very/long/url",
-  "custom_code": "mycode",  // Optional
-  "expires_at": 1735689600  // Optional (Unix timestamp)
+  "custom_code": "mycode"  // Optional
 }
 
 Response: 201 Created
@@ -108,7 +109,7 @@ Response: 201 Created
   "created_at": 1704067200,
   "created_by": null,
   "clicks": 0,
-  "expires_at": 1735689600
+  "is_active": true
 }
 ```
 
@@ -125,35 +126,34 @@ Response: 200 OK
   "created_at": 1704067200,
   "created_by": null,
   "clicks": 42,
-  "expires_at": null
+  "is_active": true
 }
 ```
 
-#### Update URL
+#### Deactivate URL
 ```bash
-PUT /urls/:code
+PUT /urls/:code/deactivate
 Content-Type: application/json
 X-API-Key: your-api-key
 
 {
-  "url": "https://example.com/new/url",  // Optional
-  "expires_at": 1735689600               // Optional
+  "reason": "Policy violation"  // Optional
 }
 
 Response: 200 OK
 {
-  "message": "URL updated successfully"
+  "message": "URL deactivated successfully"
 }
 ```
 
-#### Delete URL
+#### Reactivate URL
 ```bash
-DELETE /urls/:code
+PUT /urls/:code/reactivate
 X-API-Key: your-api-key
 
 Response: 200 OK
 {
-  "message": "URL deleted successfully"
+  "message": "URL reactivated successfully"
 }
 ```
 
@@ -171,7 +171,7 @@ Response: 200 OK
     "created_at": 1704067200,
     "created_by": null,
     "clicks": 10,
-    "expires_at": null
+    "is_active": true
   },
   ...
 ]
@@ -245,10 +245,33 @@ curl http://localhost:8080/urls/lynx \
 curl http://localhost:8080/urls?limit=10 \
   -H "X-API-Key: dev-key-123"
 
-# Delete a URL
-curl -X DELETE http://localhost:8080/urls/lynx \
+# Deactivate a URL
+curl -X PUT http://localhost:8080/urls/lynx/deactivate \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-key-123" \
+  -d '{}'
+
+# Reactivate a URL
+curl -X PUT http://localhost:8080/urls/lynx/reactivate \
   -H "X-API-Key: dev-key-123"
 ```
+
+### Running with Authentication Disabled
+
+For secure environments where the control plane is already protected:
+
+```bash
+# .env file
+DATABASE_BACKEND=sqlite
+DATABASE_URL=sqlite://./lynx.db
+API_HOST=127.0.0.1
+API_PORT=8080
+REDIRECT_HOST=127.0.0.1
+REDIRECT_PORT=3000
+DISABLE_AUTH=true
+```
+
+With `DISABLE_AUTH=true`, no API key is required for any endpoint.
 
 ## Deployment with Reverse Proxy
 

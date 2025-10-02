@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::models::{CreateUrlRequest, ShortenedUrl, UpdateUrlRequest};
+use crate::models::{CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl};
 use crate::storage::Storage;
 
 pub struct AppState {
@@ -105,7 +105,7 @@ pub async fn create_url(
     // Create the shortened URL
     match state
         .storage
-        .create(&short_code, &payload.url, None, payload.expires_at)
+        .create(&short_code, &payload.url, None)
         .await
     {
         Ok(url) => Ok((StatusCode::CREATED, Json(url))),
@@ -140,19 +140,15 @@ pub async fn get_url(
     }
 }
 
-/// Update a shortened URL
-pub async fn update_url(
+/// Deactivate a shortened URL
+pub async fn deactivate_url(
     State(state): State<Arc<AppState>>,
     Path(code): Path<String>,
-    Json(payload): Json<UpdateUrlRequest>,
+    Json(_payload): Json<DeactivateUrlRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match state
-        .storage
-        .update(&code, payload.url.as_deref(), payload.expires_at)
-        .await
-    {
+    match state.storage.deactivate(&code).await {
         Ok(true) => Ok(Json(SuccessResponse {
-            message: "URL updated successfully".to_string(),
+            message: "URL deactivated successfully".to_string(),
         })),
         Ok(false) => Err((
             StatusCode::NOT_FOUND,
@@ -163,20 +159,20 @@ pub async fn update_url(
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
-                error: format!("Failed to update URL: {}", e),
+                error: format!("Failed to deactivate URL: {}", e),
             }),
         )),
     }
 }
 
-/// Delete a shortened URL
-pub async fn delete_url(
+/// Reactivate a shortened URL
+pub async fn reactivate_url(
     State(state): State<Arc<AppState>>,
     Path(code): Path<String>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match state.storage.delete(&code).await {
+    match state.storage.reactivate(&code).await {
         Ok(true) => Ok(Json(SuccessResponse {
-            message: "URL deleted successfully".to_string(),
+            message: "URL reactivated successfully".to_string(),
         })),
         Ok(false) => Err((
             StatusCode::NOT_FOUND,
@@ -187,7 +183,7 @@ pub async fn delete_url(
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
-                error: format!("Failed to delete URL: {}", e),
+                error: format!("Failed to reactivate URL: {}", e),
             }),
         )),
     }

@@ -30,7 +30,7 @@ impl Storage for SqliteStorage {
                 created_at INTEGER NOT NULL,
                 created_by TEXT,
                 clicks INTEGER NOT NULL DEFAULT 0,
-                expires_at INTEGER
+                is_active INTEGER NOT NULL DEFAULT 1
             )
             "#,
         )
@@ -49,7 +49,6 @@ impl Storage for SqliteStorage {
         short_code: &str,
         original_url: &str,
         created_by: Option<&str>,
-        expires_at: Option<i64>,
     ) -> Result<ShortenedUrl> {
         let created_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -57,15 +56,14 @@ impl Storage for SqliteStorage {
 
         let id = sqlx::query(
             r#"
-            INSERT INTO urls (short_code, original_url, created_at, created_by, expires_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO urls (short_code, original_url, created_at, created_by, is_active)
+            VALUES (?, ?, ?, ?, 1)
             "#,
         )
         .bind(short_code)
         .bind(original_url)
         .bind(created_at)
         .bind(created_by)
-        .bind(expires_at)
         .execute(self.pool.as_ref())
         .await?
         .last_insert_rowid();
@@ -77,14 +75,14 @@ impl Storage for SqliteStorage {
             created_at,
             created_by: created_by.map(|s| s.to_string()),
             clicks: 0,
-            expires_at,
+            is_active: true,
         })
     }
 
     async fn get(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {
         let url = sqlx::query_as::<_, ShortenedUrl>(
             r#"
-            SELECT id, short_code, original_url, created_at, created_by, clicks, expires_at
+            SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
             FROM urls
             WHERE short_code = ?
             "#,
@@ -96,51 +94,26 @@ impl Storage for SqliteStorage {
         Ok(url)
     }
 
-    async fn update(
-        &self,
-        short_code: &str,
-        original_url: Option<&str>,
-        expires_at: Option<i64>,
-    ) -> Result<bool> {
-        if let Some(url) = original_url {
-            let result = sqlx::query(
-                r#"
-                UPDATE urls
-                SET original_url = ?
-                WHERE short_code = ?
-                "#,
-            )
-            .bind(url)
-            .bind(short_code)
-            .execute(self.pool.as_ref())
-            .await?;
-
-            if result.rows_affected() == 0 {
-                return Ok(false);
-            }
-        }
-
-        if let Some(exp) = expires_at {
-            sqlx::query(
-                r#"
-                UPDATE urls
-                SET expires_at = ?
-                WHERE short_code = ?
-                "#,
-            )
-            .bind(exp)
-            .bind(short_code)
-            .execute(self.pool.as_ref())
-            .await?;
-        }
-
-        Ok(true)
-    }
-
-    async fn delete(&self, short_code: &str) -> Result<bool> {
+    async fn deactivate(&self, short_code: &str) -> Result<bool> {
         let result = sqlx::query(
             r#"
-            DELETE FROM urls
+            UPDATE urls
+            SET is_active = 0
+            WHERE short_code = ?
+            "#,
+        )
+        .bind(short_code)
+        .execute(self.pool.as_ref())
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn reactivate(&self, short_code: &str) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            UPDATE urls
+            SET is_active = 1
             WHERE short_code = ?
             "#,
         )
@@ -169,7 +142,7 @@ impl Storage for SqliteStorage {
     async fn list(&self, limit: i64, offset: i64) -> Result<Vec<ShortenedUrl>> {
         let urls = sqlx::query_as::<_, ShortenedUrl>(
             r#"
-            SELECT id, short_code, original_url, created_at, created_by, clicks, expires_at
+            SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
             FROM urls
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?

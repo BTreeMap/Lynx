@@ -30,7 +30,7 @@ impl Storage for PostgresStorage {
                 created_at BIGINT NOT NULL,
                 created_by TEXT,
                 clicks BIGINT NOT NULL DEFAULT 0,
-                expires_at BIGINT
+                is_active BOOLEAN NOT NULL DEFAULT true
             )
             "#,
         )
@@ -49,7 +49,6 @@ impl Storage for PostgresStorage {
         short_code: &str,
         original_url: &str,
         created_by: Option<&str>,
-        expires_at: Option<i64>,
     ) -> Result<ShortenedUrl> {
         let created_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -57,16 +56,15 @@ impl Storage for PostgresStorage {
 
         let row = sqlx::query_as::<_, ShortenedUrl>(
             r#"
-            INSERT INTO urls (short_code, original_url, created_at, created_by, expires_at)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, short_code, original_url, created_at, created_by, clicks, expires_at
+            INSERT INTO urls (short_code, original_url, created_at, created_by, is_active)
+            VALUES ($1, $2, $3, $4, true)
+            RETURNING id, short_code, original_url, created_at, created_by, clicks, is_active
             "#,
         )
         .bind(short_code)
         .bind(original_url)
         .bind(created_at)
         .bind(created_by)
-        .bind(expires_at)
         .fetch_one(self.pool.as_ref())
         .await?;
 
@@ -76,7 +74,7 @@ impl Storage for PostgresStorage {
     async fn get(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {
         let url = sqlx::query_as::<_, ShortenedUrl>(
             r#"
-            SELECT id, short_code, original_url, created_at, created_by, clicks, expires_at
+            SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
             FROM urls
             WHERE short_code = $1
             "#,
@@ -88,51 +86,26 @@ impl Storage for PostgresStorage {
         Ok(url)
     }
 
-    async fn update(
-        &self,
-        short_code: &str,
-        original_url: Option<&str>,
-        expires_at: Option<i64>,
-    ) -> Result<bool> {
-        if let Some(url) = original_url {
-            let result = sqlx::query(
-                r#"
-                UPDATE urls
-                SET original_url = $1
-                WHERE short_code = $2
-                "#,
-            )
-            .bind(url)
-            .bind(short_code)
-            .execute(self.pool.as_ref())
-            .await?;
-
-            if result.rows_affected() == 0 {
-                return Ok(false);
-            }
-        }
-
-        if let Some(exp) = expires_at {
-            sqlx::query(
-                r#"
-                UPDATE urls
-                SET expires_at = $1
-                WHERE short_code = $2
-                "#,
-            )
-            .bind(exp)
-            .bind(short_code)
-            .execute(self.pool.as_ref())
-            .await?;
-        }
-
-        Ok(true)
-    }
-
-    async fn delete(&self, short_code: &str) -> Result<bool> {
+    async fn deactivate(&self, short_code: &str) -> Result<bool> {
         let result = sqlx::query(
             r#"
-            DELETE FROM urls
+            UPDATE urls
+            SET is_active = false
+            WHERE short_code = $1
+            "#,
+        )
+        .bind(short_code)
+        .execute(self.pool.as_ref())
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn reactivate(&self, short_code: &str) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            UPDATE urls
+            SET is_active = true
             WHERE short_code = $1
             "#,
         )
@@ -161,7 +134,7 @@ impl Storage for PostgresStorage {
     async fn list(&self, limit: i64, offset: i64) -> Result<Vec<ShortenedUrl>> {
         let urls = sqlx::query_as::<_, ShortenedUrl>(
             r#"
-            SELECT id, short_code, original_url, created_at, created_by, clicks, expires_at
+            SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
             FROM urls
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2

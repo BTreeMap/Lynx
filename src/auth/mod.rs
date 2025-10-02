@@ -7,21 +7,29 @@ use axum::{
 use std::sync::Arc;
 
 pub struct AuthService {
+    enabled: bool,
     api_keys: Arc<Vec<String>>,
 }
 
 impl AuthService {
-    pub fn new(api_keys: Vec<String>) -> Self {
+    pub fn new(enabled: bool, api_keys: Vec<String>) -> Self {
         Self {
+            enabled,
             api_keys: Arc::new(api_keys),
         }
     }
 
     pub fn validate_key(&self, key: &str) -> bool {
-        if self.api_keys.is_empty() {
-            // If no API keys configured, allow all requests (development mode)
+        // If authentication is disabled, allow all requests
+        if !self.enabled {
             return true;
         }
+        
+        // If no API keys configured but auth is enabled, allow all (dev mode)
+        if self.api_keys.is_empty() {
+            return true;
+        }
+        
         self.api_keys.iter().any(|k| k == key)
     }
 }

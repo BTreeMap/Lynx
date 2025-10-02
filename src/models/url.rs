@@ -9,18 +9,16 @@ pub struct ShortenedUrl {
     pub created_at: i64,
     pub created_by: Option<String>,
     pub clicks: i64,
-    pub expires_at: Option<i64>,
+    pub is_active: bool,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CreateUrlRequest {
     pub url: String,
     pub custom_code: Option<String>,
-    pub expires_at: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateUrlRequest {
-    pub url: Option<String>,
-    pub expires_at: Option<i64>,
+pub struct DeactivateUrlRequest {
+    pub reason: Option<String>,
 }

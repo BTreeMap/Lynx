@@ -19,16 +19,9 @@ pub async fn redirect_url(
     // Get the URL
     match state.storage.get(&code).await {
         Ok(Some(url)) => {
-            // Check if expired
-            if let Some(expires_at) = url.expires_at {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64;
-                
-                if now > expires_at {
-                    return (StatusCode::GONE, "This link has expired").into_response();
-                }
+            // Check if URL is active
+            if !url.is_active {
+                return (StatusCode::GONE, "This link has been deactivated").into_response();
             }
             
             // Increment clicks asynchronously (fire and forget)

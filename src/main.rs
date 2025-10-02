@@ -40,8 +40,14 @@ async fn main() -> Result<()> {
     info!("Database initialized successfully");
 
     // Initialize auth service
-    let auth_service = Arc::new(AuthService::new(config.auth.api_keys.clone()));
-    if config.auth.api_keys.is_empty() {
+    let auth_service = Arc::new(AuthService::new(
+        config.auth.enabled,
+        config.auth.api_keys.clone()
+    ));
+    
+    if !config.auth.enabled {
+        info!("⚠️  Authentication is DISABLED - all API requests will be allowed");
+    } else if config.auth.api_keys.is_empty() {
         info!("⚠️  Running in development mode - no API keys required");
     } else {
         info!("API keys configured: {} key(s)", config.auth.api_keys.len());

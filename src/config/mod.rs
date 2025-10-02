@@ -29,6 +29,7 @@ pub struct ServerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
+    pub enabled: bool,
     pub api_keys: Vec<String>,
 }
 
@@ -59,6 +60,11 @@ impl Config {
             .unwrap_or_else(|_| "3000".to_string())
             .parse::<u16>()?;
 
+        // Check if authentication is disabled
+        let auth_enabled = std::env::var("DISABLE_AUTH")
+            .map(|v| v.to_lowercase() != "true")
+            .unwrap_or(true);
+
         let api_keys_str = std::env::var("API_KEYS")
             .unwrap_or_else(|_| String::new());
         let api_keys: Vec<String> = api_keys_str
@@ -80,7 +86,10 @@ impl Config {
                 host: redirect_host,
                 port: redirect_port,
             },
-            auth: AuthConfig { api_keys },
+            auth: AuthConfig { 
+                enabled: auth_enabled,
+                api_keys 
+            },
         })
     }
 }
