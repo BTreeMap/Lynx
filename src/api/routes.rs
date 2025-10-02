@@ -13,8 +13,7 @@ use super::handlers::{create_url, delete_url, get_url, health_check, list_urls, 
 pub fn create_api_router(storage: Arc<dyn Storage>, auth_service: Arc<AuthService>) -> Router {
     let state = Arc::new(AppState { storage });
 
-    Router::new()
-        .route("/health", get(health_check))
+    let protected_routes = Router::new()
         .route("/urls", post(create_url))
         .route("/urls", get(list_urls))
         .route("/urls/:code", get(get_url))
@@ -24,5 +23,10 @@ pub fn create_api_router(storage: Arc<dyn Storage>, auth_service: Arc<AuthServic
             let auth = Arc::clone(&auth_service);
             auth_middleware(auth, headers, req, next)
         }))
-        .with_state(state)
+        .with_state(Arc::clone(&state));
+
+    Router::new()
+        .route("/health", get(health_check))
+        .merge(protected_routes)
 }
+
