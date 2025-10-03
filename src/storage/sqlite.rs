@@ -1,7 +1,8 @@
 use crate::models::ShortenedUrl;
-use crate::storage::Storage;
+use crate::storage::{encode_base36_lower, Storage};
 use anyhow::Result;
 use async_trait::async_trait;
+use rand::distr::{Alphanumeric, Distribution};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
@@ -44,7 +45,7 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
-    async fn create(
+    async fn create_with_code(
         &self,
         short_code: &str,
         original_url: &str,
@@ -71,6 +72,59 @@ impl Storage for SqliteStorage {
         Ok(ShortenedUrl {
             id,
             short_code: short_code.to_string(),
+            original_url: original_url.to_string(),
+            created_at,
+            created_by: created_by.map(|s| s.to_string()),
+            clicks: 0,
+            is_active: true,
+        })
+    }
+
+    async fn create_auto(
+        &self,
+        original_url: &str,
+        created_by: Option<&str>,
+    ) -> Result<ShortenedUrl> {
+        let created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+
+        let mut tx = self.pool.begin().await?;
+        let placeholder = format!("tmp_{}", random_alphanumeric(16));
+
+        let id = sqlx::query(
+            r#"
+            INSERT INTO urls (short_code, original_url, created_at, created_by, is_active)
+            VALUES (?, ?, ?, ?, 1)
+            "#,
+        )
+        .bind(&placeholder)
+        .bind(original_url)
+        .bind(created_at)
+        .bind(created_by)
+        .execute(&mut *tx)
+        .await?
+        .last_insert_rowid();
+
+        let short_code = encode_base36_lower(id);
+
+        sqlx::query(
+            r#"
+            UPDATE urls
+            SET short_code = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&short_code)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        Ok(ShortenedUrl {
+            id,
+            short_code,
             original_url: original_url.to_string(),
             created_at,
             created_by: created_by.map(|s| s.to_string()),
@@ -168,4 +222,11 @@ impl Storage for SqliteStorage {
 
         Ok(count.0 > 0)
     }
+}
+
+fn random_alphanumeric(len: usize) -> String {
+    let mut rng = rand::rng();
+    (0..len)
+        .map(|_| Alphanumeric.sample(&mut rng) as char)
+        .collect()
 }

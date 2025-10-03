@@ -1,6 +1,6 @@
 use axum::{
     extract::Request,
-    http::{StatusCode, HeaderMap},
+    http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -24,12 +24,12 @@ impl AuthService {
         if !self.enabled {
             return true;
         }
-        
+
         // If no API keys configured but auth is enabled, allow all (dev mode)
         if self.api_keys.is_empty() {
             return true;
         }
-        
+
         self.api_keys.iter().any(|k| k == key)
     }
 }

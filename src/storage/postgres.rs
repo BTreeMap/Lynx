@@ -1,5 +1,5 @@
 use crate::models::ShortenedUrl;
-use crate::storage::Storage;
+use crate::storage::{encode_base36_lower, Storage};
 use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::PgPool;
@@ -44,7 +44,7 @@ impl Storage for PostgresStorage {
         Ok(())
     }
 
-    async fn create(
+    async fn create_with_code(
         &self,
         short_code: &str,
         original_url: &str,
@@ -67,6 +67,43 @@ impl Storage for PostgresStorage {
         .bind(created_by)
         .fetch_one(self.pool.as_ref())
         .await?;
+
+        Ok(row)
+    }
+
+    async fn create_auto(
+        &self,
+        original_url: &str,
+        created_by: Option<&str>,
+    ) -> Result<ShortenedUrl> {
+        let created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+
+        let mut tx = self.pool.begin().await?;
+
+        let id: i64 = sqlx::query_scalar(r#"SELECT nextval('urls_id_seq')"#)
+            .fetch_one(&mut *tx)
+            .await?;
+
+        let short_code = encode_base36_lower(id);
+
+        let row = sqlx::query_as::<_, ShortenedUrl>(
+            r#"
+            INSERT INTO urls (id, short_code, original_url, created_at, created_by, is_active)
+            VALUES ($1, $2, $3, $4, $5, true)
+            RETURNING id, short_code, original_url, created_at, created_by, clicks, is_active
+            "#,
+        )
+        .bind(id)
+        .bind(&short_code)
+        .bind(original_url)
+        .bind(created_at)
+        .bind(created_by)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
 
         Ok(row)
     }

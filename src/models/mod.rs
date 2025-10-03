@@ -1,3 +1,3 @@
 pub mod url;
 
-pub use url::{ShortenedUrl, CreateUrlRequest, DeactivateUrlRequest};
+pub use url::{CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl};

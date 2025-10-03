@@ -8,7 +8,9 @@ use std::sync::Arc;
 use crate::auth::{auth_middleware, AuthService};
 use crate::storage::Storage;
 
-use super::handlers::{create_url, deactivate_url, get_url, health_check, list_urls, reactivate_url, AppState};
+use super::handlers::{
+    create_url, deactivate_url, get_url, health_check, list_urls, reactivate_url, AppState,
+};
 
 pub fn create_api_router(storage: Arc<dyn Storage>, auth_service: Arc<AuthService>) -> Router {
     let state = Arc::new(AppState { storage });
@@ -29,4 +31,3 @@ pub fn create_api_router(storage: Arc<dyn Storage>, auth_service: Arc<AuthServic
         .route("/health", get(health_check))
         .merge(protected_routes)
 }
-

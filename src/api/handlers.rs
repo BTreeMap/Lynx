@@ -35,21 +35,14 @@ fn default_limit() -> i64 {
     50
 }
 
-/// Generate a random short code
-fn generate_short_code() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let num: u64 = rng.gen_range(100000000..9999999999);
-    base62::encode(num)
-}
-
 /// Create a new shortened URL
 pub async fn create_url(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateUrlRequest>,
 ) -> Result<(StatusCode, Json<ShortenedUrl>), (StatusCode, Json<ErrorResponse>)> {
-    // Validate URL
-    if payload.url.is_empty() {
+    let CreateUrlRequest { url, custom_code } = payload;
+
+    if url.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -58,9 +51,7 @@ pub async fn create_url(
         ));
     }
 
-    // Use custom code or generate one
-    let short_code = if let Some(custom) = payload.custom_code {
-        // Validate custom code
+    let created = if let Some(custom) = custom_code {
         if custom.is_empty() || custom.len() > 20 {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -69,53 +60,51 @@ pub async fn create_url(
                 }),
             ));
         }
-        
-        // Check if already exists
-        if state.storage.exists(&custom).await.unwrap_or(false) {
-            return Err((
+
+        match state.storage.exists(&custom).await {
+            Ok(true) => Err((
                 StatusCode::CONFLICT,
                 Json(ErrorResponse {
                     error: "Short code already exists".to_string(),
                 }),
-            ));
-        }
-        
-        custom
-    } else {
-        // Generate unique short code
-        let mut code = generate_short_code();
-        let mut attempts = 0;
-        while state.storage.exists(&code).await.unwrap_or(false) && attempts < 10 {
-            code = generate_short_code();
-            attempts += 1;
-        }
-        
-        if attempts >= 10 {
-            return Err((
+            )),
+            Ok(false) => state
+                .storage
+                .create_with_code(&custom, &url, None)
+                .await
+                .map(|url| (StatusCode::CREATED, Json(url)))
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResponse {
+                            error: format!("Failed to create URL with custom code: {}", e),
+                        }),
+                    )
+                }),
+            Err(e) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: "Failed to generate unique short code".to_string(),
+                    error: format!("Failed to validate custom code availability: {}", e),
                 }),
-            ));
+            )),
         }
-        
-        code
+    } else {
+        state
+            .storage
+            .create_auto(&url, None)
+            .await
+            .map(|url| (StatusCode::CREATED, Json(url)))
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("Failed to create URL: {}", e),
+                    }),
+                )
+            })
     };
 
-    // Create the shortened URL
-    match state
-        .storage
-        .create(&short_code, &payload.url, None)
-        .await
-    {
-        Ok(url) => Ok((StatusCode::CREATED, Json(url))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("Failed to create URL: {}", e),
-            }),
-        )),
-    }
+    created
 }
 
 /// Get a shortened URL by code

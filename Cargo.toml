@@ -30,8 +30,8 @@ thiserror = "2"
 async-trait = "0.1"
 
 # URL shortening
-base62 = "2"
 rand = "0.9"
 
 # Environment variables
 dotenvy = "0.15"
+rand_distr = "0.5.1"

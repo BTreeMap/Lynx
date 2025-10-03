@@ -42,9 +42,9 @@ async fn main() -> Result<()> {
     // Initialize auth service
     let auth_service = Arc::new(AuthService::new(
         config.auth.enabled,
-        config.auth.api_keys.clone()
+        config.auth.api_keys.clone(),
     ));
-    
+
     if !config.auth.enabled {
         info!("⚠️  Authentication is DISABLED - all API requests will be allowed");
     } else if config.auth.api_keys.is_empty() {
@@ -78,4 +78,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-

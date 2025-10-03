@@ -23,14 +23,14 @@ pub async fn redirect_url(
             if !url.is_active {
                 return (StatusCode::GONE, "This link has been deactivated").into_response();
             }
-            
+
             // Increment clicks asynchronously (fire and forget)
             let storage = Arc::clone(&state.storage);
             let code_clone = code.clone();
             tokio::spawn(async move {
                 let _ = storage.increment_clicks(&code_clone).await;
             });
-            
+
             // Redirect
             Redirect::permanent(&url.original_url).into_response()
         }
