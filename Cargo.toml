@@ -31,7 +31,7 @@ async-trait = "0.1"
 
 # URL shortening
 rand = "0.9"
+statrs = "0.16"
 
 # Environment variables
 dotenvy = "0.15"
-rand_distr = "0.5.1"

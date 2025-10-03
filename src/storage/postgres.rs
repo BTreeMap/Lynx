@@ -1,5 +1,5 @@
 use crate::models::ShortenedUrl;
-use crate::storage::{encode_base36_lower, Storage};
+use crate::storage::{Storage, StorageError, StorageResult};
 use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::PgPool;
@@ -49,61 +49,42 @@ impl Storage for PostgresStorage {
         short_code: &str,
         original_url: &str,
         created_by: Option<&str>,
-    ) -> Result<ShortenedUrl> {
+    ) -> StorageResult<ShortenedUrl> {
         let created_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| StorageError::Other(e.into()))?
             .as_secs() as i64;
 
-        let row = sqlx::query_as::<_, ShortenedUrl>(
+        let result = sqlx::query(
             r#"
             INSERT INTO urls (short_code, original_url, created_at, created_by, is_active)
             VALUES ($1, $2, $3, $4, true)
-            RETURNING id, short_code, original_url, created_at, created_by, clicks, is_active
+            ON CONFLICT (short_code) DO NOTHING
             "#,
         )
         .bind(short_code)
         .bind(original_url)
         .bind(created_at)
         .bind(created_by)
-        .fetch_one(self.pool.as_ref())
-        .await?;
+        .execute(self.pool.as_ref())
+        .await
+        .map_err(|e| StorageError::Other(e.into()))?;
 
-        Ok(row)
-    }
-
-    async fn create_auto(
-        &self,
-        original_url: &str,
-        created_by: Option<&str>,
-    ) -> Result<ShortenedUrl> {
-        let created_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs() as i64;
-
-        let mut tx = self.pool.begin().await?;
-
-        let id: i64 = sqlx::query_scalar(r#"SELECT nextval('urls_id_seq')"#)
-            .fetch_one(&mut *tx)
-            .await?;
-
-        let short_code = encode_base36_lower(id);
+        if result.rows_affected() == 0 {
+            return Err(StorageError::Conflict);
+        }
 
         let row = sqlx::query_as::<_, ShortenedUrl>(
             r#"
-            INSERT INTO urls (id, short_code, original_url, created_at, created_by, is_active)
-            VALUES ($1, $2, $3, $4, $5, true)
-            RETURNING id, short_code, original_url, created_at, created_by, clicks, is_active
+            SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+            FROM urls
+            WHERE short_code = $1
             "#,
         )
-        .bind(id)
-        .bind(&short_code)
-        .bind(original_url)
-        .bind(created_at)
-        .bind(created_by)
-        .fetch_one(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
+        .bind(short_code)
+        .fetch_one(self.pool.as_ref())
+        .await
+        .map_err(|e| StorageError::Other(e.into()))?;
 
         Ok(row)
     }
@@ -183,18 +164,5 @@ impl Storage for PostgresStorage {
         .await?;
 
         Ok(urls)
-    }
-
-    async fn exists(&self, short_code: &str) -> Result<bool> {
-        let count: (i64,) = sqlx::query_as(
-            r#"
-            SELECT COUNT(*) FROM urls WHERE short_code = $1
-            "#,
-        )
-        .bind(short_code)
-        .fetch_one(self.pool.as_ref())
-        .await?;
-
-        Ok(count.0 > 0)
     }
 }

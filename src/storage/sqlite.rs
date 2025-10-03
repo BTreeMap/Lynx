@@ -1,8 +1,7 @@
 use crate::models::ShortenedUrl;
-use crate::storage::{encode_base36_lower, Storage};
+use crate::storage::{Storage, StorageError, StorageResult};
 use anyhow::Result;
 use async_trait::async_trait;
-use rand::distr::{Alphanumeric, Distribution};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
@@ -50,15 +49,17 @@ impl Storage for SqliteStorage {
         short_code: &str,
         original_url: &str,
         created_by: Option<&str>,
-    ) -> Result<ShortenedUrl> {
+    ) -> StorageResult<ShortenedUrl> {
         let created_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| StorageError::Other(e.into()))?
             .as_secs() as i64;
 
-        let id = sqlx::query(
+        let result = sqlx::query(
             r#"
             INSERT INTO urls (short_code, original_url, created_at, created_by, is_active)
             VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(short_code) DO NOTHING
             "#,
         )
         .bind(short_code)
@@ -66,71 +67,26 @@ impl Storage for SqliteStorage {
         .bind(created_at)
         .bind(created_by)
         .execute(self.pool.as_ref())
-        .await?
-        .last_insert_rowid();
+        .await
+        .map_err(|e| StorageError::Other(e.into()))?;
 
-        Ok(ShortenedUrl {
-            id,
-            short_code: short_code.to_string(),
-            original_url: original_url.to_string(),
-            created_at,
-            created_by: created_by.map(|s| s.to_string()),
-            clicks: 0,
-            is_active: true,
-        })
-    }
+        if result.rows_affected() == 0 {
+            return Err(StorageError::Conflict);
+        }
 
-    async fn create_auto(
-        &self,
-        original_url: &str,
-        created_by: Option<&str>,
-    ) -> Result<ShortenedUrl> {
-        let created_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs() as i64;
-
-        let mut tx = self.pool.begin().await?;
-        let placeholder = format!("tmp_{}", random_alphanumeric(16));
-
-        let id = sqlx::query(
+        let url = sqlx::query_as::<_, ShortenedUrl>(
             r#"
-            INSERT INTO urls (short_code, original_url, created_at, created_by, is_active)
-            VALUES (?, ?, ?, ?, 1)
+            SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+            FROM urls
+            WHERE short_code = ?
             "#,
         )
-        .bind(&placeholder)
-        .bind(original_url)
-        .bind(created_at)
-        .bind(created_by)
-        .execute(&mut *tx)
-        .await?
-        .last_insert_rowid();
+        .bind(short_code)
+        .fetch_one(self.pool.as_ref())
+        .await
+        .map_err(|e| StorageError::Other(e.into()))?;
 
-        let short_code = encode_base36_lower(id);
-
-        sqlx::query(
-            r#"
-            UPDATE urls
-            SET short_code = ?
-            WHERE id = ?
-            "#,
-        )
-        .bind(&short_code)
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
-
-        Ok(ShortenedUrl {
-            id,
-            short_code,
-            original_url: original_url.to_string(),
-            created_at,
-            created_by: created_by.map(|s| s.to_string()),
-            clicks: 0,
-            is_active: true,
-        })
+        Ok(url)
     }
 
     async fn get(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {
@@ -209,24 +165,4 @@ impl Storage for SqliteStorage {
 
         Ok(urls)
     }
-
-    async fn exists(&self, short_code: &str) -> Result<bool> {
-        let count: (i64,) = sqlx::query_as(
-            r#"
-            SELECT COUNT(*) FROM urls WHERE short_code = ?
-            "#,
-        )
-        .bind(short_code)
-        .fetch_one(self.pool.as_ref())
-        .await?;
-
-        Ok(count.0 > 0)
-    }
-}
-
-fn random_alphanumeric(len: usize) -> String {
-    let mut rng = rand::rng();
-    (0..len)
-        .map(|_| Alphanumeric.sample(&mut rng) as char)
-        .collect()
 }

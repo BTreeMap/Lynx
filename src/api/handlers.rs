@@ -6,8 +6,12 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use anyhow::anyhow;
+use rand::distr::{Alphanumeric, Distribution};
+use statrs::distribution::{Beta, ContinuousCDF};
+
 use crate::models::{CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl};
-use crate::storage::Storage;
+use crate::storage::{Storage, StorageError};
 
 pub struct AppState {
     pub storage: Arc<dyn Storage>,
@@ -33,6 +37,72 @@ pub struct ListQuery {
 
 fn default_limit() -> i64 {
     50
+}
+
+const MIN_SHORT_CODE_LENGTH: usize = 3;
+const MAX_SHORT_CODE_LENGTH: usize = 10;
+const MIN_PROBES_BEFORE_ESCALATION: usize = 5;
+const MAX_PROBES_PER_LENGTH: usize = 64;
+const SUCCESS_CONFIDENCE: f64 = 0.95;
+const TARGET_MAX_EXPECTED_ATTEMPTS: f64 = 4.0;
+
+fn random_code(length: usize) -> String {
+    let mut rng = rand::rng();
+    (0..length)
+        .map(|_| Alphanumeric.sample(&mut rng) as char)
+        .collect()
+}
+
+fn success_probability_lower_bound(successes: usize, failures: usize, confidence: f64) -> f64 {
+    let alpha = successes as f64 + 1.0;
+    let beta = failures as f64 + 1.0;
+    let lower_tail = (1.0 - confidence).max(f64::EPSILON);
+    Beta::new(alpha, beta)
+        .map(|dist| dist.inverse_cdf(lower_tail))
+        .unwrap_or(0.0)
+}
+
+async fn create_with_random_code(
+    storage: &dyn Storage,
+    original_url: &str,
+) -> Result<ShortenedUrl, StorageError> {
+    let success_threshold = 1.0 / TARGET_MAX_EXPECTED_ATTEMPTS;
+
+    for length in MIN_SHORT_CODE_LENGTH..=MAX_SHORT_CODE_LENGTH {
+        let mut attempts = 0usize;
+        let mut failures = 0usize;
+
+        while attempts < MAX_PROBES_PER_LENGTH {
+            let candidate = random_code(length);
+            attempts += 1;
+
+            match storage
+                .create_with_code(&candidate, original_url, None)
+                .await
+            {
+                Ok(url) => return Ok(url),
+                Err(StorageError::Conflict) => {
+                    failures += 1;
+                    if attempts >= MIN_PROBES_BEFORE_ESCALATION {
+                        let successes = attempts - failures;
+                        let lower_bound = success_probability_lower_bound(
+                            successes,
+                            failures,
+                            SUCCESS_CONFIDENCE,
+                        );
+                        if lower_bound < success_threshold {
+                            break;
+                        }
+                    }
+                }
+                Err(StorageError::Other(e)) => return Err(StorageError::Other(e)),
+            }
+        }
+    }
+
+    Err(StorageError::Other(anyhow!(
+        "Failed to generate unique short code"
+    )))
 }
 
 /// Create a new shortened URL
@@ -61,46 +131,39 @@ pub async fn create_url(
             ));
         }
 
-        match state.storage.exists(&custom).await {
-            Ok(true) => Err((
+        match state.storage.create_with_code(&custom, &url, None).await {
+            Ok(url) => Ok((StatusCode::CREATED, Json(url))),
+            Err(StorageError::Conflict) => Err((
                 StatusCode::CONFLICT,
                 Json(ErrorResponse {
                     error: "Short code already exists".to_string(),
                 }),
             )),
-            Ok(false) => state
-                .storage
-                .create_with_code(&custom, &url, None)
-                .await
-                .map(|url| (StatusCode::CREATED, Json(url)))
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse {
-                            error: format!("Failed to create URL with custom code: {}", e),
-                        }),
-                    )
-                }),
-            Err(e) => Err((
+            Err(StorageError::Other(e)) => Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
-                    error: format!("Failed to validate custom code availability: {}", e),
+                    error: format!("Failed to create URL with custom code: {}", e),
                 }),
             )),
         }
     } else {
-        state
-            .storage
-            .create_auto(&url, None)
+        create_with_random_code(state.storage.as_ref(), &url)
             .await
             .map(|url| (StatusCode::CREATED, Json(url)))
-            .map_err(|e| {
-                (
+            .map_err(|e| match e {
+                StorageError::Conflict => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ErrorResponse {
-                        error: format!("Failed to create URL: {}", e),
+                        error: "Failed to generate unique short code after multiple attempts"
+                            .to_string(),
                     }),
-                )
+                ),
+                StorageError::Other(err) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("Failed to create URL: {}", err),
+                    }),
+                ),
             })
     };
 
