@@ -1,0 +1,122 @@
+name: Build and Publish Docker image to GHCR
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+    - cron: '0 16 * * *'
+  push:
+    branches: [ "main" ]
+
+jobs:
+  set-env:
+    runs-on: ubuntu-24.04
+    outputs:
+      DOCKER_IMAGE_NAME: ${{ steps.env_vars.outputs.DOCKER_IMAGE_NAME }}
+      SHA_VAR: ${{ steps.env_vars.outputs.SHA_VAR }}
+      DATE_VAR: ${{ steps.dates.outputs.DATE_VAR }}
+      DATE_TIME_VAR: ${{ steps.dates.outputs.DATE_TIME_VAR }}
+      SOURCE_DATE_EPOCH_VAR: ${{ steps.dates.outputs.SOURCE_DATE_EPOCH_VAR }}
+    steps:
+      - name: Set repository name and SHA
+        id: env_vars
+        run: |
+          echo "DOCKER_IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
+          echo "SHA_VAR=${GITHUB_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Generate date and time strings
+        id: dates
+        run: |
+          now=$(date '+%s')
+          echo "DATE_VAR=$(date -u -d "@$now" '+%Y-%m-%d')" >> $GITHUB_OUTPUT
+          echo "DATE_TIME_VAR=$(date -u -d "@$now" '+%Y-%m-%d.%H-%M-%S')" >> $GITHUB_OUTPUT
+          year_month=$(date -u -d "@$now" '+%Y-%m')
+          echo "SOURCE_DATE_EPOCH_VAR=$(date -u -d "${year_month}-01 00:00:00" '+%s')" >> $GITHUB_OUTPUT
+
+  build-matrix:
+    needs: set-env
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            variant: amd64
+          - platform: linux/arm64
+            variant: arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: |
+            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:latest.${{ matrix.variant }}
+            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:${{ needs.set-env.outputs.DATE_VAR }}.${{ matrix.variant }}
+            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:${{ needs.set-env.outputs.DATE_TIME_VAR }}.${{ matrix.variant }}
+            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:${{ needs.set-env.outputs.SHA_VAR }}.${{ matrix.variant }}
+            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:${{ needs.set-env.outputs.SHA_VAR }}.${{ needs.set-env.outputs.DATE_VAR }}.${{ matrix.variant }}
+            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:${{ needs.set-env.outputs.SHA_VAR }}.${{ needs.set-env.outputs.DATE_TIME_VAR }}.${{ matrix.variant }}
+          outputs: "type=registry,compression=zstd,force-compression=true,compression-level=3,rewrite-timestamp=true,oci-mediatypes=true"
+        env:
+          SOURCE_DATE_EPOCH: ${{ needs.set-env.outputs.SOURCE_DATE_EPOCH_VAR }}
+
+  create-manifest:
+    needs: [set-env, build-matrix]
+    permissions:
+      packages: write
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest list
+        run: |
+          # The most specific tags for the platform-specific images
+          AMD64_TAG="${DOCKER_IMAGE_NAME}:${SHA_VAR}.${DATE_TIME_VAR}.amd64"
+          ARM64_TAG="${DOCKER_IMAGE_NAME}:${SHA_VAR}.${DATE_TIME_VAR}.arm64"
+
+          # All the tags we want to create
+          TAG_OPTIONS=()
+          TAGS=(
+            "latest"
+            "${DATE_VAR}"
+            "${DATE_TIME_VAR}"
+            "${SHA_VAR}"
+            "${SHA_VAR}.${DATE_VAR}"
+            "${SHA_VAR}.${DATE_TIME_VAR}"
+          )
+
+          # Build the tag options for docker buildx imagetools
+          for tag in "${TAGS[@]}"; do
+            TAG_OPTIONS+=(--tag "${DOCKER_IMAGE_NAME}:${tag}")
+          done
+
+          # Create a single manifest with multiple tags
+          echo "Creating manifest with tags: ${TAGS[*]}"
+          docker buildx imagetools create "${TAG_OPTIONS[@]}" "${AMD64_TAG}" "${ARM64_TAG}"
+        env:
+          DOCKER_IMAGE_NAME: ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}
+          DATE_VAR: ${{ needs.set-env.outputs.DATE_VAR }}
+          DATE_TIME_VAR: ${{ needs.set-env.outputs.DATE_TIME_VAR }}
+          SHA_VAR: ${{ needs.set-env.outputs.SHA_VAR }}
