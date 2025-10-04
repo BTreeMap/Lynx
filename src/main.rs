@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::info;
 
 use auth::AuthService;
-use config::{Config, DatabaseBackend};
+use config::{AuthMode, Config, DatabaseBackend};
 use storage::{PostgresStorage, SqliteStorage, Storage};
 
 #[tokio::main]
@@ -40,17 +40,23 @@ async fn main() -> Result<()> {
     info!("Database initialized successfully");
 
     // Initialize auth service
-    let auth_service = Arc::new(AuthService::new(
-        config.auth.enabled,
-        config.auth.api_keys.clone(),
-    ));
+    let auth_config = config.auth.clone();
+    let auth_service = Arc::new(AuthService::new(auth_config.clone()).await?);
 
-    if !config.auth.enabled {
-        info!("⚠️  Authentication is DISABLED - all API requests will be allowed");
-    } else if config.auth.api_keys.is_empty() {
-        info!("⚠️  Running in development mode - no API keys required");
-    } else {
-        info!("API keys configured: {} key(s)", config.auth.api_keys.len());
+    match auth_config.mode {
+        AuthMode::None => {
+            info!("🔓 Authentication is disabled - all API requests are allowed");
+        }
+        AuthMode::Oauth => {
+            if let Some(oauth) = auth_config.oauth.as_ref() {
+                info!(
+                    "🔐 OAuth authentication enabled (issuer: {}, audience: {})",
+                    oauth.issuer_url, oauth.audience
+                );
+            } else {
+                info!("🔐 OAuth authentication enabled");
+            }
+        }
     }
 
     // Create routers

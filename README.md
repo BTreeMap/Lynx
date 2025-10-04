@@ -6,7 +6,7 @@ Lynx is a URL shortener backend API written in Rust with support for multiple st
 
 - 🔗 **URL Shortening**: Create short codes for long URLs with optional custom codes
 - 🗄️ **Extensible Storage**: Support for both SQLite and PostgreSQL backends
-- 🔐 **Access Control**: Optional API key-based authentication for management operations
+- 🔐 **Access Control**: Optional OAuth 2.0 Bearer token authentication with configurable pass-through mode
 - 🚀 **Dual Server Architecture**: Separate ports for API management and client redirects
 - 📊 **Analytics**: Track click counts for each shortened URL
 - 🔒 **Immutable URLs**: URLs are immutable and can only be deactivated, not deleted or modified
@@ -17,10 +17,11 @@ Lynx is a URL shortener backend API written in Rust with support for multiple st
 Lynx runs two separate HTTP servers:
 
 1. **API Server** (default: port 8080): For creating and managing shortened URLs
-   - Optional API key authentication (can be disabled)
-   - Create URLs with auto-generated or custom codes
-   - Deactivate/reactivate URLs
-   - List and search capabilities
+
+- Optional OAuth 2.0 authentication (can be disabled)
+- Create URLs with auto-generated or custom codes
+- Deactivate/reactivate URLs
+- List and search capabilities
 
 2. **Redirect Server** (default: port 3000): For client-facing URL redirects
    - No authentication required
@@ -29,6 +30,7 @@ Lynx runs two separate HTTP servers:
    - Handles deactivated links
 
 This separation allows you to:
+
 - Expose the redirect server publicly while keeping the API server internal
 - Use different domains for each server via reverse proxy
 - Apply different rate limiting and security policies
@@ -64,8 +66,12 @@ cp .env.example .env
 - `API_PORT`: API server port (default: `8080`)
 - `REDIRECT_HOST`: Redirect server host (default: `127.0.0.1`)
 - `REDIRECT_PORT`: Redirect server port (default: `3000`)
-- `DISABLE_AUTH`: Set to `true` to completely disable authentication (default: `false`)
-- `API_KEYS`: Comma-separated list of API keys (leave empty for development mode)
+- `AUTH_MODE`: Authentication mode (`none` or `oauth`, default: `none`)
+- `DISABLE_AUTH`: Legacy override alias for `AUTH_MODE=none`
+- `OAUTH_ISSUER_URL`: OpenID Connect issuer URL (required when `AUTH_MODE=oauth`)
+- `OAUTH_AUDIENCE`: Expected audience claim for incoming tokens (required when `AUTH_MODE=oauth`)
+- `OAUTH_JWKS_URL`: Optional JWKS endpoint override (defaults to issuer discovery document)
+- `OAUTH_JWKS_CACHE_SECS`: JWKS cache TTL in seconds (default: `300`)
 
 ## Running
 
@@ -83,18 +89,20 @@ Or run the binary directly:
 
 ### API Server (Port 8080)
 
-All endpoints require an `X-API-Key` header (unless authentication is disabled via `DISABLE_AUTH=true` or running in development mode with no API keys configured).
+All endpoints require a valid OAuth 2.0 Bearer token in the `Authorization` header (unless authentication is disabled via `AUTH_MODE=none`).
 
 #### Health Check
+
 ```bash
 GET /health
 ```
 
 #### Create Shortened URL
+
 ```bash
 POST /urls
 Content-Type: application/json
-X-API-Key: your-api-key
+Authorization: Bearer <access-token>
 
 {
   "url": "https://example.com/very/long/url",
@@ -114,9 +122,10 @@ Response: 201 Created
 ```
 
 #### Get URL Details
+
 ```bash
 GET /urls/:code
-X-API-Key: your-api-key
+Authorization: Bearer <access-token>
 
 Response: 200 OK
 {
@@ -131,10 +140,11 @@ Response: 200 OK
 ```
 
 #### Deactivate URL
+
 ```bash
 PUT /urls/:code/deactivate
 Content-Type: application/json
-X-API-Key: your-api-key
+Authorization: Bearer <access-token>
 
 {
   "reason": "Policy violation"  // Optional
@@ -147,9 +157,10 @@ Response: 200 OK
 ```
 
 #### Reactivate URL
+
 ```bash
 PUT /urls/:code/reactivate
-X-API-Key: your-api-key
+Authorization: Bearer <access-token>
 
 Response: 200 OK
 {
@@ -158,9 +169,10 @@ Response: 200 OK
 ```
 
 #### List URLs
+
 ```bash
 GET /urls?limit=50&offset=0
-X-API-Key: your-api-key
+Authorization: Bearer <access-token>
 
 Response: 200 OK
 [
@@ -182,11 +194,13 @@ Response: 200 OK
 No authentication required.
 
 #### Health Check
+
 ```bash
 GET /health
 ```
 
 #### Redirect to Original URL
+
 ```bash
 GET /:code
 
@@ -206,7 +220,7 @@ API_HOST=127.0.0.1
 API_PORT=8080
 REDIRECT_HOST=127.0.0.1
 REDIRECT_PORT=3000
-API_KEYS=dev-key-123
+AUTH_MODE=none
 ```
 
 ### Using PostgreSQL (Production)
@@ -219,7 +233,11 @@ API_HOST=0.0.0.0
 API_PORT=8080
 REDIRECT_HOST=0.0.0.0
 REDIRECT_PORT=3000
-API_KEYS=prod-key-1,prod-key-2,prod-key-3
+AUTH_MODE=oauth
+OAUTH_ISSUER_URL=https://auth.yourdomain.com/realms/lynx
+OAUTH_AUDIENCE=lynx-api
+# Optional if discovery document exposes JWKS endpoint
+# OAUTH_JWKS_URL=https://auth.yourdomain.com/realms/lynx/protocol/openid-connect/certs
 ```
 
 ### Example API Calls
@@ -228,7 +246,7 @@ API_KEYS=prod-key-1,prod-key-2,prod-key-3
 # Create a shortened URL
 curl -X POST http://localhost:8080/urls \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: dev-key-123" \
+  -H "Authorization: Bearer <access-token>" \
   -d '{
     "url": "https://github.com/BTreeMap/Lynx",
     "custom_code": "lynx"
@@ -239,21 +257,21 @@ curl -L http://localhost:3000/lynx
 
 # Get URL statistics
 curl http://localhost:8080/urls/lynx \
-  -H "X-API-Key: dev-key-123"
+  -H "Authorization: Bearer <access-token>"
 
 # List all URLs
 curl http://localhost:8080/urls?limit=10 \
-  -H "X-API-Key: dev-key-123"
+  -H "Authorization: Bearer <access-token>"
 
 # Deactivate a URL
 curl -X PUT http://localhost:8080/urls/lynx/deactivate \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: dev-key-123" \
+  -H "Authorization: Bearer <access-token>" \
   -d '{}'
 
 # Reactivate a URL
 curl -X PUT http://localhost:8080/urls/lynx/reactivate \
-  -H "X-API-Key: dev-key-123"
+  -H "Authorization: Bearer <access-token>"
 ```
 
 ### Running with Authentication Disabled
@@ -268,10 +286,10 @@ API_HOST=127.0.0.1
 API_PORT=8080
 REDIRECT_HOST=127.0.0.1
 REDIRECT_PORT=3000
-DISABLE_AUTH=true
+AUTH_MODE=none
 ```
 
-With `DISABLE_AUTH=true`, no API key is required for any endpoint.
+With `AUTH_MODE=none` (or `DISABLE_AUTH=true` for backward compatibility), no authentication is required for management endpoints.
 
 ## Deployment with Reverse Proxy
 
@@ -331,7 +349,7 @@ RUST_LOG=debug cargo run
 
 ## Security Considerations
 
-1. **API Keys**: Always use strong, randomly generated API keys in production
+1. **OAuth Scopes**: Delegate least-privilege scopes to Lynx API clients and rotate credentials regularly
 2. **HTTPS**: Use HTTPS in production (configure via reverse proxy)
 3. **Network Isolation**: Consider running the API server on a private network
 4. **Rate Limiting**: Implement rate limiting at the reverse proxy level

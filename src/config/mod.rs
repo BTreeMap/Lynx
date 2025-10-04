@@ -1,3 +1,4 @@
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,9 +29,33 @@ pub struct ServerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthMode {
+    None,
+    Oauth,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
-    pub enabled: bool,
-    pub api_keys: Vec<String>,
+    pub mode: AuthMode,
+    #[serde(default)]
+    pub oauth: Option<OAuthConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthConfig {
+    pub issuer_url: String,
+    pub audience: String,
+    #[serde(default)]
+    pub jwks_url: Option<String>,
+    #[serde(default = "OAuthConfig::default_cache_ttl_secs")]
+    pub jwks_cache_ttl_secs: u64,
+}
+
+impl OAuthConfig {
+    const fn default_cache_ttl_secs() -> u64 {
+        300
+    }
 }
 
 impl Config {
@@ -59,17 +84,49 @@ impl Config {
             .unwrap_or_else(|_| "3000".to_string())
             .parse::<u16>()?;
 
-        // Check if authentication is disabled
-        let auth_enabled = std::env::var("DISABLE_AUTH")
-            .map(|v| v.to_lowercase() != "true")
-            .unwrap_or(true);
+        let disable_auth = std::env::var("DISABLE_AUTH")
+            .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
+            .unwrap_or(false);
 
-        let api_keys_str = std::env::var("API_KEYS").unwrap_or_else(|_| String::new());
-        let api_keys: Vec<String> = api_keys_str
-            .split(',')
-            .filter(|s| !s.is_empty())
-            .map(|s| s.trim().to_string())
-            .collect();
+        let mut auth_mode = std::env::var("AUTH_MODE")
+            .unwrap_or_else(|_| "none".to_string())
+            .to_lowercase();
+
+        if disable_auth {
+            auth_mode = "none".to_string();
+        }
+
+        let auth_mode = match auth_mode.as_str() {
+            "none" => AuthMode::None,
+            "oauth" => AuthMode::Oauth,
+            other => {
+                tracing::warn!(
+                    "Unknown AUTH_MODE '{other}', falling back to 'none'. Supported values: none, oauth"
+                );
+                AuthMode::None
+            }
+        };
+
+        let oauth = if matches!(auth_mode, AuthMode::Oauth) {
+            let issuer_url = std::env::var("OAUTH_ISSUER_URL")
+                .context("OAUTH_ISSUER_URL must be set when AUTH_MODE=oauth")?;
+            let audience = std::env::var("OAUTH_AUDIENCE")
+                .context("OAUTH_AUDIENCE must be set when AUTH_MODE=oauth")?;
+            let jwks_url = std::env::var("OAUTH_JWKS_URL").ok();
+            let jwks_cache_ttl_secs = std::env::var("OAUTH_JWKS_CACHE_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or_else(OAuthConfig::default_cache_ttl_secs);
+
+            Some(OAuthConfig {
+                issuer_url,
+                audience,
+                jwks_url,
+                jwks_cache_ttl_secs,
+            })
+        } else {
+            None
+        };
 
         Ok(Config {
             database: DatabaseConfig {
@@ -85,8 +142,8 @@ impl Config {
                 port: redirect_port,
             },
             auth: AuthConfig {
-                enabled: auth_enabled,
-                api_keys,
+                mode: auth_mode,
+                oauth,
             },
         })
     }
