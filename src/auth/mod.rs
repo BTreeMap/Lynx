@@ -51,9 +51,9 @@ pub enum AuthError {
 impl AuthError {
     fn status(&self) -> StatusCode {
         match self {
-            AuthError::MissingAuthorization | AuthError::InvalidAuthorization | AuthError::Token(_) => {
-                StatusCode::UNAUTHORIZED
-            }
+            AuthError::MissingAuthorization
+            | AuthError::InvalidAuthorization
+            | AuthError::Token(_) => StatusCode::UNAUTHORIZED,
             AuthError::Misconfigured(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

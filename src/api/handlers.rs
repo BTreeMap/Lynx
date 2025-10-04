@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use rand::distr::{Alphanumeric, Distribution};
-use statrs::distribution::{Beta, ContinuousCDF};
 
 use crate::models::{CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl};
 use crate::storage::{Storage, StorageError};
@@ -43,8 +42,11 @@ const MIN_SHORT_CODE_LENGTH: usize = 3;
 const MAX_SHORT_CODE_LENGTH: usize = 10;
 const MIN_PROBES_BEFORE_ESCALATION: usize = 5;
 const MAX_PROBES_PER_LENGTH: usize = 64;
-const SUCCESS_CONFIDENCE: f64 = 0.95;
-const TARGET_MAX_EXPECTED_ATTEMPTS: f64 = 4.0;
+/// Precomputed minimum number of successes required after each attempt
+/// to keep the expected number of probes below the target threshold.
+/// Generated in `build.rs` to avoid runtime statistical calculations.
+const REQUIRED_SUCCESSES: [u8; MAX_PROBES_PER_LENGTH] =
+    include!(concat!(env!("OUT_DIR"), "/required_successes.in"));
 
 fn random_code(length: usize) -> String {
     let mut rng = rand::rng();
@@ -53,21 +55,10 @@ fn random_code(length: usize) -> String {
         .collect()
 }
 
-fn success_probability_lower_bound(successes: usize, failures: usize, confidence: f64) -> f64 {
-    let alpha = successes as f64 + 1.0;
-    let beta = failures as f64 + 1.0;
-    let lower_tail = (1.0 - confidence).max(f64::EPSILON);
-    Beta::new(alpha, beta)
-        .map(|dist| dist.inverse_cdf(lower_tail))
-        .unwrap_or(0.0)
-}
-
 async fn create_with_random_code(
     storage: &dyn Storage,
     original_url: &str,
 ) -> Result<ShortenedUrl, StorageError> {
-    let success_threshold = 1.0 / TARGET_MAX_EXPECTED_ATTEMPTS;
-
     for length in MIN_SHORT_CODE_LENGTH..=MAX_SHORT_CODE_LENGTH {
         let mut attempts = 0usize;
         let mut failures = 0usize;
@@ -85,12 +76,8 @@ async fn create_with_random_code(
                     failures += 1;
                     if attempts >= MIN_PROBES_BEFORE_ESCALATION {
                         let successes = attempts - failures;
-                        let lower_bound = success_probability_lower_bound(
-                            successes,
-                            failures,
-                            SUCCESS_CONFIDENCE,
-                        );
-                        if lower_bound < success_threshold {
+                        let required = REQUIRED_SUCCESSES[attempts - 1];
+                        if required == u8::MAX || successes < required as usize {
                             break;
                         }
                     }

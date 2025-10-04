@@ -61,9 +61,9 @@ impl OAuthValidator {
 
         let key = self.get_decoding_key(&kid).await?;
 
-    let mut validation = Validation::new(header.alg);
-    validation.validate_aud = false;
-    validation.validate_iss = false;
+        let mut validation = Validation::new(header.alg);
+        validation.validate_aud = false;
+        validation.validate_iss = false;
 
         let data = decode::<Value>(token, key.as_ref(), &validation)
             .context("token failed signature or structural validation")?;
@@ -141,7 +141,10 @@ impl OAuthValidator {
             .error_for_status()
             .context("JWKS endpoint returned an error status")?;
 
-        let jwks: JwkSet = response.json().await.context("failed to parse JWKS response")?;
+        let jwks: JwkSet = response
+            .json()
+            .await
+            .context("failed to parse JWKS response")?;
 
         let mut new_keys: HashMap<String, Arc<DecodingKey<'static>>> = HashMap::new();
 
@@ -261,7 +264,10 @@ mod tests {
         assert!(audience_matches(Some(&Value::String("abc".into())), "abc"));
         assert!(!audience_matches(Some(&Value::String("abc".into())), "def"));
 
-        let array = Value::Array(vec![Value::String("def".into()), Value::String("ghi".into())]);
+        let array = Value::Array(vec![
+            Value::String("def".into()),
+            Value::String("ghi".into()),
+        ]);
         assert!(audience_matches(Some(&array), "def"));
         assert!(!audience_matches(Some(&array), "abc"));
 
