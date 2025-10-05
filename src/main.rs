@@ -60,13 +60,26 @@ async fn main() -> Result<()> {
     }
 
     // Create routers
-    let api_router = api::create_api_router(Arc::clone(&storage), auth_service);
+    let api_router = api::create_api_router(
+        Arc::clone(&storage),
+        auth_service,
+        config.frontend.clone(),
+    );
     let redirect_router = redirect::create_redirect_router(Arc::clone(&storage));
+
+    // Log frontend configuration
+    if let Some(ref static_dir) = config.frontend.static_dir {
+        info!("🎨 Serving frontend from directory: {}", static_dir);
+    } else {
+        info!("🎨 Serving embedded frontend");
+    }
 
     // Start API server
     let api_addr = format!("{}:{}", config.api_server.host, config.api_server.port);
     let api_listener = tokio::net::TcpListener::bind(&api_addr).await?;
     info!("🚀 API server listening on http://{}", api_addr);
+    info!("   - API endpoints available at http://{}/api/...", api_addr);
+    info!("   - Frontend UI available at http://{}/", api_addr);
 
     // Start redirect server
     let redirect_addr = format!(

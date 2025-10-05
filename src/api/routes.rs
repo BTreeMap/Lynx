@@ -7,14 +7,20 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::auth::{auth_middleware, AuthService};
+use crate::config::FrontendConfig;
 use crate::storage::Storage;
 
 use super::handlers::{
     create_url, deactivate_url, get_url, get_user_info, health_check, list_urls, reactivate_url,
     AppState,
 };
+use super::static_files::serve_static;
 
-pub fn create_api_router(storage: Arc<dyn Storage>, auth_service: Arc<AuthService>) -> Router {
+pub fn create_api_router(
+    storage: Arc<dyn Storage>,
+    auth_service: Arc<AuthService>,
+    frontend_config: FrontendConfig,
+) -> Router {
     let state = Arc::new(AppState { storage });
 
     // Configure CORS
@@ -36,8 +42,14 @@ pub fn create_api_router(storage: Arc<dyn Storage>, auth_service: Arc<AuthServic
         }))
         .with_state(Arc::clone(&state));
 
-    Router::new()
+    let api_routes = Router::new()
         .route("/health", get(health_check))
         .merge(protected_routes)
-        .layer(cors)
+        .layer(cors);
+
+    // Add frontend static file serving
+    let static_dir = frontend_config.static_dir.clone();
+    Router::new()
+        .nest("/api", api_routes)
+        .fallback(move |uri| serve_static(uri, static_dir.clone()))
 }

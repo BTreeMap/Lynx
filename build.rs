@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 use statrs::distribution::{Beta, ContinuousCDF};
 
@@ -11,6 +12,7 @@ const TARGET_MAX_EXPECTED_ATTEMPTS: f64 = 4.0;
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
+    // Generate required successes lookup table
     let lower_tail = (1.0 - SUCCESS_CONFIDENCE).max(f64::EPSILON);
     let success_threshold = 1.0 / TARGET_MAX_EXPECTED_ATTEMPTS;
 
@@ -46,4 +48,49 @@ fn main() {
     let content = format!("{:?}", required_successes);
 
     fs::write(dest_path, content).expect("failed to write required successes lookup table");
+
+    // Build and bundle frontend if it exists
+    let frontend_dir = PathBuf::from("frontend");
+    if frontend_dir.exists() && frontend_dir.join("package.json").exists() {
+        println!("cargo:rerun-if-changed=frontend/src");
+        println!("cargo:rerun-if-changed=frontend/package.json");
+        println!("cargo:rerun-if-changed=frontend/vite.config.ts");
+
+        // Check if npm is available
+        let npm_available = Command::new("npm")
+            .arg("--version")
+            .output()
+            .is_ok();
+
+        if npm_available {
+            println!("cargo:warning=Building frontend with npm...");
+
+            // Install dependencies
+            let install_status = Command::new("npm")
+                .arg("install")
+                .current_dir(&frontend_dir)
+                .status()
+                .expect("Failed to run npm install");
+
+            if !install_status.success() {
+                panic!("npm install failed");
+            }
+
+            // Build frontend
+            let build_status = Command::new("npm")
+                .arg("run")
+                .arg("build")
+                .current_dir(&frontend_dir)
+                .status()
+                .expect("Failed to run npm build");
+
+            if !build_status.success() {
+                panic!("npm build failed");
+            }
+
+            println!("cargo:warning=Frontend built successfully");
+        } else {
+            println!("cargo:warning=npm not found, skipping frontend build. Static files will need to be provided separately.");
+        }
+    }
 }

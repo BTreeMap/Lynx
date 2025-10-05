@@ -7,6 +7,7 @@ pub struct Config {
     pub api_server: ServerConfig,
     pub redirect_server: ServerConfig,
     pub auth: AuthConfig,
+    pub frontend: FrontendConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +51,13 @@ pub struct OAuthConfig {
     pub jwks_url: Option<String>,
     #[serde(default = "OAuthConfig::default_cache_ttl_secs")]
     pub jwks_cache_ttl_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrontendConfig {
+    /// Path to directory containing static frontend files
+    /// If None, uses embedded frontend (if available)
+    pub static_dir: Option<String>,
 }
 
 impl OAuthConfig {
@@ -128,6 +136,8 @@ impl Config {
             None
         };
 
+        let frontend_static_dir = std::env::var("FRONTEND_STATIC_DIR").ok();
+
         Ok(Config {
             database: DatabaseConfig {
                 backend,
@@ -144,6 +154,9 @@ impl Config {
             auth: AuthConfig {
                 mode: auth_mode,
                 oauth,
+            },
+            frontend: FrontendConfig {
+                static_dir: frontend_static_dir,
             },
         })
     }

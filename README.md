@@ -16,7 +16,15 @@ Lynx is a URL shortener backend API written in Rust with support for multiple st
 
 ## Frontend
 
-Lynx includes a modern React-based web frontend for managing short URLs. The frontend supports:
+Lynx includes a modern React-based web frontend for managing short URLs. The frontend is **bundled into the binary at compile time** and served directly from the API server.
+
+### Accessing the Frontend
+
+The frontend is automatically available at the API server's root path:
+- **Frontend UI**: `http://localhost:8080/` (default)
+- **API endpoints**: `http://localhost:8080/api/...`
+
+### Frontend Features
 
 - OAuth 2.0 Bearer token authentication
 - Creating short URLs with optional custom codes
@@ -25,15 +33,43 @@ Lynx includes a modern React-based web frontend for managing short URLs. The fro
 - Admin panel for managing all users' links
 - Admin-only deactivation/reactivation of URLs
 
-See the [frontend README](frontend/README.md) for setup and usage instructions.
+### Serving from Custom Directory
+
+You can optionally serve frontend files from a custom directory instead of using the embedded version:
+
+```bash
+export FRONTEND_STATIC_DIR=/path/to/frontend/dist
+```
+
+This is useful for:
+- Serving a custom frontend without recompiling
+- Static hosting scenarios where you extract the frontend separately
+- Development with hot-reload (point to your dev server's output)
+
+### Standalone Frontend Archive
+
+A separate `frontend-static.tar.gz` archive is available in releases and CI artifacts. Extract and serve with any static file server:
+
+```bash
+# Extract the frontend
+tar -xzf frontend-static.tar.gz -C /var/www/lynx-frontend
+
+# Serve with nginx, Apache, or any static file server
+# Point FRONTEND_STATIC_DIR to the extracted directory
+export FRONTEND_STATIC_DIR=/var/www/lynx-frontend
+```
+
+See the [frontend README](frontend/README.md) for development setup.
 
 
 ## Architecture
 
 Lynx runs two separate HTTP servers:
 
-1. **API Server** (default: port 8080): For creating and managing shortened URLs
+1. **API Server** (default: port 8080): For management operations and frontend serving
 
+- Serves the bundled React frontend at `/`
+- API endpoints available at `/api/...`
 - Optional OAuth 2.0 authentication (can be disabled)
 - Create URLs with auto-generated or custom codes
 - Deactivate/reactivate URLs
@@ -50,6 +86,7 @@ This separation allows you to:
 - Expose the redirect server publicly while keeping the API server internal
 - Use different domains for each server via reverse proxy
 - Apply different rate limiting and security policies
+- Serve the management frontend only to authorized networks
 
 ## Installation
 
