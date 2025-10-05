@@ -37,12 +37,54 @@ This separation allows you to:
 
 ## Installation
 
-### Prerequisites
+### Download Pre-built Binaries
+
+Pre-built binaries are available for download:
+
+**Latest main branch builds** (updated on every commit):
+- Available as artifacts from [GitHub Actions runs](https://github.com/BTreeMap/Lynx/actions)
+
+**Release builds** (stable versions):
+- Download from [GitHub Releases](https://github.com/BTreeMap/Lynx/releases)
+- Available for Linux (amd64, arm64), macOS (Intel, Apple Silicon), and Windows
+
+```bash
+# Example: Download and run on Linux
+wget https://github.com/BTreeMap/Lynx/releases/download/v1.0.0/lynx-linux-amd64
+chmod +x lynx-linux-amd64
+./lynx-linux-amd64
+```
+
+### Using Docker
+
+Docker images are automatically published to GitHub Container Registry:
+
+```bash
+# Pull latest main branch build
+docker pull ghcr.io/btreemap/lynx:latest
+
+# Or pull a specific release
+docker pull ghcr.io/btreemap/lynx:v1.0.0
+
+# Run with default SQLite database
+docker run -p 8080:8080 -p 3000:3000 ghcr.io/btreemap/lynx:latest
+
+# Run with custom environment variables
+docker run -p 8080:8080 -p 3000:3000 \
+  -e DATABASE_BACKEND=postgres \
+  -e DATABASE_URL=postgresql://user:password@host/db \
+  -e AUTH_MODE=oauth \
+  ghcr.io/btreemap/lynx:latest
+```
+
+### Building from Source
+
+#### Prerequisites
 
 - Rust 1.70+ (install from [rustup.rs](https://rustup.rs))
 - For PostgreSQL: A running PostgreSQL instance
 
-### Building
+#### Building
 
 ```bash
 cargo build --release

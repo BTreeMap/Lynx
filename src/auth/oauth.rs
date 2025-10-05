@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Result};
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
@@ -20,7 +20,7 @@ pub struct OAuthValidator {
     audience: String,
     jwks_uri: String,
     client: Client,
-    keys: Arc<RwLock<HashMap<String, Arc<DecodingKey<'static>>>>>,
+    keys: Arc<RwLock<HashMap<String, Arc<DecodingKey>>>>,
     last_refresh: Arc<RwLock<Option<Instant>>>,
     cache_ttl: Duration,
 }
@@ -51,9 +51,6 @@ impl OAuthValidator {
 
     pub async fn validate(&self, token: &str) -> Result<Value> {
         let header = decode_header(token).context("failed to parse token header")?;
-        if header.alg == Algorithm::None {
-            bail!("unsigned tokens are not allowed");
-        }
 
         let kid = header
             .kid
@@ -62,29 +59,17 @@ impl OAuthValidator {
         let key = self.get_decoding_key(&kid).await?;
 
         let mut validation = Validation::new(header.alg);
-        validation.validate_aud = false;
-        validation.validate_iss = false;
+        validation.set_audience(&[&self.audience]);
+        validation.set_issuer(&[&self.issuer]);
 
         let data = decode::<Value>(token, key.as_ref(), &validation)
             .context("token failed signature or structural validation")?;
         let claims = data.claims;
 
-        let issuer = claims
-            .get("iss")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("token missing 'iss' claim"))?;
-        if issuer != self.issuer {
-            bail!("token issuer '{}' does not match expected issuer", issuer);
-        }
-
-        if !audience_matches(claims.get("aud"), &self.audience) {
-            bail!("token audience does not include expected value");
-        }
-
         Ok(claims)
     }
 
-    async fn get_decoding_key(&self, kid: &str) -> Result<Arc<DecodingKey<'static>>> {
+    async fn get_decoding_key(&self, kid: &str) -> Result<Arc<DecodingKey>> {
         self.ensure_fresh_keys(Some(kid)).await?;
 
         let keys_guard = self.keys.read().await;
@@ -146,7 +131,7 @@ impl OAuthValidator {
             .await
             .context("failed to parse JWKS response")?;
 
-        let mut new_keys: HashMap<String, Arc<DecodingKey<'static>>> = HashMap::new();
+        let mut new_keys: HashMap<String, Arc<DecodingKey>> = HashMap::new();
 
         for jwk in jwks.keys {
             let Some(kid) = jwk.kid else {
