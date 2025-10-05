@@ -36,6 +36,34 @@ impl std::ops::Deref for AuthClaims {
     }
 }
 
+impl AuthClaims {
+    /// Extract user ID from claims (tries 'sub' then 'email')
+    pub fn user_id(&self) -> Option<String> {
+        self.0
+            .get("sub")
+            .and_then(|v| v.as_str())
+            .or_else(|| self.0.get("email").and_then(|v| v.as_str()))
+            .map(|s| s.to_string())
+    }
+
+    /// Check if user has admin role (checks 'roles' array or 'role' field for 'admin')
+    pub fn is_admin(&self) -> bool {
+        // Check roles array
+        if let Some(roles) = self.0.get("roles").and_then(|v| v.as_array()) {
+            return roles.iter().any(|r| {
+                r.as_str()
+                    .map(|s| s.eq_ignore_ascii_case("admin"))
+                    .unwrap_or(false)
+            });
+        }
+        // Check single role field
+        if let Some(role) = self.0.get("role").and_then(|v| v.as_str()) {
+            return role.eq_ignore_ascii_case("admin");
+        }
+        false
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum AuthError {
     #[error("missing Authorization header")]
@@ -108,10 +136,14 @@ pub async fn auth_middleware(
 ) -> Response {
     match auth_service.authenticate(&headers).await {
         Ok(Some(claims)) => {
-            request.extensions_mut().insert(claims);
+            request.extensions_mut().insert(Some(claims));
             next.run(request).await
         }
-        Ok(None) => next.run(request).await,
+        Ok(None) => {
+            // Auth disabled, insert None
+            request.extensions_mut().insert(None::<AuthClaims>);
+            next.run(request).await
+        }
         Err(err) => {
             warn!(error = %err, "Authentication failed");
             (err.status(), err.to_string()).into_response()

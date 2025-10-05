@@ -9,7 +9,8 @@ use crate::auth::{auth_middleware, AuthService};
 use crate::storage::Storage;
 
 use super::handlers::{
-    create_url, deactivate_url, get_url, health_check, list_urls, reactivate_url, AppState,
+    create_url, deactivate_url, get_url, get_user_info, health_check, list_urls, reactivate_url,
+    AppState,
 };
 
 pub fn create_api_router(storage: Arc<dyn Storage>, auth_service: Arc<AuthService>) -> Router {
@@ -21,6 +22,7 @@ pub fn create_api_router(storage: Arc<dyn Storage>, auth_service: Arc<AuthServic
         .route("/urls/:code", get(get_url))
         .route("/urls/:code/deactivate", put(deactivate_url))
         .route("/urls/:code/reactivate", put(reactivate_url))
+        .route("/user/info", get(get_user_info))
         .route_layer(middleware::from_fn(move |headers, req, next| {
             let auth = Arc::clone(&auth_service);
             auth_middleware(auth, headers, req, next)

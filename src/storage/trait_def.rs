@@ -40,6 +40,14 @@ pub trait Storage: Send + Sync {
     /// Increment click count
     async fn increment_clicks(&self, short_code: &str) -> Result<()>;
 
-    /// List all URLs (with pagination)
-    async fn list(&self, limit: i64, offset: i64) -> Result<Vec<ShortenedUrl>>;
+    /// List all URLs (with pagination and optional user filtering)
+    /// If is_admin is true, returns all URLs regardless of user_id
+    /// Otherwise, returns only URLs created by the specified user_id
+    async fn list(
+        &self,
+        limit: i64,
+        offset: i64,
+        is_admin: bool,
+        user_id: Option<&str>,
+    ) -> Result<Vec<ShortenedUrl>>;
 }

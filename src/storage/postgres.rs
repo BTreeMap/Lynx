@@ -41,6 +41,10 @@ impl Storage for PostgresStorage {
             .execute(self.pool.as_ref())
             .await?;
 
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_created_by ON urls(created_by)")
+            .execute(self.pool.as_ref())
+            .await?;
+
         Ok(())
     }
 
@@ -149,19 +153,47 @@ impl Storage for PostgresStorage {
         Ok(())
     }
 
-    async fn list(&self, limit: i64, offset: i64) -> Result<Vec<ShortenedUrl>> {
-        let urls = sqlx::query_as::<_, ShortenedUrl>(
-            r#"
-            SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
-            FROM urls
-            ORDER BY created_at DESC
-            LIMIT $1 OFFSET $2
-            "#,
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(self.pool.as_ref())
-        .await?;
+    async fn list(
+        &self,
+        limit: i64,
+        offset: i64,
+        is_admin: bool,
+        user_id: Option<&str>,
+    ) -> Result<Vec<ShortenedUrl>> {
+        let urls = if is_admin {
+            // Admin sees all URLs
+            sqlx::query_as::<_, ShortenedUrl>(
+                r#"
+                SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                FROM urls
+                ORDER BY created_at DESC
+                LIMIT $1 OFFSET $2
+                "#,
+            )
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(self.pool.as_ref())
+            .await?
+        } else if let Some(uid) = user_id {
+            // Regular user sees only their own URLs
+            sqlx::query_as::<_, ShortenedUrl>(
+                r#"
+                SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                FROM urls
+                WHERE created_by = $1
+                ORDER BY created_at DESC
+                LIMIT $2 OFFSET $3
+                "#,
+            )
+            .bind(uid)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(self.pool.as_ref())
+            .await?
+        } else {
+            // No user identity, return empty list
+            vec![]
+        };
 
         Ok(urls)
     }

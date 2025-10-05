@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    Json,
+    Extension, Json,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -9,6 +9,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use rand::distr::{Alphanumeric, Distribution};
 
+use crate::auth::AuthClaims;
 use crate::models::{CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl};
 use crate::storage::{Storage, StorageError};
 
@@ -58,6 +59,7 @@ fn random_code(length: usize) -> String {
 async fn create_with_random_code(
     storage: &dyn Storage,
     original_url: &str,
+    created_by: Option<&str>,
 ) -> Result<ShortenedUrl, StorageError> {
     for length in MIN_SHORT_CODE_LENGTH..=MAX_SHORT_CODE_LENGTH {
         let mut attempts = 0usize;
@@ -68,7 +70,7 @@ async fn create_with_random_code(
             attempts += 1;
 
             match storage
-                .create_with_code(&candidate, original_url, None)
+                .create_with_code(&candidate, original_url, created_by)
                 .await
             {
                 Ok(url) => return Ok(url),
@@ -95,6 +97,7 @@ async fn create_with_random_code(
 /// Create a new shortened URL
 pub async fn create_url(
     State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
     Json(payload): Json<CreateUrlRequest>,
 ) -> Result<(StatusCode, Json<ShortenedUrl>), (StatusCode, Json<ErrorResponse>)> {
     let CreateUrlRequest { url, custom_code } = payload;
@@ -108,6 +111,10 @@ pub async fn create_url(
         ));
     }
 
+    // Extract user ID from claims
+    let created_by = claims.as_ref().and_then(|c| c.user_id());
+    let created_by_ref = created_by.as_deref();
+
     let created = if let Some(custom) = custom_code {
         if custom.is_empty() || custom.len() > 20 {
             return Err((
@@ -118,7 +125,11 @@ pub async fn create_url(
             ));
         }
 
-        match state.storage.create_with_code(&custom, &url, None).await {
+        match state
+            .storage
+            .create_with_code(&custom, &url, created_by_ref)
+            .await
+        {
             Ok(url) => Ok((StatusCode::CREATED, Json(url))),
             Err(StorageError::Conflict) => Err((
                 StatusCode::CONFLICT,
@@ -134,7 +145,7 @@ pub async fn create_url(
             )),
         }
     } else {
-        create_with_random_code(state.storage.as_ref(), &url)
+        create_with_random_code(state.storage.as_ref(), &url, created_by_ref)
             .await
             .map(|url| (StatusCode::CREATED, Json(url)))
             .map_err(|e| match e {
@@ -179,12 +190,24 @@ pub async fn get_url(
     }
 }
 
-/// Deactivate a shortened URL
+/// Deactivate a shortened URL (admin only)
 pub async fn deactivate_url(
     State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
     Path(code): Path<String>,
     Json(_payload): Json<DeactivateUrlRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Check if user is admin
+    let is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
+    if !is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Only administrators can deactivate URLs".to_string(),
+            }),
+        ));
+    }
+
     match state.storage.deactivate(&code).await {
         Ok(true) => Ok(Json(SuccessResponse {
             message: "URL deactivated successfully".to_string(),
@@ -204,11 +227,23 @@ pub async fn deactivate_url(
     }
 }
 
-/// Reactivate a shortened URL
+/// Reactivate a shortened URL (admin only)
 pub async fn reactivate_url(
     State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
     Path(code): Path<String>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Check if user is admin
+    let is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
+    if !is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Only administrators can reactivate URLs".to_string(),
+            }),
+        ));
+    }
+
     match state.storage.reactivate(&code).await {
         Ok(true) => Ok(Json(SuccessResponse {
             message: "URL reactivated successfully".to_string(),
@@ -231,9 +266,17 @@ pub async fn reactivate_url(
 /// List all shortened URLs
 pub async fn list_urls(
     State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Vec<ShortenedUrl>>, (StatusCode, Json<ErrorResponse>)> {
-    match state.storage.list(query.limit, query.offset).await {
+    let is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
+    let user_id = claims.as_ref().and_then(|c| c.user_id());
+
+    match state
+        .storage
+        .list(query.limit, query.offset, is_admin, user_id.as_deref())
+        .await
+    {
         Ok(urls) => Ok(Json(urls)),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -249,4 +292,20 @@ pub async fn health_check() -> Json<SuccessResponse> {
     Json(SuccessResponse {
         message: "OK".to_string(),
     })
+}
+
+#[derive(Serialize)]
+pub struct UserInfo {
+    pub user_id: Option<String>,
+    pub is_admin: bool,
+}
+
+/// Get current user information from token
+pub async fn get_user_info(
+    Extension(claims): Extension<Option<AuthClaims>>,
+) -> Json<UserInfo> {
+    let user_id = claims.as_ref().and_then(|c| c.user_id());
+    let is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
+
+    Json(UserInfo { user_id, is_admin })
 }
