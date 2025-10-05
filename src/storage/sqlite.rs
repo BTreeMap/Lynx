@@ -160,8 +160,8 @@ impl Storage for SqliteStorage {
         is_admin: bool,
         user_id: Option<&str>,
     ) -> Result<Vec<ShortenedUrl>> {
-        let urls = if is_admin {
-            // Admin sees all URLs
+        let urls = if is_admin || user_id.is_none() {
+            // Admin sees all URLs, or when auth is disabled (no user_id), show all
             sqlx::query_as::<_, ShortenedUrl>(
                 r#"
                 SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
@@ -191,7 +191,7 @@ impl Storage for SqliteStorage {
             .fetch_all(self.pool.as_ref())
             .await?
         } else {
-            // No user identity, return empty list
+            // Should not reach here, but return empty list
             vec![]
         };
 
