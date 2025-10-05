@@ -11,6 +11,22 @@ Lynx is a URL shortener backend API written in Rust with support for multiple st
 - 📊 **Analytics**: Track click counts for each shortened URL
 - 🔒 **Immutable URLs**: URLs are immutable and can only be deactivated, not deleted or modified
 - 🔄 **Deactivation**: URLs can be deactivated and reactivated (e.g., for policy violations)
+- 👥 **Multi-User Support**: Each user can manage their own links; admins can manage all links
+- 🖥️ **Web Frontend**: React-based dashboard for managing URLs and viewing statistics
+
+## Frontend
+
+Lynx includes a modern React-based web frontend for managing short URLs. The frontend supports:
+
+- OAuth 2.0 Bearer token authentication
+- Creating short URLs with optional custom codes
+- Viewing URL statistics (clicks, status, creation date)
+- User-specific URL filtering (users see only their own links)
+- Admin panel for managing all users' links
+- Admin-only deactivation/reactivation of URLs
+
+See the [frontend README](frontend/README.md) for setup and usage instructions.
+
 
 ## Architecture
 

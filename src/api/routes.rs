@@ -4,6 +4,7 @@ use axum::{
     Router,
 };
 use std::sync::Arc;
+use tower_http::cors::{Any, CorsLayer};
 
 use crate::auth::{auth_middleware, AuthService};
 use crate::storage::Storage;
@@ -15,6 +16,12 @@ use super::handlers::{
 
 pub fn create_api_router(storage: Arc<dyn Storage>, auth_service: Arc<AuthService>) -> Router {
     let state = Arc::new(AppState { storage });
+
+    // Configure CORS
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
 
     let protected_routes = Router::new()
         .route("/urls", post(create_url))
@@ -32,4 +39,5 @@ pub fn create_api_router(storage: Arc<dyn Storage>, auth_service: Arc<AuthServic
     Router::new()
         .route("/health", get(health_check))
         .merge(protected_routes)
+        .layer(cors)
 }
