@@ -12,6 +12,7 @@ target/
 frontend/node_modules/
 frontend/.env
 frontend/.env.*
+!frontend/dist/
 
 # Environment
 .env
