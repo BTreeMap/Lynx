@@ -8,6 +8,11 @@ target/
 *.db-shm
 *.db-wal
 
+# Frontend build artifacts
+frontend/node_modules/
+frontend/.env
+frontend/.env.*
+
 # Environment
 .env
 .env.*
