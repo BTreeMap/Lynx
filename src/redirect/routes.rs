@@ -10,6 +10,6 @@ pub fn create_redirect_router(storage: Arc<dyn Storage>) -> Router {
 
     Router::new()
         .route("/health", get(health_check))
-        .route("/:code", get(redirect_url))
+        .route("/{code}", get(redirect_url))
         .with_state(state)
 }

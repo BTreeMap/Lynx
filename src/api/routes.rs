@@ -26,9 +26,9 @@ pub fn create_api_router(storage: Arc<dyn Storage>, auth_service: Arc<AuthServic
     let protected_routes = Router::new()
         .route("/urls", post(create_url))
         .route("/urls", get(list_urls))
-        .route("/urls/:code", get(get_url))
-        .route("/urls/:code/deactivate", put(deactivate_url))
-        .route("/urls/:code/reactivate", put(reactivate_url))
+        .route("/urls/{code}", get(get_url))
+        .route("/urls/{code}/deactivate", put(deactivate_url))
+        .route("/urls/{code}/reactivate", put(reactivate_url))
         .route("/user/info", get(get_user_info))
         .route_layer(middleware::from_fn(move |headers, req, next| {
             let auth = Arc::clone(&auth_service);
