@@ -50,6 +50,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+          cd ..
+
+      - name: Verify frontend build
+        run: |
+          if [ ! -d "frontend/dist" ]; then
+            echo "ERROR: frontend/dist directory not found!"
+            exit 1
+          fi
+          echo "Frontend dist contents:"
+          ls -la frontend/dist/
+          echo "Checking .dockerignore:"
+          cat .dockerignore
+          echo "Files in frontend directory:"
+          ls -la frontend/
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -64,6 +89,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
