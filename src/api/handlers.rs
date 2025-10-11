@@ -10,11 +10,13 @@ use anyhow::anyhow;
 use rand::distr::{Alphanumeric, Distribution};
 
 use crate::auth::AuthClaims;
+use crate::config::Config;
 use crate::models::{CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl};
 use crate::storage::{Storage, StorageError};
 
 pub struct AppState {
     pub storage: Arc<dyn Storage>,
+    pub config: Arc<Config>,
 }
 
 #[derive(Serialize)]
@@ -25,6 +27,23 @@ pub struct ErrorResponse {
 #[derive(Serialize)]
 pub struct SuccessResponse {
     pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct ShortenedUrlResponse {
+    #[serde(flatten)]
+    pub inner: ShortenedUrl,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_base_url: Option<String>,
+}
+
+impl ShortenedUrlResponse {
+    fn with_base(url: ShortenedUrl, base: Option<&str>) -> Self {
+        Self {
+            inner: url,
+            redirect_base_url: base.map(|value| value.to_owned()),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -99,7 +118,9 @@ pub async fn create_url(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
     Json(payload): Json<CreateUrlRequest>,
-) -> Result<(StatusCode, Json<ShortenedUrl>), (StatusCode, Json<ErrorResponse>)> {
+) -> Result<(StatusCode, Json<ShortenedUrlResponse>), (StatusCode, Json<ErrorResponse>)> {
+    let base = Some(state.config.redirect_base_url.as_str());
+
     let CreateUrlRequest { url, custom_code } = payload;
 
     if url.is_empty() {
@@ -130,7 +151,10 @@ pub async fn create_url(
             .create_with_code(&custom, &url, created_by_ref)
             .await
         {
-            Ok(url) => Ok((StatusCode::CREATED, Json(url))),
+            Ok(url) => Ok((
+                StatusCode::CREATED,
+                Json(ShortenedUrlResponse::with_base(url, base)),
+            )),
             Err(StorageError::Conflict) => Err((
                 StatusCode::CONFLICT,
                 Json(ErrorResponse {
@@ -145,24 +169,27 @@ pub async fn create_url(
             )),
         }
     } else {
-        create_with_random_code(state.storage.as_ref(), &url, created_by_ref)
-            .await
-            .map(|url| (StatusCode::CREATED, Json(url)))
-            .map_err(|e| match e {
-                StorageError::Conflict => (
+        match create_with_random_code(state.storage.as_ref(), &url, created_by_ref).await {
+            Ok(url) => Ok((
+                StatusCode::CREATED,
+                Json(ShortenedUrlResponse::with_base(url, base)),
+            )),
+            Err(e) => match e {
+                StorageError::Conflict => Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ErrorResponse {
                         error: "Failed to generate unique short code after multiple attempts"
                             .to_string(),
                     }),
-                ),
-                StorageError::Other(err) => (
+                )),
+                StorageError::Other(err) => Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ErrorResponse {
                         error: format!("Failed to create URL: {}", err),
                     }),
-                ),
-            })
+                )),
+            },
+        }
     };
 
     created
@@ -172,9 +199,12 @@ pub async fn create_url(
 pub async fn get_url(
     State(state): State<Arc<AppState>>,
     Path(code): Path<String>,
-) -> Result<Json<ShortenedUrl>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<ShortenedUrlResponse>, (StatusCode, Json<ErrorResponse>)> {
     match state.storage.get(&code).await {
-        Ok(Some(url)) => Ok(Json(url)),
+        Ok(Some(url)) => Ok(Json(ShortenedUrlResponse::with_base(
+            url,
+            Some(state.config.redirect_base_url.as_str()),
+        ))),
         Ok(None) => Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -268,7 +298,7 @@ pub async fn list_urls(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<Vec<ShortenedUrl>>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<Vec<ShortenedUrlResponse>>, (StatusCode, Json<ErrorResponse>)> {
     let is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
     let user_id = claims.as_ref().and_then(|c| c.user_id());
 
@@ -277,7 +307,14 @@ pub async fn list_urls(
         .list(query.limit, query.offset, is_admin, user_id.as_deref())
         .await
     {
-        Ok(urls) => Ok(Json(urls)),
+        Ok(urls) => {
+            let base = Some(state.config.redirect_base_url.as_str());
+            let response = urls
+                .into_iter()
+                .map(|url| ShortenedUrlResponse::with_base(url, base))
+                .collect();
+            Ok(Json(response))
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
@@ -301,9 +338,7 @@ pub struct UserInfo {
 }
 
 /// Get current user information from token
-pub async fn get_user_info(
-    Extension(claims): Extension<Option<AuthClaims>>,
-) -> Json<UserInfo> {
+pub async fn get_user_info(Extension(claims): Extension<Option<AuthClaims>>) -> Json<UserInfo> {
     let user_id = claims.as_ref().and_then(|c| c.user_id());
     let is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
 

@@ -14,7 +14,7 @@ pub struct Assets;
 /// Serve static files from embedded assets or filesystem
 pub async fn serve_static(uri: Uri, static_dir: Option<String>) -> Response {
     let path = uri.path().trim_start_matches('/');
-    
+
     // Try to serve from filesystem if static_dir is provided
     if let Some(ref dir) = static_dir {
         let file_path = PathBuf::from(dir).join(path);

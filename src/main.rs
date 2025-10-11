@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     // Load configuration
-    let config = Config::from_env()?;
+    let config = Arc::new(Config::from_env()?);
     info!("Loaded configuration");
 
     // Initialize storage
@@ -60,11 +60,13 @@ async fn main() -> Result<()> {
     }
 
     // Create routers
-    let api_router = api::create_api_router(
-        Arc::clone(&storage),
-        auth_service,
-        config.frontend.clone(),
+    info!(
+        "🔗 Redirect base URL advertised to clients: {}",
+        config.redirect_base_url
     );
+
+    let api_router =
+        api::create_api_router(Arc::clone(&storage), auth_service, Arc::clone(&config));
     let redirect_router = redirect::create_redirect_router(Arc::clone(&storage));
 
     // Log frontend configuration
@@ -78,7 +80,10 @@ async fn main() -> Result<()> {
     let api_addr = format!("{}:{}", config.api_server.host, config.api_server.port);
     let api_listener = tokio::net::TcpListener::bind(&api_addr).await?;
     info!("🚀 API server listening on http://{}", api_addr);
-    info!("   - API endpoints available at http://{}/api/...", api_addr);
+    info!(
+        "   - API endpoints available at http://{}/api/...",
+        api_addr
+    );
     info!("   - Frontend UI available at http://{}/", api_addr);
 
     // Start redirect server

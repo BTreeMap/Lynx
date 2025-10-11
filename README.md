@@ -21,6 +21,7 @@ Lynx includes a modern React-based web frontend for managing short URLs. The fro
 ### Accessing the Frontend
 
 The frontend is automatically available at the API server's root path:
+
 - **Frontend UI**: `http://localhost:8080/` (default)
 - **API endpoints**: `http://localhost:8080/api/...`
 
@@ -42,6 +43,7 @@ export FRONTEND_STATIC_DIR=/path/to/frontend/dist
 ```
 
 This is useful for:
+
 - Serving a custom frontend without recompiling
 - Static hosting scenarios where you extract the frontend separately
 - Development with hot-reload (point to your dev server's output)
@@ -60,7 +62,6 @@ export FRONTEND_STATIC_DIR=/var/www/lynx-frontend
 ```
 
 See the [frontend README](frontend/README.md) for development setup.
-
 
 ## Architecture
 
@@ -95,9 +96,11 @@ This separation allows you to:
 Pre-built binaries are available for download:
 
 **Latest main branch builds** (updated on every commit):
+
 - Available as artifacts from [GitHub Actions runs](https://github.com/BTreeMap/Lynx/actions)
 
 **Release builds** (stable versions):
+
 - Download from [GitHub Releases](https://github.com/BTreeMap/Lynx/releases)
 - Available for Linux (amd64, arm64), macOS (Intel, Apple Silicon), and Windows
 

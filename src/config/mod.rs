@@ -6,6 +6,7 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub api_server: ServerConfig,
     pub redirect_server: ServerConfig,
+    pub redirect_base_url: String,
     pub auth: AuthConfig,
     pub frontend: FrontendConfig,
 }
@@ -91,6 +92,29 @@ impl Config {
         let redirect_port = std::env::var("REDIRECT_PORT")
             .unwrap_or_else(|_| "3000".to_string())
             .parse::<u16>()?;
+        let redirect_scheme = std::env::var("REDIRECT_SCHEME")
+            .ok()
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                if redirect_port == 443 {
+                    "https"
+                } else {
+                    "http"
+                }
+                .to_string()
+            });
+
+        let redirect_base_url = std::env::var("REDIRECT_BASE_URL")
+            .ok()
+            .map(|value| value.trim().trim_end_matches('/').to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| match (redirect_scheme.as_str(), redirect_port) {
+                ("http", 80) | ("https", 443) => {
+                    format!("{}://{}", redirect_scheme, redirect_host)
+                }
+                _ => format!("{}://{}:{}", redirect_scheme, redirect_host, redirect_port),
+            });
 
         let disable_auth = std::env::var("DISABLE_AUTH")
             .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
@@ -151,6 +175,7 @@ impl Config {
                 host: redirect_host,
                 port: redirect_port,
             },
+            redirect_base_url,
             auth: AuthConfig {
                 mode: auth_mode,
                 oauth,

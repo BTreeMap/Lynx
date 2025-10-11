@@ -6,6 +6,7 @@ export interface ShortenedUrl {
   created_by: string | null;
   clicks: number;
   is_active: boolean;
+  redirect_base_url?: string | null;
 }
 
 export interface CreateUrlRequest {

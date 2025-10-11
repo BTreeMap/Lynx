@@ -57,10 +57,7 @@ fn main() {
         println!("cargo:rerun-if-changed=frontend/vite.config.ts");
 
         // Check if npm is available
-        let npm_available = Command::new("npm")
-            .arg("--version")
-            .output()
-            .is_ok();
+        let npm_available = Command::new("npm").arg("--version").output().is_ok();
 
         if npm_available {
             println!("cargo:warning=Building frontend with npm...");

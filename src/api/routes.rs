@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::auth::{auth_middleware, AuthService};
-use crate::config::FrontendConfig;
+use crate::config::Config;
 use crate::storage::Storage;
 
 use super::handlers::{
@@ -19,9 +19,10 @@ use super::static_files::serve_static;
 pub fn create_api_router(
     storage: Arc<dyn Storage>,
     auth_service: Arc<AuthService>,
-    frontend_config: FrontendConfig,
+    config: Arc<Config>,
 ) -> Router {
-    let state = Arc::new(AppState { storage });
+    let frontend_config = config.frontend.clone();
+    let state = Arc::new(AppState { storage, config });
 
     // Configure CORS
     let cors = CorsLayer::new()

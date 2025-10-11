@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { apiClient } from '../api';
 import type { CreateUrlRequest } from '../types';
+import { buildShortLink } from '../utils/url';
 
 interface CreateUrlFormProps {
   onUrlCreated: () => void;
@@ -11,13 +12,15 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
   const [customCode, setCustomCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [successCode, setSuccessCode] = useState<string | null>(null);
+  const [successLink, setSuccessLink] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
-    setSuccess(null);
+    setSuccessCode(null);
+    setSuccessLink(null);
 
     try {
       const request: CreateUrlRequest = {
@@ -25,7 +28,9 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
         custom_code: customCode || undefined,
       };
       const result = await apiClient.createUrl(request);
-      setSuccess(`Created short URL: ${result.short_code}`);
+      const fullLink = buildShortLink(result.short_code, result.redirect_base_url);
+      setSuccessCode(result.short_code);
+      setSuccessLink(fullLink);
       setUrl('');
       setCustomCode('');
       onUrlCreated();
@@ -86,9 +91,21 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
             {error}
           </div>
         )}
-        {success && (
+        {successCode && (
           <div style={{ padding: '10px', marginBottom: '15px', backgroundColor: '#d4edda', color: '#155724', borderRadius: '4px' }}>
-            {success}
+            Created short URL:{' '}
+            {successLink ? (
+              <a
+                href={successLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: '#155724', fontWeight: 600 }}
+              >
+                {successLink}
+              </a>
+            ) : (
+              <span style={{ fontWeight: 600 }}>{successCode}</span>
+            )}
           </div>
         )}
         <button

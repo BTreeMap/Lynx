@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { apiClient } from '../api';
 import type { ShortenedUrl } from '../types';
+import { buildShortLink } from '../utils/url';
 
 interface UrlListProps {
   urls: ShortenedUrl[];
@@ -48,10 +49,7 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
     return new Date(timestamp * 1000).toLocaleString();
   };
 
-  const getRedirectUrl = () => {
-    const redirectHost = import.meta.env.VITE_REDIRECT_URL || 'http://localhost:3000';
-    return redirectHost;
-  };
+  const buildLinkForItem = (item: ShortenedUrl) => buildShortLink(item.short_code, item.redirect_base_url);
 
   return (
     <div>
@@ -78,76 +76,85 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
               </tr>
             </thead>
             <tbody>
-              {urls.map((url) => (
-                <tr key={url.id} style={{ borderBottom: '1px solid #dee2e6' }}>
-                  <td style={{ padding: '12px' }}>
-                    <a 
-                      href={`${getRedirectUrl()}/${url.short_code}`} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      style={{ color: '#007bff', textDecoration: 'none' }}
-                    >
-                      {url.short_code}
-                    </a>
-                  </td>
-                  <td style={{ padding: '12px', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <a href={url.original_url} target="_blank" rel="noopener noreferrer" style={{ color: '#666', textDecoration: 'none' }}>
-                      {url.original_url}
-                    </a>
-                  </td>
-                  <td style={{ padding: '12px' }}>{url.clicks}</td>
-                  <td style={{ padding: '12px' }}>
-                    <span style={{
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      backgroundColor: url.is_active ? '#d4edda' : '#f8d7da',
-                      color: url.is_active ? '#155724' : '#721c24',
-                      fontSize: '12px',
-                    }}>
-                      {url.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px', fontSize: '13px', color: '#666' }}>{formatDate(url.created_at)}</td>
-                  {isAdmin && <td style={{ padding: '12px', fontSize: '13px', color: '#666' }}>{url.created_by || 'N/A'}</td>}
-                  {isAdmin && (
+              {urls.map((url) => {
+                const shortLink = buildLinkForItem(url);
+                return (
+                  <tr key={url.id} style={{ borderBottom: '1px solid #dee2e6' }}>
                     <td style={{ padding: '12px' }}>
-                      {url.is_active ? (
-                        <button
-                          onClick={() => handleDeactivate(url.short_code)}
-                          disabled={actionInProgress === url.short_code}
-                          style={{
-                            padding: '6px 12px',
-                            backgroundColor: actionInProgress === url.short_code ? '#ccc' : '#dc3545',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            cursor: actionInProgress === url.short_code ? 'not-allowed' : 'pointer',
-                          }}
+                      {shortLink ? (
+                        <a
+                          href={shortLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: '#007bff', textDecoration: 'none' }}
                         >
-                          Deactivate
-                        </button>
+                          {url.short_code}
+                        </a>
                       ) : (
-                        <button
-                          onClick={() => handleReactivate(url.short_code)}
-                          disabled={actionInProgress === url.short_code}
-                          style={{
-                            padding: '6px 12px',
-                            backgroundColor: actionInProgress === url.short_code ? '#ccc' : '#28a745',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            cursor: actionInProgress === url.short_code ? 'not-allowed' : 'pointer',
-                          }}
-                        >
-                          Reactivate
-                        </button>
+                        <span style={{ color: '#212529' }}>{url.short_code}</span>
                       )}
                     </td>
-                  )}
-                </tr>
-              ))}
+                    <td style={{ padding: '12px', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <a href={url.original_url} target="_blank" rel="noopener noreferrer" style={{ color: '#666', textDecoration: 'none' }}>
+                        {url.original_url}
+                      </a>
+                    </td>
+                    <td style={{ padding: '12px' }}>{url.clicks}</td>
+                    <td style={{ padding: '12px' }}>
+                      <span
+                        style={{
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: url.is_active ? '#d4edda' : '#f8d7da',
+                          color: url.is_active ? '#155724' : '#721c24',
+                          fontSize: '12px',
+                        }}
+                      >
+                        {url.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '12px', fontSize: '13px', color: '#666' }}>{formatDate(url.created_at)}</td>
+                    {isAdmin && <td style={{ padding: '12px', fontSize: '13px', color: '#666' }}>{url.created_by || 'N/A'}</td>}
+                    {isAdmin && (
+                      <td style={{ padding: '12px' }}>
+                        {url.is_active ? (
+                          <button
+                            onClick={() => handleDeactivate(url.short_code)}
+                            disabled={actionInProgress === url.short_code}
+                            style={{
+                              padding: '6px 12px',
+                              backgroundColor: actionInProgress === url.short_code ? '#ccc' : '#dc3545',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              cursor: actionInProgress === url.short_code ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            Deactivate
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleReactivate(url.short_code)}
+                            disabled={actionInProgress === url.short_code}
+                            style={{
+                              padding: '6px 12px',
+                              backgroundColor: actionInProgress === url.short_code ? '#ccc' : '#28a745',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              cursor: actionInProgress === url.short_code ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            Reactivate
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
