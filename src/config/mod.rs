@@ -35,6 +35,7 @@ pub struct ServerConfig {
 pub enum AuthMode {
     None,
     Oauth,
+    Cloudflare,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +43,8 @@ pub struct AuthConfig {
     pub mode: AuthMode,
     #[serde(default)]
     pub oauth: Option<OAuthConfig>,
+    #[serde(default)]
+    pub cloudflare: Option<CloudflareConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +58,14 @@ pub struct OAuthConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudflareConfig {
+    pub team_domain: String,
+    pub audience: String,
+    #[serde(default = "CloudflareConfig::default_cache_ttl_secs")]
+    pub certs_cache_ttl_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrontendConfig {
     /// Path to directory containing static frontend files
     /// If None, uses embedded frontend (if available)
@@ -64,6 +75,12 @@ pub struct FrontendConfig {
 impl OAuthConfig {
     const fn default_cache_ttl_secs() -> u64 {
         300
+    }
+}
+
+impl CloudflareConfig {
+    const fn default_cache_ttl_secs() -> u64 {
+        86400 // 24 hours
     }
 }
 
@@ -131,9 +148,10 @@ impl Config {
         let auth_mode = match auth_mode.as_str() {
             "none" => AuthMode::None,
             "oauth" => AuthMode::Oauth,
+            "cloudflare" => AuthMode::Cloudflare,
             other => {
                 tracing::warn!(
-                    "Unknown AUTH_MODE '{other}', falling back to 'none'. Supported values: none, oauth"
+                    "Unknown AUTH_MODE '{other}', falling back to 'none'. Supported values: none, oauth, cloudflare"
                 );
                 AuthMode::None
             }
@@ -160,6 +178,25 @@ impl Config {
             None
         };
 
+        let cloudflare = if matches!(auth_mode, AuthMode::Cloudflare) {
+            let team_domain = std::env::var("CLOUDFLARE_TEAM_DOMAIN")
+                .context("CLOUDFLARE_TEAM_DOMAIN must be set when AUTH_MODE=cloudflare")?;
+            let audience = std::env::var("CLOUDFLARE_AUDIENCE")
+                .context("CLOUDFLARE_AUDIENCE must be set when AUTH_MODE=cloudflare")?;
+            let certs_cache_ttl_secs = std::env::var("CLOUDFLARE_CERTS_CACHE_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or_else(CloudflareConfig::default_cache_ttl_secs);
+
+            Some(CloudflareConfig {
+                team_domain,
+                audience,
+                certs_cache_ttl_secs,
+            })
+        } else {
+            None
+        };
+
         let frontend_static_dir = std::env::var("FRONTEND_STATIC_DIR").ok();
 
         Ok(Config {
@@ -179,6 +216,7 @@ impl Config {
             auth: AuthConfig {
                 mode: auth_mode,
                 oauth,
+                cloudflare,
             },
             frontend: FrontendConfig {
                 static_dir: frontend_static_dir,

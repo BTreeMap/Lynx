@@ -50,4 +50,24 @@ pub trait Storage: Send + Sync {
         is_admin: bool,
         user_id: Option<&str>,
     ) -> Result<Vec<ShortenedUrl>>;
+
+    /// Register or update user metadata
+    async fn upsert_user(
+        &self,
+        user_id: &str,
+        email: Option<&str>,
+        auth_method: &str,
+    ) -> Result<()>;
+
+    /// Check if a user is manually promoted to admin
+    async fn is_manual_admin(&self, user_id: &str, auth_method: &str) -> Result<bool>;
+
+    /// Promote a user to admin manually
+    async fn promote_to_admin(&self, user_id: &str, auth_method: &str) -> Result<()>;
+
+    /// Demote a user from admin
+    async fn demote_from_admin(&self, user_id: &str, auth_method: &str) -> Result<bool>;
+
+    /// List all manually promoted admins
+    async fn list_manual_admins(&self) -> Result<Vec<(String, String, String)>>; // (user_id, auth_method, email)
 }
