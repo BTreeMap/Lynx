@@ -11,8 +11,8 @@ use crate::config::Config;
 use crate::storage::Storage;
 
 use super::handlers::{
-    create_url, deactivate_url, get_url, get_user_info, health_check, list_urls, reactivate_url,
-    AppState,
+    create_url, deactivate_url, get_auth_mode, get_url, get_user_info, health_check, list_urls,
+    reactivate_url, AppState,
 };
 use super::static_files::serve_static;
 
@@ -45,7 +45,9 @@ pub fn create_api_router(
 
     let api_routes = Router::new()
         .route("/health", get(health_check))
+        .route("/auth/mode", get(get_auth_mode))
         .merge(protected_routes)
+        .with_state(Arc::clone(&state))
         .layer(cors);
 
     // Add frontend static file serving

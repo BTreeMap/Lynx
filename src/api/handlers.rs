@@ -59,17 +59,19 @@ fn default_limit() -> i64 {
 }
 
 /// Helper to check if user is admin (combines JWT claims and manual promotion)
+/// JWT claims take precedence - if JWT says admin, they're admin regardless of manual table
+/// Manual promotion only applies when JWT doesn't grant admin status
 async fn is_user_admin(
     storage: &dyn Storage,
     claims: &Option<AuthClaims>,
 ) -> bool {
     if let Some(c) = claims {
-        // First check JWT claims
+        // First check JWT claims - these take precedence
         if c.is_admin() {
             return true;
         }
 
-        // Then check manual promotion
+        // Only check manual promotion if JWT doesn't grant admin
         if let (Some(user_id), Some(auth_method)) = (c.user_id(), c.auth_method()) {
             if let Ok(manual_admin) = storage.is_manual_admin(&user_id, &auth_method).await {
                 return manual_admin;
@@ -365,20 +367,10 @@ pub async fn get_user_info(
     Extension(claims): Extension<Option<AuthClaims>>,
 ) -> Json<UserInfo> {
     let user_id = claims.as_ref().and_then(|c| c.user_id());
-    let mut is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
+    let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
 
-    // Check manual admin promotion if user is authenticated
+    // Upsert user metadata if authenticated
     if let (Some(ref uid), Some(ref c)) = (&user_id, &claims) {
-        if !is_admin {
-            // Only check manual admin if not already admin via claims
-            if let Some(auth_method) = c.auth_method() {
-                if let Ok(manual_admin) = state.storage.is_manual_admin(uid, &auth_method).await {
-                    is_admin = manual_admin;
-                }
-            }
-        }
-
-        // Upsert user metadata
         if let Some(auth_method) = c.auth_method() {
             let email = c.email();
             let _ = state
@@ -389,4 +381,23 @@ pub async fn get_user_info(
     }
 
     Json(UserInfo { user_id, is_admin })
+}
+
+#[derive(Serialize)]
+pub struct AuthModeResponse {
+    pub mode: String,
+}
+
+/// Get the authentication mode configured for this instance
+/// This endpoint is public (no auth required) so frontend can determine auth flow
+pub async fn get_auth_mode(State(state): State<Arc<AppState>>) -> Json<AuthModeResponse> {
+    let mode = match state.config.auth.mode {
+        crate::config::AuthMode::None => "none",
+        crate::config::AuthMode::Oauth => "oauth",
+        crate::config::AuthMode::Cloudflare => "cloudflare",
+    };
+    
+    Json(AuthModeResponse {
+        mode: mode.to_string(),
+    })
 }
