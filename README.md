@@ -415,21 +415,23 @@ With `AUTH_MODE=none` (or `DISABLE_AUTH=true` for backward compatibility), no au
 
 ## Admin Management
 
-When using `AUTH_MODE=oauth` or `AUTH_MODE=cloudflare`, you can manually promote users to admin using the CLI tool:
+When using `AUTH_MODE=oauth` or `AUTH_MODE=cloudflare`, you can manually promote users to admin using the CLI:
 
 ```bash
 # Promote a user to admin
-./lynx-admin promote <user-id> <auth-method>
+./lynx admin promote <user-id> <auth-method>
 
 # Example for Cloudflare
-./lynx-admin promote "google-oauth2|123456" cloudflare
+./lynx admin promote "google-oauth2|123456" cloudflare
 
 # List all manually promoted admins
-./lynx-admin list
+./lynx admin list
 
 # Demote a user from admin
-./lynx-admin demote <user-id> <auth-method>
+./lynx admin demote <user-id> <auth-method>
 ```
+
+**Note:** Admin status from OAuth/Cloudflare JWT claims takes precedence. Manual promotion only applies when the JWT doesn't grant admin status.
 
 For detailed Cloudflare Zero Trust setup, see [Cloudflare Setup Guide](docs/CLOUDFLARE_SETUP.md).
 

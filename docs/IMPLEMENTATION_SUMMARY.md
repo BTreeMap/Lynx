@@ -103,21 +103,22 @@ CLOUDFLARE_CERTS_CACHE_SECS=86400  # Optional, default: 24 hours
 
 ### New Files
 - `src/auth/cloudflare.rs` - Cloudflare Zero Trust validator
-- `src/bin/lynx-admin.rs` - Admin management CLI tool
-- `src/lib.rs` - Library crate for CLI tool
+- `src/lib.rs` - Library crate for code reuse
 - `docs/CLOUDFLARE_SETUP.md` - Comprehensive setup guide
 
 ### Modified Files
+- `src/main.rs` - Integrated admin subcommands
 - `src/auth/mod.rs` - Added Cloudflare auth strategy, updated AuthClaims
 - `src/config/mod.rs` - Added CloudflareConfig and parsing
-- `src/api/handlers.rs` - Updated admin checks, user metadata tracking
+- `src/api/handlers.rs` - Updated admin checks (JWT precedence), auth mode endpoint
+- `src/api/routes.rs` - Added `/api/auth/mode` endpoint
 - `src/storage/trait_def.rs` - Added user and admin management methods
 - `src/storage/sqlite.rs` - Implemented new tables and methods
 - `src/storage/postgres.rs` - Implemented new tables and methods
-- `src/main.rs` - Added Cloudflare auth logging
-- `Cargo.toml` - Added clap dependency and binary definitions
+- `Cargo.toml` - Removed separate binary definition
 - `.env.example` - Added Cloudflare configuration examples
 - `README.md` - Updated with Cloudflare auth documentation
+- `frontend/src/*` - Updated to detect and handle different auth modes
 
 ## Testing
 - ✅ All existing unit tests pass
@@ -133,7 +134,7 @@ CLOUDFLARE_CERTS_CACHE_SECS=86400  # Optional, default: 24 hours
 2. Update environment variables
 3. Restart Lynx
 4. All previous links automatically attributed to legacy user
-5. Promote first admin: `./lynx-admin promote <user-sub> cloudflare`
+5. Promote first admin: `./lynx admin promote <user-sub> cloudflare`
 
 ### From auth=oauth to auth=cloudflare
 1. Set up Cloudflare Zero Trust Access Application

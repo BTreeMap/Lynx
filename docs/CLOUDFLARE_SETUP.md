@@ -61,18 +61,20 @@ You should see: `☁️  Cloudflare Zero Trust authentication enabled`
 
 ## Admin Management
 
-Promote users to admin using the CLI tool:
+Promote users to admin using the CLI:
 
 ```bash
 # Promote a user
-./lynx-admin promote <user-sub> cloudflare
+./lynx admin promote <user-sub> cloudflare
 
 # List admins
-./lynx-admin list
+./lynx admin list
 
 # Demote a user
-./lynx-admin demote <user-sub> cloudflare
+./lynx admin demote <user-sub> cloudflare
 ```
+
+**Note:** Admin status from Cloudflare JWT claims takes precedence. Manual promotion only applies when the JWT doesn't grant admin status.
 
 ## Migration from auth=none
 
