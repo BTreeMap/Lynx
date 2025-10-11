@@ -3,6 +3,18 @@ name = "lynx"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "lynx"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lynx"
+path = "src/main.rs"
+
+[[bin]]
+name = "lynx-admin"
+path = "src/bin/lynx-admin.rs"
+
 [dependencies]
 # Web framework
 axum = "0.8"
@@ -44,6 +56,9 @@ base64 = { version = "0.22", default-features = false, features = ["std"] }
 # Static file embedding
 rust-embed = "8"
 mime_guess = "2"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
 
 [build-dependencies]
 statrs = "0.16"

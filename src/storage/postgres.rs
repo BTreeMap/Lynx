@@ -21,6 +21,7 @@ impl PostgresStorage {
 #[async_trait]
 impl Storage for PostgresStorage {
     async fn init(&self) -> Result<()> {
+        // Create URLs table
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS urls (
@@ -44,6 +45,36 @@ impl Storage for PostgresStorage {
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_created_by ON urls(created_by)")
             .execute(self.pool.as_ref())
             .await?;
+
+        // Create users table to track user metadata
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS users (
+                user_id TEXT NOT NULL,
+                auth_method TEXT NOT NULL,
+                email TEXT,
+                created_at BIGINT NOT NULL,
+                updated_at BIGINT NOT NULL,
+                PRIMARY KEY (user_id, auth_method)
+            )
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Create admin_users table for manually promoted admins
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS admin_users (
+                user_id TEXT NOT NULL,
+                auth_method TEXT NOT NULL,
+                promoted_at BIGINT NOT NULL,
+                PRIMARY KEY (user_id, auth_method)
+            )
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
 
         Ok(())
     }
@@ -196,5 +227,106 @@ impl Storage for PostgresStorage {
         };
 
         Ok(urls)
+    }
+
+    async fn upsert_user(
+        &self,
+        user_id: &str,
+        email: Option<&str>,
+        auth_method: &str,
+    ) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+
+        sqlx::query(
+            r#"
+            INSERT INTO users (user_id, auth_method, email, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, auth_method) DO UPDATE SET
+                email = COALESCE(EXCLUDED.email, users.email),
+                updated_at = EXCLUDED.updated_at
+            "#,
+        )
+        .bind(user_id)
+        .bind(auth_method)
+        .bind(email)
+        .bind(now)
+        .bind(now)
+        .execute(self.pool.as_ref())
+        .await?;
+
+        Ok(())
+    }
+
+    async fn is_manual_admin(&self, user_id: &str, auth_method: &str) -> Result<bool> {
+        let result = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*) FROM admin_users
+            WHERE user_id = $1 AND auth_method = $2
+            "#,
+        )
+        .bind(user_id)
+        .bind(auth_method)
+        .fetch_one(self.pool.as_ref())
+        .await?;
+
+        Ok(result > 0)
+    }
+
+    async fn promote_to_admin(&self, user_id: &str, auth_method: &str) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+
+        sqlx::query(
+            r#"
+            INSERT INTO admin_users (user_id, auth_method, promoted_at)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, auth_method) DO NOTHING
+            "#,
+        )
+        .bind(user_id)
+        .bind(auth_method)
+        .bind(now)
+        .execute(self.pool.as_ref())
+        .await?;
+
+        Ok(())
+    }
+
+    async fn demote_from_admin(&self, user_id: &str, auth_method: &str) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM admin_users
+            WHERE user_id = $1 AND auth_method = $2
+            "#,
+        )
+        .bind(user_id)
+        .bind(auth_method)
+        .execute(self.pool.as_ref())
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn list_manual_admins(&self) -> Result<Vec<(String, String, String)>> {
+        let admins = sqlx::query_as::<_, (String, String, Option<String>)>(
+            r#"
+            SELECT a.user_id, a.auth_method, u.email
+            FROM admin_users a
+            LEFT JOIN users u ON a.user_id = u.user_id AND a.auth_method = u.auth_method
+            ORDER BY a.promoted_at DESC
+            "#,
+        )
+        .fetch_all(self.pool.as_ref())
+        .await?
+        .into_iter()
+        .map(|(user_id, auth_method, email)| {
+            (user_id, auth_method, email.unwrap_or_else(|| "N/A".to_string()))
+        })
+        .collect();
+
+        Ok(admins)
     }
 }

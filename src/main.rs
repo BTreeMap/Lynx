@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
 
     match auth_config.mode {
         AuthMode::None => {
-            info!("🔓 Authentication is disabled - all API requests are allowed");
+            info!("🔓 Authentication is disabled - all API requests are allowed as admin");
         }
         AuthMode::Oauth => {
             if let Some(oauth) = auth_config.oauth.as_ref() {
@@ -55,6 +55,16 @@ async fn main() -> Result<()> {
                 );
             } else {
                 info!("🔐 OAuth authentication enabled");
+            }
+        }
+        AuthMode::Cloudflare => {
+            if let Some(cf) = auth_config.cloudflare.as_ref() {
+                info!(
+                    "☁️  Cloudflare Zero Trust authentication enabled (team: {}, audience: {})",
+                    cf.team_domain, cf.audience
+                );
+            } else {
+                info!("☁️  Cloudflare Zero Trust authentication enabled");
             }
         }
     }

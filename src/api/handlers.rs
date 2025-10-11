@@ -58,6 +58,28 @@ fn default_limit() -> i64 {
     50
 }
 
+/// Helper to check if user is admin (combines JWT claims and manual promotion)
+async fn is_user_admin(
+    storage: &dyn Storage,
+    claims: &Option<AuthClaims>,
+) -> bool {
+    if let Some(c) = claims {
+        // First check JWT claims
+        if c.is_admin() {
+            return true;
+        }
+
+        // Then check manual promotion
+        if let (Some(user_id), Some(auth_method)) = (c.user_id(), c.auth_method()) {
+            if let Ok(manual_admin) = storage.is_manual_admin(&user_id, &auth_method).await {
+                return manual_admin;
+            }
+        }
+    }
+
+    false
+}
+
 const MIN_SHORT_CODE_LENGTH: usize = 3;
 const MAX_SHORT_CODE_LENGTH: usize = 10;
 const MIN_PROBES_BEFORE_ESCALATION: usize = 5;
@@ -228,7 +250,7 @@ pub async fn deactivate_url(
     Json(_payload): Json<DeactivateUrlRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Check if user is admin
-    let is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
+    let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     if !is_admin {
         return Err((
             StatusCode::FORBIDDEN,
@@ -264,7 +286,7 @@ pub async fn reactivate_url(
     Path(code): Path<String>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     // Check if user is admin
-    let is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
+    let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     if !is_admin {
         return Err((
             StatusCode::FORBIDDEN,
@@ -299,7 +321,7 @@ pub async fn list_urls(
     Extension(claims): Extension<Option<AuthClaims>>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<Vec<ShortenedUrlResponse>>, (StatusCode, Json<ErrorResponse>)> {
-    let is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
+    let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     let user_id = claims.as_ref().and_then(|c| c.user_id());
 
     match state
@@ -338,9 +360,33 @@ pub struct UserInfo {
 }
 
 /// Get current user information from token
-pub async fn get_user_info(Extension(claims): Extension<Option<AuthClaims>>) -> Json<UserInfo> {
+pub async fn get_user_info(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
+) -> Json<UserInfo> {
     let user_id = claims.as_ref().and_then(|c| c.user_id());
-    let is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
+    let mut is_admin = claims.as_ref().map(|c| c.is_admin()).unwrap_or(false);
+
+    // Check manual admin promotion if user is authenticated
+    if let (Some(ref uid), Some(ref c)) = (&user_id, &claims) {
+        if !is_admin {
+            // Only check manual admin if not already admin via claims
+            if let Some(auth_method) = c.auth_method() {
+                if let Ok(manual_admin) = state.storage.is_manual_admin(uid, &auth_method).await {
+                    is_admin = manual_admin;
+                }
+            }
+        }
+
+        // Upsert user metadata
+        if let Some(auth_method) = c.auth_method() {
+            let email = c.email();
+            let _ = state
+                .storage
+                .upsert_user(uid, email.as_deref(), &auth_method)
+                .await;
+        }
+    }
 
     Json(UserInfo { user_id, is_admin })
 }
