@@ -69,14 +69,14 @@ async fn main() -> Result<()> {
 
 async fn handle_admin_command(command: AdminCommands) -> Result<()> {
     let config = Config::from_env()?;
-    
+
     let storage: Arc<dyn Storage> = match config.database.backend {
-        DatabaseBackend::Sqlite => {
-            Arc::new(SqliteStorage::new(&config.database.url, config.database.max_connections).await?)
-        }
-        DatabaseBackend::Postgres => {
-            Arc::new(PostgresStorage::new(&config.database.url, config.database.max_connections).await?)
-        }
+        DatabaseBackend::Sqlite => Arc::new(
+            SqliteStorage::new(&config.database.url, config.database.max_connections).await?,
+        ),
+        DatabaseBackend::Postgres => Arc::new(
+            PostgresStorage::new(&config.database.url, config.database.max_connections).await?,
+        ),
     };
 
     // Ensure database is initialized
@@ -129,7 +129,6 @@ async fn handle_admin_command(command: AdminCommands) -> Result<()> {
 }
 
 async fn run_server() -> Result<()> {
-
     // Load configuration
     let config = Arc::new(Config::from_env()?);
     info!("Loaded configuration");
@@ -138,11 +137,15 @@ async fn run_server() -> Result<()> {
     let base_storage: Arc<dyn Storage> = match config.database.backend {
         DatabaseBackend::Sqlite => {
             info!("Using SQLite storage: {}", config.database.url);
-            Arc::new(SqliteStorage::new(&config.database.url, config.database.max_connections).await?)
+            Arc::new(
+                SqliteStorage::new(&config.database.url, config.database.max_connections).await?,
+            )
         }
         DatabaseBackend::Postgres => {
             info!("Using PostgreSQL storage: {}", config.database.url);
-            Arc::new(PostgresStorage::new(&config.database.url, config.database.max_connections).await?)
+            Arc::new(
+                PostgresStorage::new(&config.database.url, config.database.max_connections).await?,
+            )
         }
     };
 
@@ -230,7 +233,7 @@ async fn run_server() -> Result<()> {
 
     // Set up graceful shutdown signal
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    
+
     // Spawn signal handler
     tokio::spawn(async move {
         tokio::signal::ctrl_c()
@@ -241,11 +244,10 @@ async fn run_server() -> Result<()> {
     });
 
     // Run both servers concurrently with graceful shutdown
-    let api_server = axum::serve(api_listener, api_router)
-        .with_graceful_shutdown(async {
-            let _ = shutdown_rx.await;
-        });
-    
+    let api_server = axum::serve(api_listener, api_router).with_graceful_shutdown(async {
+        let _ = shutdown_rx.await;
+    });
+
     let redirect_server = axum::serve(redirect_listener, redirect_router);
 
     // Run servers

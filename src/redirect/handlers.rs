@@ -28,7 +28,7 @@ pub async fn redirect_url(
             let storage = Arc::clone(&state.storage);
             let code_clone = code.clone();
             tokio::spawn(async move {
-                let _ = storage.increment_clicks(&code_clone).await;
+                let _ = storage.increment_click(&code_clone).await;
             });
 
             // Redirect

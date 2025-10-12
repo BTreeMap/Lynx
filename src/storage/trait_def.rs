@@ -37,8 +37,13 @@ pub trait Storage: Send + Sync {
     /// Reactivate a shortened URL
     async fn reactivate(&self, short_code: &str) -> Result<bool>;
 
-    /// Increment click count
-    async fn increment_clicks(&self, short_code: &str) -> Result<()>;
+    /// Increment click count by the provided amount
+    async fn increment_clicks(&self, short_code: &str, amount: u64) -> Result<()>;
+
+    /// Increment click count by 1 (convenience helper)
+    async fn increment_click(&self, short_code: &str) -> Result<()> {
+        self.increment_clicks(short_code, 1).await
+    }
 
     /// List all URLs (with pagination and optional user filtering)
     /// If is_admin is true, returns all URLs regardless of user_id

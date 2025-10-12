@@ -90,25 +90,26 @@ async fn flush_click_buffer(
     storage: &Arc<dyn Storage>,
     buffer: &Arc<DashMap<String, u64>>,
 ) -> Result<()> {
-    // Drain the buffer into a temporary vector to minimize lock time
-    let items: Vec<(String, u64)> = buffer
-        .iter()
-        .map(|entry| (entry.key().clone(), *entry.value()))
-        .collect();
-
-    // Clear the buffer
-    for (short_code, _) in &items {
-        buffer.remove(short_code);
-    }
-
-    // Write to database
-    for (short_code, count) in items {
-        if count > 0 {
-            // Execute multiple increments
-            for _ in 0..count {
-                storage.increment_clicks(&short_code).await?;
+    // Collect increments while zeroing counts so concurrent writers can continue
+    let pending_updates = buffer
+        .iter_mut()
+        .map_while(|mut entry| {
+            let count = *entry.value();
+            if count == 0 {
+                return None;
             }
-        }
+
+            *entry.value_mut() = 0;
+            Some((entry.key().clone(), count))
+        })
+        .collect::<Vec<(String, u64)>>();
+
+    // Remove empty entries in case no new clicks were buffered meanwhile
+    buffer.retain(|_, v| *v > 0);
+
+    // Persist updates to the underlying storage
+    for (short_code, count) in pending_updates {
+        storage.increment_clicks(&short_code, count).await?;
     }
 
     Ok(())
@@ -187,12 +188,16 @@ impl Storage for CachedStorage {
         Ok(result)
     }
 
-    async fn increment_clicks(&self, short_code: &str) -> Result<()> {
+    async fn increment_clicks(&self, short_code: &str, amount: u64) -> Result<()> {
+        if amount == 0 {
+            return Ok(());
+        }
+
         // Buffer the click increment in memory
         self.click_buffer
             .entry(short_code.to_string())
-            .and_modify(|count| *count += 1)
-            .or_insert(1);
+            .and_modify(|count| *count += amount)
+            .or_insert(amount);
 
         Ok(())
     }

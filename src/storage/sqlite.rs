@@ -1,9 +1,10 @@
 use crate::models::ShortenedUrl;
 use crate::storage::{Storage, StorageError, StorageResult};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 pub struct SqliteStorage {
@@ -173,14 +174,21 @@ impl Storage for SqliteStorage {
         Ok(result.rows_affected() > 0)
     }
 
-    async fn increment_clicks(&self, short_code: &str) -> Result<()> {
+    async fn increment_clicks(&self, short_code: &str, amount: u64) -> Result<()> {
+        if amount == 0 {
+            return Ok(());
+        }
+
+        let amount = i64::try_from(amount).map_err(|_| anyhow!("increment amount exceeds i64"))?;
+
         sqlx::query(
             r#"
             UPDATE urls
-            SET clicks = clicks + 1
+            SET clicks = clicks + ?
             WHERE short_code = ?
             "#,
         )
+        .bind(amount)
         .bind(short_code)
         .execute(self.pool.as_ref())
         .await?;
@@ -327,7 +335,11 @@ impl Storage for SqliteStorage {
         .await?
         .into_iter()
         .map(|(user_id, auth_method, email)| {
-            (user_id, auth_method, email.unwrap_or_else(|| "N/A".to_string()))
+            (
+                user_id,
+                auth_method,
+                email.unwrap_or_else(|| "N/A".to_string()),
+            )
         })
         .collect();
 

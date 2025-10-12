@@ -61,10 +61,7 @@ fn default_limit() -> i64 {
 /// Helper to check if user is admin (combines JWT claims and manual promotion)
 /// JWT claims take precedence - if JWT says admin, they're admin regardless of manual table
 /// Manual promotion only applies when JWT doesn't grant admin status
-async fn is_user_admin(
-    storage: &dyn Storage,
-    claims: &Option<AuthClaims>,
-) -> bool {
+async fn is_user_admin(storage: &dyn Storage, claims: &Option<AuthClaims>) -> bool {
     if let Some(c) = claims {
         // First check JWT claims - these take precedence
         if c.is_admin() {
@@ -396,7 +393,7 @@ pub async fn get_auth_mode(State(state): State<Arc<AppState>>) -> Json<AuthModeR
         crate::config::AuthMode::Oauth => "oauth",
         crate::config::AuthMode::Cloudflare => "cloudflare",
     };
-    
+
     Json(AuthModeResponse {
         mode: mode.to_string(),
     })

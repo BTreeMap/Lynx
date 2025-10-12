@@ -66,7 +66,7 @@ impl AuthClaims {
         if let Some(is_admin) = self.0.get("is_admin").and_then(|v| v.as_bool()) {
             return is_admin;
         }
-        
+
         // Check roles array
         if let Some(roles) = self.0.get("roles").and_then(|v| v.as_array()) {
             return roles.iter().any(|r| {
@@ -75,12 +75,12 @@ impl AuthClaims {
                     .unwrap_or(false)
             });
         }
-        
+
         // Check single role field
         if let Some(role) = self.0.get("role").and_then(|v| v.as_str()) {
             return role.eq_ignore_ascii_case("admin");
         }
-        
+
         false
     }
 
@@ -129,7 +129,9 @@ impl AuthService {
             }
             AuthMode::Cloudflare => {
                 let cloudflare_config = config.cloudflare.ok_or_else(|| {
-                    anyhow::anyhow!("AUTH_MODE=cloudflare but no Cloudflare configuration was provided")
+                    anyhow::anyhow!(
+                        "AUTH_MODE=cloudflare but no Cloudflare configuration was provided"
+                    )
                 })?;
                 let validator = CloudflareValidator::from_config(&cloudflare_config).await?;
                 AuthStrategy::Cloudflare(Arc::new(validator))
@@ -144,8 +146,14 @@ impl AuthService {
             AuthStrategy::None => {
                 // For auth=none, return a special admin user with legacy UUID
                 let mut claims = serde_json::Map::new();
-                claims.insert("sub".to_string(), Value::String("00000000-0000-0000-0000-000000000000".to_string()));
-                claims.insert("email".to_string(), Value::String("legacy@nonexistent.joefang.org".to_string()));
+                claims.insert(
+                    "sub".to_string(),
+                    Value::String("00000000-0000-0000-0000-000000000000".to_string()),
+                );
+                claims.insert(
+                    "email".to_string(),
+                    Value::String("legacy@nonexistent.joefang.org".to_string()),
+                );
                 claims.insert("is_admin".to_string(), Value::Bool(true));
                 claims.insert("auth_method".to_string(), Value::String("none".to_string()));
                 Ok(Some(AuthClaims(Arc::new(Value::Object(claims)))))
@@ -168,7 +176,10 @@ impl AuthService {
 
                 // Add auth_method to claims
                 if let Some(obj) = claims.as_object_mut() {
-                    obj.insert("auth_method".to_string(), Value::String("oauth".to_string()));
+                    obj.insert(
+                        "auth_method".to_string(),
+                        Value::String("oauth".to_string()),
+                    );
                 }
 
                 Ok(Some(AuthClaims(Arc::new(claims))))
@@ -188,7 +199,10 @@ impl AuthService {
 
                 // Add auth_method to claims
                 if let Some(obj) = claims.as_object_mut() {
-                    obj.insert("auth_method".to_string(), Value::String("cloudflare".to_string()));
+                    obj.insert(
+                        "auth_method".to_string(),
+                        Value::String("cloudflare".to_string()),
+                    );
                 }
 
                 Ok(Some(AuthClaims(Arc::new(claims))))
@@ -237,10 +251,13 @@ mod tests {
         assert!(result.is_ok());
         let claims = result.unwrap();
         assert!(claims.is_some());
-        
+
         // Verify auth=none creates admin user with legacy UUID
         let claims = claims.unwrap();
-        assert_eq!(claims.user_id().unwrap(), "00000000-0000-0000-0000-000000000000");
+        assert_eq!(
+            claims.user_id().unwrap(),
+            "00000000-0000-0000-0000-000000000000"
+        );
         assert_eq!(claims.email().unwrap(), "legacy@nonexistent.joefang.org");
         assert!(claims.is_admin());
         assert_eq!(claims.auth_method().unwrap(), "none");

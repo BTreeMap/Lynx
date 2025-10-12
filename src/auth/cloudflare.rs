@@ -86,12 +86,15 @@ impl CloudflareValidator {
         }
 
         drop(keys_guard);
-        
+
         // If key not found, try refreshing synchronously
         if let Err(e) = self.refresh_keys().await {
-            warn!("Failed to refresh Cloudflare keys when kid was missing: {}", e);
+            warn!(
+                "Failed to refresh Cloudflare keys when kid was missing: {}",
+                e
+            );
         }
-        
+
         let keys_guard = self.keys.read().await;
         keys_guard
             .get(kid)
@@ -126,7 +129,9 @@ impl CloudflareValidator {
                 !keys_guard.contains_key(k)
             };
             if missing {
-                debug!("Refreshing Cloudflare certs cache because key {k} was missing (background)");
+                debug!(
+                    "Refreshing Cloudflare certs cache because key {k} was missing (background)"
+                );
                 let self_clone = self.clone();
                 tokio::spawn(async move {
                     if let Err(e) = self_clone.refresh_keys().await {
