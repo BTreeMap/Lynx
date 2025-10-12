@@ -28,8 +28,11 @@ pub trait Storage: Send + Sync {
 
     // Additional helper methods may be added for automatic code generation if storage-backed.
 
-    /// Get a shortened URL by short code
+    /// Get a shortened URL by short code (may serve cached, potentially stale statistics)
     async fn get(&self, short_code: &str) -> Result<Option<ShortenedUrl>>;
+
+    /// Get a shortened URL by short code with authoritative statistics
+    async fn get_authoritative(&self, short_code: &str) -> Result<Option<ShortenedUrl>>;
 
     /// Deactivate a shortened URL (soft delete)
     async fn deactivate(&self, short_code: &str) -> Result<bool>;

@@ -157,6 +157,22 @@ impl Storage for CachedStorage {
         Ok(result)
     }
 
+    async fn get_authoritative(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {
+        let db_value = self.inner.get_authoritative(short_code).await?;
+
+        // Keep cache in sync with the latest database read
+        self.read_cache
+            .insert(short_code.to_string(), db_value.clone())
+            .await;
+
+        let mut result = db_value;
+        if let Some(ref mut url) = result {
+            url.clicks += self.get_buffered_clicks(short_code) as i64;
+        }
+
+        Ok(result)
+    }
+
     async fn deactivate(&self, short_code: &str) -> Result<bool> {
         let result = self.inner.deactivate(short_code).await?;
 

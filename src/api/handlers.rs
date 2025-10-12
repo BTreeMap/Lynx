@@ -221,7 +221,7 @@ pub async fn get_url(
     State(state): State<Arc<AppState>>,
     Path(code): Path<String>,
 ) -> Result<Json<ShortenedUrlResponse>, (StatusCode, Json<ErrorResponse>)> {
-    match state.storage.get(&code).await {
+    match state.storage.get_authoritative(&code).await {
         Ok(Some(url)) => Ok(Json(ShortenedUrlResponse::with_base(
             url,
             Some(state.config.redirect_base_url.as_str()),

@@ -130,6 +130,10 @@ impl Storage for SqliteStorage {
     }
 
     async fn get(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {
+        self.get_authoritative(short_code).await
+    }
+
+    async fn get_authoritative(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {
         let url = sqlx::query_as::<_, ShortenedUrl>(
             r#"
             SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
