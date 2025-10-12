@@ -142,21 +142,12 @@ impl Storage for CachedStorage {
 
     async fn get(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {
         // Try to get from cache first
-        if let Some(mut cached) = self.read_cache.get(short_code).await {
-            // Update click count with buffered data if URL exists
-            if let Some(ref mut url) = cached {
-                url.clicks += self.get_buffered_clicks(short_code) as i64;
-            }
+        if let Some(cached) = self.read_cache.get(short_code).await {
             return Ok(cached);
         }
 
         // Cache miss - fetch from underlying storage
-        let mut result = self.inner.get(short_code).await?;
-
-        // Add buffered clicks to the result
-        if let Some(ref mut url) = result {
-            url.clicks += self.get_buffered_clicks(short_code) as i64;
-        }
+        let result = self.inner.get(short_code).await?;
 
         // Cache the result from database (without buffered clicks to avoid double-counting)
         self.read_cache
