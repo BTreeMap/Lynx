@@ -2,6 +2,7 @@ use crate::models::ShortenedUrl;
 use crate::storage::{Storage, StorageError, StorageResult};
 use anyhow::Result;
 use async_trait::async_trait;
+use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::sync::Arc;
 
@@ -10,8 +11,11 @@ pub struct PostgresStorage {
 }
 
 impl PostgresStorage {
-    pub async fn new(database_url: &str) -> Result<Self> {
-        let pool = PgPool::connect(database_url).await?;
+    pub async fn new(database_url: &str, max_connections: u32) -> Result<Self> {
+        let pool = PgPoolOptions::new()
+            .max_connections(max_connections)
+            .connect(database_url)
+            .await?;
         Ok(Self {
             pool: Arc::new(pool),
         })

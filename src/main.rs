@@ -12,7 +12,7 @@ use tracing::info;
 
 use auth::AuthService;
 use config::{AuthMode, Config, DatabaseBackend};
-use storage::{PostgresStorage, SqliteStorage, Storage};
+use storage::{CachedStorage, PostgresStorage, SqliteStorage, Storage};
 
 #[derive(Parser)]
 #[command(name = "lynx")]
@@ -72,10 +72,10 @@ async fn handle_admin_command(command: AdminCommands) -> Result<()> {
     
     let storage: Arc<dyn Storage> = match config.database.backend {
         DatabaseBackend::Sqlite => {
-            Arc::new(SqliteStorage::new(&config.database.url).await?)
+            Arc::new(SqliteStorage::new(&config.database.url, config.database.max_connections).await?)
         }
         DatabaseBackend::Postgres => {
-            Arc::new(PostgresStorage::new(&config.database.url).await?)
+            Arc::new(PostgresStorage::new(&config.database.url, config.database.max_connections).await?)
         }
     };
 
@@ -135,21 +135,31 @@ async fn run_server() -> Result<()> {
     info!("Loaded configuration");
 
     // Initialize storage
-    let storage: Arc<dyn Storage> = match config.database.backend {
+    let base_storage: Arc<dyn Storage> = match config.database.backend {
         DatabaseBackend::Sqlite => {
             info!("Using SQLite storage: {}", config.database.url);
-            Arc::new(SqliteStorage::new(&config.database.url).await?)
+            Arc::new(SqliteStorage::new(&config.database.url, config.database.max_connections).await?)
         }
         DatabaseBackend::Postgres => {
             info!("Using PostgreSQL storage: {}", config.database.url);
-            Arc::new(PostgresStorage::new(&config.database.url).await?)
+            Arc::new(PostgresStorage::new(&config.database.url, config.database.max_connections).await?)
         }
     };
 
     // Initialize database
     info!("Initializing database...");
-    storage.init().await?;
+    base_storage.init().await?;
     info!("Database initialized successfully");
+
+    // Wrap with cached storage for performance
+    info!(
+        "Initializing cache with max {} entries and DB pool with max {} connections",
+        config.cache.max_entries, config.database.max_connections
+    );
+    let storage: Arc<dyn Storage> = Arc::new(CachedStorage::new(
+        base_storage,
+        config.cache.max_entries,
+    ));
 
     // Initialize auth service
     let auth_config = config.auth.clone();
