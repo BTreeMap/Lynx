@@ -1,5 +1,5 @@
 use crate::models::ShortenedUrl;
-use crate::storage::{Storage, StorageError, StorageResult};
+use crate::storage::{Storage, StorageResult};
 use anyhow::Result;
 use async_trait::async_trait;
 use dashmap::DashMap;

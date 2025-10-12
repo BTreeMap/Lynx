@@ -13,6 +13,7 @@ Lynx is a URL shortener backend API written in Rust with support for multiple st
 - 🔄 **Deactivation**: URLs can be deactivated and reactivated (e.g., for policy violations)
 - 👥 **Multi-User Support**: Each user can manage their own links; admins can manage all links
 - 🖥️ **Web Frontend**: React-based dashboard for managing URLs and viewing statistics
+- ⚡ **High Performance**: In-memory caching and write buffering for optimal performance (see [Performance Optimizations](docs/PERFORMANCE_OPTIMIZATIONS.md))
 
 ## Frontend
 
@@ -160,6 +161,8 @@ cp .env.example .env
 - `DATABASE_URL`: Database connection string
   - SQLite: `sqlite://./lynx.db`
   - PostgreSQL: `postgresql://user:password@localhost/lynx`
+- `DATABASE_MAX_CONNECTIONS`: Database connection pool size (default: `30`)
+- `CACHE_MAX_ENTRIES`: Maximum number of entries in the read cache (default: `500000`, approximately 100MB)
 - `API_HOST`: API server host (default: `127.0.0.1`)
 - `API_PORT`: API server port (default: `8080`)
 - `REDIRECT_HOST`: Redirect server host (default: `127.0.0.1`)
