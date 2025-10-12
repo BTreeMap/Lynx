@@ -43,13 +43,13 @@ async-trait = "0.1"
 
 # URL shortening
 rand = "0.9"
-statrs = "0.16"
+statrs = "0.18"
 
 # Environment variables
 dotenvy = "0.15"
 
 # Authentication
-jsonwebtoken = "9"
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 
@@ -61,4 +61,4 @@ mime_guess = "2"
 clap = { version = "4", features = ["derive"] }
 
 [build-dependencies]
-statrs = "0.16"
+statrs = "0.18"
