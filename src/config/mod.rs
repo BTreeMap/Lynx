@@ -9,12 +9,39 @@ pub struct Config {
     pub redirect_base_url: String,
     pub auth: AuthConfig,
     pub frontend: FrontendConfig,
+    pub cache: CacheConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheConfig {
+    #[serde(default = "CacheConfig::default_max_entries")]
+    pub max_entries: u64,
+    #[serde(default = "CacheConfig::default_flush_interval_secs")]
+    pub flush_interval_secs: u64,
+}
+
+impl CacheConfig {
+    const fn default_max_entries() -> u64 {
+        500_000
+    }
+
+    const fn default_flush_interval_secs() -> u64 {
+        5
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseConfig {
     pub backend: DatabaseBackend,
     pub url: String,
+    #[serde(default = "DatabaseConfig::default_max_connections")]
+    pub max_connections: u32,
+}
+
+impl DatabaseConfig {
+    const fn default_max_connections() -> u32 {
+        30
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +125,21 @@ impl Config {
 
         let database_url =
             std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://./lynx.db".to_string());
+
+        let database_max_connections = std::env::var("DATABASE_MAX_CONNECTIONS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or_else(DatabaseConfig::default_max_connections);
+
+        let cache_max_entries = std::env::var("CACHE_MAX_ENTRIES")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or_else(CacheConfig::default_max_entries);
+
+        let cache_flush_interval_secs = std::env::var("CACHE_FLUSH_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or_else(CacheConfig::default_flush_interval_secs);
 
         let api_host = std::env::var("API_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
         let api_port = std::env::var("API_PORT")
@@ -203,6 +245,7 @@ impl Config {
             database: DatabaseConfig {
                 backend,
                 url: database_url,
+                max_connections: database_max_connections,
             },
             api_server: ServerConfig {
                 host: api_host,
@@ -220,6 +263,10 @@ impl Config {
             },
             frontend: FrontendConfig {
                 static_dir: frontend_static_dir,
+            },
+            cache: CacheConfig {
+                max_entries: cache_max_entries,
+                flush_interval_secs: cache_flush_interval_secs,
             },
         })
     }
