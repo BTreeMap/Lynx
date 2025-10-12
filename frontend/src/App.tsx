@@ -4,7 +4,7 @@ import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 
 const AppContent: React.FC = () => {
-  const { token, isLoading } = useAuth();
+  const { authMode, token, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -12,6 +12,12 @@ const AppContent: React.FC = () => {
         Loading...
       </div>
     );
+  }
+
+  // For auth=none or cloudflare, go directly to dashboard
+  // For oauth, show login if no token
+  if (authMode === 'none' || authMode === 'cloudflare') {
+    return <Dashboard />;
   }
 
   return token ? <Dashboard /> : <Login />;

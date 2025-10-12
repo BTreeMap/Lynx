@@ -16,7 +16,7 @@ const Login: React.FC = () => {
     <div style={{ maxWidth: '400px', margin: '50px auto', padding: '20px' }}>
       <h1>Lynx URL Shortener</h1>
       <p style={{ marginBottom: '20px' }}>
-        Please enter your OAuth bearer token to continue.
+        Please enter your OAuth 2.0 bearer token to continue.
       </p>
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: '15px' }}>
@@ -28,7 +28,7 @@ const Login: React.FC = () => {
             id="token"
             value={token}
             onChange={(e) => setToken(e.target.value)}
-            placeholder="Enter your OAuth bearer token"
+            placeholder="Enter your OAuth 2.0 bearer token"
             style={{
               width: '100%',
               padding: '8px',
@@ -58,9 +58,9 @@ const Login: React.FC = () => {
       <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
         <h3 style={{ marginTop: 0, fontSize: '14px' }}>How to get a token:</h3>
         <ol style={{ fontSize: '13px', paddingLeft: '20px' }}>
-          <li>Obtain a token from your OAuth provider</li>
+          <li>Obtain a bearer token from your OAuth 2.0 provider</li>
           <li>Paste it in the field above</li>
-          <li>The token will be stored in your browser</li>
+          <li>The token will be stored in your browser's local storage</li>
         </ol>
       </div>
     </div>

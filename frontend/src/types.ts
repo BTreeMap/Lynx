@@ -19,6 +19,10 @@ export interface UserInfo {
   is_admin: boolean;
 }
 
+export interface AuthModeResponse {
+  mode: string;
+}
+
 export interface ErrorResponse {
   error: string;
 }

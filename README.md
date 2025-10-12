@@ -6,7 +6,7 @@ Lynx is a URL shortener backend API written in Rust with support for multiple st
 
 - 🔗 **URL Shortening**: Create short codes for long URLs with optional custom codes
 - 🗄️ **Extensible Storage**: Support for both SQLite and PostgreSQL backends
-- 🔐 **Access Control**: Optional OAuth 2.0 Bearer token authentication with configurable pass-through mode
+- 🔐 **Access Control**: OAuth 2.0 and Cloudflare Zero Trust authentication with configurable pass-through mode
 - 🚀 **Dual Server Architecture**: Separate ports for API management and client redirects
 - 📊 **Analytics**: Track click counts for each shortened URL
 - 🔒 **Immutable URLs**: URLs are immutable and can only be deactivated, not deleted or modified
@@ -164,12 +164,19 @@ cp .env.example .env
 - `API_PORT`: API server port (default: `8080`)
 - `REDIRECT_HOST`: Redirect server host (default: `127.0.0.1`)
 - `REDIRECT_PORT`: Redirect server port (default: `3000`)
-- `AUTH_MODE`: Authentication mode (`none` or `oauth`, default: `none`)
+- `AUTH_MODE`: Authentication mode (`none`, `oauth`, or `cloudflare`, default: `none`)
 - `DISABLE_AUTH`: Legacy override alias for `AUTH_MODE=none`
-- `OAUTH_ISSUER_URL`: OpenID Connect issuer URL (required when `AUTH_MODE=oauth`)
-- `OAUTH_AUDIENCE`: Expected audience claim for incoming tokens (required when `AUTH_MODE=oauth`)
+
+**OAuth Configuration** (when `AUTH_MODE=oauth`):
+- `OAUTH_ISSUER_URL`: OpenID Connect issuer URL
+- `OAUTH_AUDIENCE`: Expected audience claim for incoming tokens
 - `OAUTH_JWKS_URL`: Optional JWKS endpoint override (defaults to issuer discovery document)
 - `OAUTH_JWKS_CACHE_SECS`: JWKS cache TTL in seconds (default: `300`)
+
+**Cloudflare Zero Trust Configuration** (when `AUTH_MODE=cloudflare`):
+- `CLOUDFLARE_TEAM_DOMAIN`: Your Cloudflare team domain (e.g., `https://your-team.cloudflareaccess.com`)
+- `CLOUDFLARE_AUDIENCE`: Application Audience (AUD) tag from your Access Application
+- `CLOUDFLARE_CERTS_CACHE_SECS`: Certificate cache TTL in seconds (default: `86400`)
 
 ## Running
 
@@ -321,7 +328,24 @@ REDIRECT_PORT=3000
 AUTH_MODE=none
 ```
 
-### Using PostgreSQL (Production)
+### Using PostgreSQL with Cloudflare Zero Trust (Production)
+
+```bash
+# .env file
+DATABASE_BACKEND=postgres
+DATABASE_URL=postgresql://lynx_user:secure_password@localhost/lynx
+API_HOST=0.0.0.0
+API_PORT=8080
+REDIRECT_HOST=0.0.0.0
+REDIRECT_PORT=3000
+AUTH_MODE=cloudflare
+CLOUDFLARE_TEAM_DOMAIN=https://your-team.cloudflareaccess.com
+CLOUDFLARE_AUDIENCE=abc123def456...your-aud-tag
+```
+
+See [Cloudflare Zero Trust Setup Guide](docs/CLOUDFLARE_SETUP.md) for detailed configuration instructions.
+
+### Using PostgreSQL with OAuth (Production)
 
 ```bash
 # .env file
@@ -387,7 +411,29 @@ REDIRECT_PORT=3000
 AUTH_MODE=none
 ```
 
-With `AUTH_MODE=none` (or `DISABLE_AUTH=true` for backward compatibility), no authentication is required for management endpoints.
+With `AUTH_MODE=none` (or `DISABLE_AUTH=true` for backward compatibility), no authentication is required for management endpoints. All users are automatically granted admin privileges and URLs are associated with a legacy user account.
+
+## Admin Management
+
+When using `AUTH_MODE=oauth` or `AUTH_MODE=cloudflare`, you can manually promote users to admin using the CLI:
+
+```bash
+# Promote a user to admin
+./lynx admin promote <user-id> <auth-method>
+
+# Example for Cloudflare
+./lynx admin promote "google-oauth2|123456" cloudflare
+
+# List all manually promoted admins
+./lynx admin list
+
+# Demote a user from admin
+./lynx admin demote <user-id> <auth-method>
+```
+
+**Note:** Admin status from OAuth/Cloudflare JWT claims takes precedence. Manual promotion only applies when the JWT doesn't grant admin status.
+
+For detailed Cloudflare Zero Trust setup, see [Cloudflare Setup Guide](docs/CLOUDFLARE_SETUP.md).
 
 ## Deployment with Reverse Proxy
 

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ShortenedUrl, CreateUrlRequest, UserInfo, SuccessResponse } from './types';
+import type { ShortenedUrl, CreateUrlRequest, UserInfo, SuccessResponse, AuthModeResponse } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -17,6 +17,11 @@ api.interceptors.request.use((config) => {
 });
 
 export const apiClient = {
+  async getAuthMode(): Promise<AuthModeResponse> {
+    const { data } = await api.get<AuthModeResponse>('/auth/mode');
+    return data;
+  },
+
   async getUserInfo(): Promise<UserInfo> {
     const { data } = await api.get<UserInfo>('/user/info');
     return data;
