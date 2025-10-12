@@ -46,19 +46,43 @@ CACHE_MAX_ENTRIES=500000  # Default: 500,000 entries
 
 - Uses DashMap, a concurrent HashMap
 - Buffers click increments in memory
-- Flushes to database every 10 seconds via background task
+- Flushes to database every 5 seconds (configurable) via background task
 - Thread-safe for concurrent access from multiple requests
+- Graceful shutdown handling ensures buffered data is persisted
 
 ### Benefits
 
-- Reduces database writes from 1 per redirect to batched writes every 10 seconds
+- Reduces database writes from 1 per redirect to batched writes every few seconds
 - Eliminates write contention on hot URLs
 - Allows the redirect endpoint to return faster (no database write in request path)
 
+### Real-time Statistics
+
+The implementation combines buffered data with database results to provide real-time click statistics:
+- `GET /api/urls/:code` endpoint returns current database clicks + buffered clicks
+- `GET /api/urls` list endpoint returns combined data for all URLs
+- Users see real-time statistics without waiting for buffer flush
+
+### Graceful Shutdown
+
+The system handles shutdown signals (SIGINT, SIGTERM) gracefully:
+- When shutdown signal is received, the buffer is immediately flushed to database
+- Ensures no buffered click data is lost during normal shutdown
+- Only hard kills (SIGKILL) may result in data loss
+
+### Configuration
+
+Set the flush interval via environment variable:
+
+```bash
+CACHE_FLUSH_INTERVAL_SECS=5  # Default: 5 seconds
+```
+
 ### Trade-offs
 
-- Click statistics may be delayed by up to 10 seconds
-- In-progress clicks are lost if the application crashes (acceptable trade-off for a URL shortener)
+- Click statistics in the database may be delayed by up to the flush interval
+- Buffered clicks not yet flushed are lost if the application crashes (hard kill)
+- This is an acceptable trade-off for a URL shortener where exact real-time persistence is less critical than performance
 
 ## Database Connection Pooling
 
@@ -97,12 +121,26 @@ With these optimizations:
    - Cache hit rate of 90%+ for typical traffic patterns
    - Reduced database load allows horizontal scaling
 
+4. **Real-time Statistics**
+   - Users see real-time click counts by combining buffered and persisted data
+   - No delay in statistics visibility despite write buffering
+
 ## Monitoring
 
 The application logs cache configuration at startup:
 
 ```
-Initializing cache with max 500000 entries and DB pool with max 30 connections
+Initializing cache with max 500000 entries, 5 second flush interval, and DB pool with max 30 connections
+```
+
+On shutdown, you'll see:
+
+```
+Received shutdown signal (SIGINT), initiating graceful shutdown...
+Flushing cached data before shutdown...
+Shutdown signal received, flushing click buffer...
+Click buffer flushed successfully on shutdown
+Shutdown complete
 ```
 
 ## Testing
@@ -111,8 +149,7 @@ To verify the optimizations are working:
 
 1. Create a short URL
 2. Access it multiple times rapidly
-3. Check the click count via the API - it will show 0 initially
-4. Wait 10+ seconds
-5. Check again - clicks will now be visible
+3. Check the click count via the API - it will show real-time data immediately
+4. The data is written to database every flush interval seconds
+5. On graceful shutdown (CTRL+C), buffered data is flushed automatically
 
-This demonstrates that clicks are being buffered and flushed periodically.

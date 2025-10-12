@@ -153,13 +153,15 @@ async fn run_server() -> Result<()> {
 
     // Wrap with cached storage for performance
     info!(
-        "Initializing cache with max {} entries and DB pool with max {} connections",
-        config.cache.max_entries, config.database.max_connections
+        "Initializing cache with max {} entries, {} second flush interval, and DB pool with max {} connections",
+        config.cache.max_entries, config.cache.flush_interval_secs, config.database.max_connections
     );
-    let storage: Arc<dyn Storage> = Arc::new(CachedStorage::new(
+    let cached_storage = Arc::new(CachedStorage::new(
         base_storage,
         config.cache.max_entries,
+        config.cache.flush_interval_secs,
     ));
+    let storage: Arc<dyn Storage> = Arc::clone(&cached_storage) as Arc<dyn Storage>;
 
     // Initialize auth service
     let auth_config = config.auth.clone();
@@ -226,11 +228,38 @@ async fn run_server() -> Result<()> {
     let redirect_listener = tokio::net::TcpListener::bind(&redirect_addr).await?;
     info!("🚀 Redirect server listening on http://{}", redirect_addr);
 
-    // Run both servers concurrently
-    tokio::try_join!(
-        axum::serve(api_listener, api_router),
-        axum::serve(redirect_listener, redirect_router),
-    )?;
+    // Set up graceful shutdown signal
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    
+    // Spawn signal handler
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to install CTRL+C signal handler");
+        info!("Received shutdown signal (SIGINT), initiating graceful shutdown...");
+        let _ = shutdown_tx.send(());
+    });
 
+    // Run both servers concurrently with graceful shutdown
+    let api_server = axum::serve(api_listener, api_router)
+        .with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        });
+    
+    let redirect_server = axum::serve(redirect_listener, redirect_router);
+
+    // Run servers
+    let result = tokio::select! {
+        result = api_server => result,
+        result = redirect_server => result,
+    };
+
+    // Flush cached data on shutdown
+    info!("Flushing cached data before shutdown...");
+    cached_storage.shutdown();
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    info!("Shutdown complete");
+
+    result?;
     Ok(())
 }

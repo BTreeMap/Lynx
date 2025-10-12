@@ -6,6 +6,7 @@ use dashmap::DashMap;
 use moka::future::Cache;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::watch;
 use tokio::time;
 
 /// Cached storage wrapper that implements read caching and write buffering
@@ -16,26 +17,43 @@ pub struct CachedStorage {
     read_cache: Cache<String, Option<ShortenedUrl>>,
     /// Write buffer for click increments (DashMap)
     click_buffer: Arc<DashMap<String, u64>>,
+    /// Shutdown signal sender
+    shutdown_tx: watch::Sender<bool>,
 }
 
 impl CachedStorage {
-    pub fn new(inner: Arc<dyn Storage>, max_cache_entries: u64) -> Self {
+    pub fn new(inner: Arc<dyn Storage>, max_cache_entries: u64, flush_interval_secs: u64) -> Self {
         let read_cache = Cache::builder()
             .max_capacity(max_cache_entries)
             .time_to_live(Duration::from_secs(300)) // 5 minutes TTL
             .build();
 
         let click_buffer = Arc::new(DashMap::new());
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
 
         // Start background task to flush click buffer periodically
         let storage = Arc::clone(&inner);
         let buffer = Arc::clone(&click_buffer);
         tokio::spawn(async move {
-            let mut interval = time::interval(Duration::from_secs(10));
+            let mut interval = time::interval(Duration::from_secs(flush_interval_secs));
             loop {
-                interval.tick().await;
-                if let Err(e) = flush_click_buffer(&storage, &buffer).await {
-                    tracing::error!("Failed to flush click buffer: {}", e);
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if let Err(e) = flush_click_buffer(&storage, &buffer).await {
+                            tracing::error!("Failed to flush click buffer: {}", e);
+                        }
+                    }
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            tracing::info!("Shutdown signal received, flushing click buffer...");
+                            if let Err(e) = flush_click_buffer(&storage, &buffer).await {
+                                tracing::error!("Failed to flush click buffer on shutdown: {}", e);
+                            } else {
+                                tracing::info!("Click buffer flushed successfully on shutdown");
+                            }
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -44,7 +62,21 @@ impl CachedStorage {
             inner,
             read_cache,
             click_buffer,
+            shutdown_tx,
         }
+    }
+
+    /// Signal shutdown to flush buffered data
+    pub fn shutdown(&self) {
+        let _ = self.shutdown_tx.send(true);
+    }
+
+    /// Get buffered click count for a short code
+    fn get_buffered_clicks(&self, short_code: &str) -> u64 {
+        self.click_buffer
+            .get(short_code)
+            .map(|entry| *entry.value())
+            .unwrap_or(0)
     }
 
     /// Invalidate cache entry for a specific short code
@@ -109,14 +141,23 @@ impl Storage for CachedStorage {
 
     async fn get(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {
         // Try to get from cache first
-        if let Some(cached) = self.read_cache.get(short_code).await {
+        if let Some(mut cached) = self.read_cache.get(short_code).await {
+            // Update click count with buffered data if URL exists
+            if let Some(ref mut url) = cached {
+                url.clicks += self.get_buffered_clicks(short_code) as i64;
+            }
             return Ok(cached);
         }
 
         // Cache miss - fetch from underlying storage
-        let result = self.inner.get(short_code).await?;
+        let mut result = self.inner.get(short_code).await?;
 
-        // Cache the result (including None for non-existent codes)
+        // Add buffered clicks to the result
+        if let Some(ref mut url) = result {
+            url.clicks += self.get_buffered_clicks(short_code) as i64;
+        }
+
+        // Cache the result from database (without buffered clicks to avoid double-counting)
         self.read_cache
             .insert(short_code.to_string(), result.clone())
             .await;
@@ -163,8 +204,15 @@ impl Storage for CachedStorage {
         is_admin: bool,
         user_id: Option<&str>,
     ) -> Result<Vec<ShortenedUrl>> {
-        // List operations are not cached as they can be large and change frequently
-        self.inner.list(limit, offset, is_admin, user_id).await
+        // Get results from database
+        let mut urls = self.inner.list(limit, offset, is_admin, user_id).await?;
+
+        // Add buffered clicks to each URL
+        for url in &mut urls {
+            url.clicks += self.get_buffered_clicks(&url.short_code) as i64;
+        }
+
+        Ok(urls)
     }
 
     async fn upsert_user(

@@ -16,11 +16,17 @@ pub struct Config {
 pub struct CacheConfig {
     #[serde(default = "CacheConfig::default_max_entries")]
     pub max_entries: u64,
+    #[serde(default = "CacheConfig::default_flush_interval_secs")]
+    pub flush_interval_secs: u64,
 }
 
 impl CacheConfig {
     const fn default_max_entries() -> u64 {
         500_000
+    }
+
+    const fn default_flush_interval_secs() -> u64 {
+        5
     }
 }
 
@@ -129,6 +135,11 @@ impl Config {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or_else(CacheConfig::default_max_entries);
+
+        let cache_flush_interval_secs = std::env::var("CACHE_FLUSH_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or_else(CacheConfig::default_flush_interval_secs);
 
         let api_host = std::env::var("API_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
         let api_port = std::env::var("API_PORT")
@@ -255,6 +266,7 @@ impl Config {
             },
             cache: CacheConfig {
                 max_entries: cache_max_entries,
+                flush_interval_secs: cache_flush_interval_secs,
             },
         })
     }
