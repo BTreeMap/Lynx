@@ -1,6 +1,7 @@
 use crate::models::ShortenedUrl;
 use anyhow::Result;
 use async_trait::async_trait;
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -12,6 +13,26 @@ pub enum StorageError {
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;
+
+/// Metadata about a storage lookup operation
+#[derive(Debug, Clone)]
+pub struct LookupMetadata {
+    /// Whether the result was served from cache
+    pub cache_hit: bool,
+    /// Time spent in cache lookup (if cache hit)
+    pub cache_duration: Option<Duration>,
+    /// Time spent in database lookup (if cache miss)
+    pub db_duration: Option<Duration>,
+}
+
+/// Result of a storage lookup with metadata
+#[derive(Debug, Clone)]
+pub struct LookupResult {
+    /// The URL data, if found
+    pub url: Option<ShortenedUrl>,
+    /// Metadata about the lookup operation
+    pub metadata: LookupMetadata,
+}
 
 #[async_trait]
 pub trait Storage: Send + Sync {
@@ -28,8 +49,8 @@ pub trait Storage: Send + Sync {
 
     // Additional helper methods may be added for automatic code generation if storage-backed.
 
-    /// Get a shortened URL by short code (may serve cached, potentially stale statistics)
-    async fn get(&self, short_code: &str) -> Result<Option<ShortenedUrl>>;
+    /// Get a shortened URL by short code with metadata (cache hit/miss, timing info)
+    async fn get(&self, short_code: &str) -> Result<LookupResult>;
 
     /// Get a shortened URL by short code with authoritative statistics
     async fn get_authoritative(&self, short_code: &str) -> Result<Option<ShortenedUrl>>;

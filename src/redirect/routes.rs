@@ -9,7 +9,7 @@ pub fn create_redirect_router(storage: Arc<dyn Storage>) -> Router {
     let state = Arc::new(RedirectState { storage });
 
     Router::new()
-        .route("/health", get(health_check))
+        .route("/", get(health_check))
         .route("/{code}", get(redirect_url))
         .with_state(state)
 }

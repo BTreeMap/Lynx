@@ -203,6 +203,11 @@ All endpoints require a valid OAuth 2.0 Bearer token in the `Authorization` head
 
 ```bash
 GET /health
+
+Response: 200 OK
+{
+  "message": "OK"
+}
 ```
 
 #### Create Shortened URL
@@ -304,7 +309,12 @@ No authentication required.
 #### Health Check
 
 ```bash
-GET /health
+GET /
+
+Response: 200 OK
+{
+  "status": "OK"
+}
 ```
 
 #### Redirect to Original URL
@@ -314,7 +324,17 @@ GET /:code
 
 Response: 301 Permanent Redirect
 Location: https://example.com/original/url
+X-Lynx-Cache-Hit: true
+X-Lynx-Timing-Total-Ms: 1
+X-Lynx-Timing-Cache-Ms: 0
+X-Lynx-Timing-Db-Ms: 0
 ```
+
+The redirect endpoint includes tracing headers to help monitor performance:
+- `X-Lynx-Cache-Hit`: Whether the URL was served from cache (`true`) or database (`false`)
+- `X-Lynx-Timing-Total-Ms`: Total request processing time in milliseconds
+- `X-Lynx-Timing-Cache-Ms`: Time spent in cache lookup in milliseconds (measured for both hits and misses to detect contention)
+- `X-Lynx-Timing-Db-Ms`: Time spent in database lookup in milliseconds (0 if cache hit)
 
 ## Example Usage
 
