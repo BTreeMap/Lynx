@@ -26,7 +26,8 @@ jobs:
 
       - name: Pull Docker image
         run: |
-          docker pull ghcr.io/${{ github.repository }}:latest.amd64
+          # Pull the latest AMD64 image (manifest will resolve to correct platform)
+          docker pull ghcr.io/${{ github.repository }}:latest
 
       - name: Start Lynx with SQLite
         run: |
@@ -41,7 +42,7 @@ jobs:
             -e API_PORT=8080 \
             -e REDIRECT_HOST=0.0.0.0 \
             -e REDIRECT_PORT=3000 \
-            ghcr.io/${{ github.repository }}:latest.amd64
+            ghcr.io/${{ github.repository }}:latest
 
       - name: Wait for service to be ready
         run: |
@@ -183,7 +184,8 @@ jobs:
 
       - name: Pull Docker image
         run: |
-          docker pull ghcr.io/${{ github.repository }}:latest.amd64
+          # Pull the latest AMD64 image (manifest will resolve to correct platform)
+          docker pull ghcr.io/${{ github.repository }}:latest
 
       - name: Start Lynx with PostgreSQL
         run: |
@@ -197,7 +199,7 @@ jobs:
             -e API_PORT=8080 \
             -e REDIRECT_HOST=0.0.0.0 \
             -e REDIRECT_PORT=3000 \
-            ghcr.io/${{ github.repository }}:latest.amd64
+            ghcr.io/${{ github.repository }}:latest
 
       - name: Wait for service to be ready
         run: |

@@ -240,8 +240,7 @@ fi
 echo ""
 echo "Test 19: Test statistics accuracy"
 # Create a new URL with unique code (must be <= 20 chars)
-timestamp=$(date +%s)
-unique_code="st${timestamp:1:9}"
+unique_code="st$RANDOM$RANDOM"
 response=$(curl -s -X POST "$API_URL/api/urls" \
     -H "Content-Type: application/json" \
     -d "{\"url\": \"https://example.com/stats\", \"custom_code\": \"$unique_code\"}")
