@@ -1,0 +1,309 @@
+name: Integration and Data Consistency Tests
+
+on:
+  workflow_run:
+    workflows: ["Build and Publish Docker image to GHCR"]
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  test-sqlite:
+    name: Test SQLite Backend
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull Docker image
+        run: |
+          # Pull the latest AMD64 image (manifest will resolve to correct platform)
+          docker pull ghcr.io/${{ github.repository }}:latest
+
+      - name: Start Lynx with SQLite
+        run: |
+          docker run -d \
+            --name lynx-sqlite \
+            -p 8080:8080 \
+            -p 3000:3000 \
+            -e DATABASE_BACKEND=sqlite \
+            -e DATABASE_URL=sqlite:///home/lynx/lynx.db \
+            -e AUTH_MODE=none \
+            -e API_HOST=0.0.0.0 \
+            -e API_PORT=8080 \
+            -e REDIRECT_HOST=0.0.0.0 \
+            -e REDIRECT_PORT=3000 \
+            ghcr.io/${{ github.repository }}:latest
+
+      - name: Wait for service to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -f http://localhost:8080/api/health > /dev/null 2>&1; then
+              echo "Service is ready!"
+              break
+            fi
+            echo "Waiting for service... ($i/30)"
+            sleep 2
+          done
+          curl http://localhost:8080/api/health || exit 1
+
+      - name: Run comprehensive API tests
+        run: |
+          bash tests/integration_test.sh http://localhost:8080 http://localhost:3000
+
+      - name: Run concurrent load test
+        run: |
+          bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 100
+
+      - name: Test graceful shutdown with SIGTERM
+        run: |
+          # Create some links and generate traffic
+          for i in {1..10}; do
+            curl -X POST http://localhost:8080/api/urls \
+              -H "Content-Type: application/json" \
+              -d "{\"url\": \"https://example.com/sigterm-$i\", \"custom_code\": \"sigterm-$i\"}"
+          done
+          
+          # Generate concurrent traffic
+          for i in {1..10}; do
+            curl -L http://localhost:3000/sigterm-$i > /dev/null 2>&1 &
+          done
+          
+          sleep 1
+          
+          # Send SIGTERM
+          docker kill --signal=SIGTERM lynx-sqlite
+          
+          # Wait for graceful shutdown
+          sleep 7
+          
+          # Restart and verify data
+          docker start lynx-sqlite
+          sleep 5
+          
+          # Check that data was persisted
+          for i in {1..10}; do
+            response=$(curl -s http://localhost:8080/api/urls/sigterm-$i)
+            echo "Checking sigterm-$i: $response"
+            if echo "$response" | grep -q "sigterm-$i"; then
+              echo "✓ Data persisted for sigterm-$i"
+            else
+              echo "✗ Data lost for sigterm-$i"
+              exit 1
+            fi
+          done
+
+      - name: Test graceful shutdown with SIGINT
+        run: |
+          # Create some links and generate traffic
+          for i in {1..10}; do
+            curl -X POST http://localhost:8080/api/urls \
+              -H "Content-Type: application/json" \
+              -d "{\"url\": \"https://example.com/sigint-$i\", \"custom_code\": \"sigint-$i\"}"
+          done
+          
+          # Generate concurrent traffic
+          for i in {1..10}; do
+            curl -L http://localhost:3000/sigint-$i > /dev/null 2>&1 &
+          done
+          
+          sleep 1
+          
+          # Send SIGINT
+          docker kill --signal=SIGINT lynx-sqlite
+          
+          # Wait for graceful shutdown
+          sleep 7
+          
+          # Restart and verify data
+          docker start lynx-sqlite
+          sleep 5
+          
+          # Check that data was persisted
+          for i in {1..10}; do
+            response=$(curl -s http://localhost:8080/api/urls/sigint-$i)
+            echo "Checking sigint-$i: $response"
+            if echo "$response" | grep -q "sigint-$i"; then
+              echo "✓ Data persisted for sigint-$i"
+            else
+              echo "✗ Data lost for sigint-$i"
+              exit 1
+            fi
+          done
+
+      - name: Collect logs
+        if: always()
+        run: |
+          docker logs lynx-sqlite || true
+
+      - name: Stop SQLite container
+        if: always()
+        run: |
+          docker stop lynx-sqlite || true
+          docker rm lynx-sqlite || true
+
+  test-postgres:
+    name: Test PostgreSQL Backend
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lynx
+          POSTGRES_PASSWORD: lynx_password
+          POSTGRES_DB: lynx
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull Docker image
+        run: |
+          # Pull the latest AMD64 image (manifest will resolve to correct platform)
+          docker pull ghcr.io/${{ github.repository }}:latest
+
+      - name: Start Lynx with PostgreSQL
+        run: |
+          docker run -d \
+            --name lynx-postgres \
+            --network host \
+            -e DATABASE_BACKEND=postgres \
+            -e DATABASE_URL=postgresql://lynx:lynx_password@localhost:5432/lynx \
+            -e AUTH_MODE=none \
+            -e API_HOST=0.0.0.0 \
+            -e API_PORT=8080 \
+            -e REDIRECT_HOST=0.0.0.0 \
+            -e REDIRECT_PORT=3000 \
+            ghcr.io/${{ github.repository }}:latest
+
+      - name: Wait for service to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -f http://localhost:8080/api/health > /dev/null 2>&1; then
+              echo "Service is ready!"
+              break
+            fi
+            echo "Waiting for service... ($i/30)"
+            sleep 2
+          done
+          curl http://localhost:8080/api/health || exit 1
+
+      - name: Run comprehensive API tests
+        run: |
+          bash tests/integration_test.sh http://localhost:8080 http://localhost:3000
+
+      - name: Run concurrent load test
+        run: |
+          bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 100
+
+      - name: Test graceful shutdown with SIGTERM
+        run: |
+          # Create some links and generate traffic
+          for i in {1..10}; do
+            curl -X POST http://localhost:8080/api/urls \
+              -H "Content-Type: application/json" \
+              -d "{\"url\": \"https://example.com/pg-sigterm-$i\", \"custom_code\": \"pg-sigterm-$i\"}"
+          done
+          
+          # Generate concurrent traffic
+          for i in {1..10}; do
+            curl -L http://localhost:3000/pg-sigterm-$i > /dev/null 2>&1 &
+          done
+          
+          sleep 1
+          
+          # Send SIGTERM
+          docker kill --signal=SIGTERM lynx-postgres
+          
+          # Wait for graceful shutdown
+          sleep 7
+          
+          # Restart and verify data
+          docker start lynx-postgres
+          sleep 5
+          
+          # Check that data was persisted
+          for i in {1..10}; do
+            response=$(curl -s http://localhost:8080/api/urls/pg-sigterm-$i)
+            echo "Checking pg-sigterm-$i: $response"
+            if echo "$response" | grep -q "pg-sigterm-$i"; then
+              echo "✓ Data persisted for pg-sigterm-$i"
+            else
+              echo "✗ Data lost for pg-sigterm-$i"
+              exit 1
+            fi
+          done
+
+      - name: Test graceful shutdown with SIGINT
+        run: |
+          # Create some links and generate traffic
+          for i in {1..10}; do
+            curl -X POST http://localhost:8080/api/urls \
+              -H "Content-Type: application/json" \
+              -d "{\"url\": \"https://example.com/pg-sigint-$i\", \"custom_code\": \"pg-sigint-$i\"}"
+          done
+          
+          # Generate concurrent traffic
+          for i in {1..10}; do
+            curl -L http://localhost:3000/pg-sigint-$i > /dev/null 2>&1 &
+          done
+          
+          sleep 1
+          
+          # Send SIGINT
+          docker kill --signal=SIGINT lynx-postgres
+          
+          # Wait for graceful shutdown
+          sleep 7
+          
+          # Restart and verify data
+          docker start lynx-postgres
+          sleep 5
+          
+          # Check that data was persisted
+          for i in {1..10}; do
+            response=$(curl -s http://localhost:8080/api/urls/pg-sigint-$i)
+            echo "Checking pg-sigint-$i: $response"
+            if echo "$response" | grep -q "pg-sigint-$i"; then
+              echo "✓ Data persisted for pg-sigint-$i"
+            else
+              echo "✗ Data lost for pg-sigint-$i"
+              exit 1
+            fi
+          done
+
+      - name: Collect logs
+        if: always()
+        run: |
+          docker logs lynx-postgres || true
+
+      - name: Stop PostgreSQL container
+        if: always()
+        run: |
+          docker stop lynx-postgres || true
+          docker rm lynx-postgres || true
