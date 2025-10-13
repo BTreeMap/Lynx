@@ -2,12 +2,13 @@ use axum::{
     extract::{Path, State},
     http::{header::HeaderMap, StatusCode},
     response::{IntoResponse, Redirect},
-    Json,
+    Extension, Json,
 };
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::middleware::RequestStart;
 use crate::storage::Storage;
 
 pub struct RedirectState {
@@ -18,8 +19,9 @@ pub struct RedirectState {
 pub async fn redirect_url(
     State(state): State<Arc<RedirectState>>,
     Path(code): Path<String>,
+    Extension(RequestStart(request_start)): Extension<RequestStart>,
 ) -> impl IntoResponse {
-    let start = Instant::now();
+    let handler_start = Instant::now();
 
     // Get URL with metadata
     let lookup_result = state.storage.get(&code).await;
@@ -46,14 +48,12 @@ pub async fn redirect_url(
                             .into_response();
                     }
 
-                    // Increment clicks asynchronously (fire and forget)
-                    let storage = Arc::clone(&state.storage);
-                    let code_clone = code.clone();
-                    tokio::spawn(async move {
-                        let _ = storage.increment_click(&code_clone).await;
-                    });
+                    if let Err(err) = state.storage.increment_click(&code).await {
+                        tracing::warn!(short_code = %code, error = %err, "failed to buffer click increment");
+                    }
 
-                    let total_time = start.elapsed();
+                    let handler_time = handler_start.elapsed();
+                    let total_time = request_start.elapsed();
 
                     // Create headers with tracing info
                     let mut headers = HeaderMap::new();
@@ -72,6 +72,10 @@ pub async fn redirect_url(
                     headers.insert(
                         "x-lynx-timing-db-ms",
                         db_time_ms.to_string().parse().unwrap(),
+                    );
+                    headers.insert(
+                        "x-lynx-timing-handler-ms",
+                        handler_time.as_millis().to_string().parse().unwrap(),
                     );
 
                     // Redirect with headers
