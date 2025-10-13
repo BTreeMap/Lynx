@@ -62,6 +62,7 @@ This architecture provides:
 - **Dual Flush Intervals**: 
   - Fast flush (Layer 1 → Layer 2): 100ms default - keeps statistics fresh
   - Slow flush (Layer 2 → Layer 3): 5s default - batches database writes
+- **Non-blocking Database Writes**: Slow flush spawns in background task, doesn't block click ingestion
 - **Backpressure**: Blocking channel sends prevent message loss during high load
 - **No Lock Contention**: Layer 1 is single-threaded, eliminating all synchronization overhead
 - **Concurrent Reads**: Layer 2 (DashMap) allows concurrent reads during database writes
@@ -72,6 +73,7 @@ This architecture provides:
 - **Eliminates all lock contention** on hot URLs via single-threaded actor buffer
 - Allows the redirect endpoint to return faster (no database write in request path)
 - Scales to 10,000+ concurrent requests on same URL without performance degradation
+- **Database writes happen in background** - slow DB operations never block click ingestion
 - Actor processes hundreds of thousands of increments per second with minimal overhead
 
 ### Real-time Statistics

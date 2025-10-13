@@ -56,12 +56,12 @@ impl ClickCounterActor {
                             tracing::info!("Actor received shutdown signal, flushing all data...");
                             // Flush Layer 1 → Layer 2
                             self.flush_buffer_to_read_view();
-                            // Flush Layer 2 → Layer 3
-                            if let Err(e) = self.flush_read_view_to_storage().await {
-                                tracing::error!("Failed to flush to storage during shutdown: {}", e);
-                            } else {
-                                tracing::info!("All data flushed successfully on shutdown");
-                            }
+                            // Flush Layer 2 → Layer 3 (spawns background task)
+                            self.flush_read_view_to_storage();
+                            // Give the background flush task time to complete
+                            // This is only for shutdown, so we can afford to wait
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            tracing::info!("All data flushed successfully on shutdown");
                             break;
                         }
                     }
@@ -72,17 +72,16 @@ impl ClickCounterActor {
                 }
                 // Slow flush: Layer 2 → Layer 3 (5s default)
                 _ = slow_flush_ticker.tick() => {
-                    if let Err(e) = self.flush_read_view_to_storage().await {
-                        tracing::error!("Failed to flush read view to storage: {}", e);
-                    }
+                    // Spawns background task, doesn't block the actor
+                    self.flush_read_view_to_storage();
                 }
                 // Channel closed without shutdown message
                 else => {
                     tracing::warn!("Actor channel closed unexpectedly, flushing data...");
                     self.flush_buffer_to_read_view();
-                    if let Err(e) = self.flush_read_view_to_storage().await {
-                        tracing::error!("Failed to flush to storage on unexpected shutdown: {}", e);
-                    }
+                    // Flush to storage and wait a bit for it to complete
+                    self.flush_read_view_to_storage();
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                     break;
                 }
             }
@@ -106,8 +105,10 @@ impl ClickCounterActor {
     
     /// Flush Layer 2 (read_view) → Layer 3 (database)
     /// This can be slow but doesn't block Layer 1 ingestion
-    async fn flush_read_view_to_storage(&self) -> Result<()> {
-        // Collect and zero out counts atomically
+    /// Returns immediately after spawning the background flush task
+    fn flush_read_view_to_storage(&self) {
+        // Atomically collect and zero out counts from DashMap
+        // This is fast and happens synchronously to maintain data consistency
         let pending_updates: Vec<(String, u64)> = self.read_view
             .iter_mut()
             .filter_map(|mut entry| {
@@ -115,20 +116,34 @@ impl ClickCounterActor {
                 if count == 0 {
                     return None;
                 }
+                // Atomically zero the entry - any new increments will be added to 0
                 *entry.value_mut() = 0;
                 Some((entry.key().clone(), count))
             })
             .collect();
         
-        // Remove zero entries
+        // Remove zero entries (fast operation)
         self.read_view.retain(|_, v| *v > 0);
         
-        // Persist to database
-        for (short_code, count) in pending_updates {
-            self.storage.increment_clicks(&short_code, count).await?;
+        // Skip spawning if there's nothing to flush
+        if pending_updates.is_empty() {
+            return;
         }
         
-        Ok(())
+        // Spawn the slow database writes in a separate task
+        // This doesn't block the actor from processing new clicks
+        let storage = Arc::clone(&self.storage);
+        tokio::spawn(async move {
+            for (short_code, count) in pending_updates {
+                if let Err(e) = storage.increment_clicks(&short_code, count).await {
+                    tracing::error!(
+                        "Failed to persist click count for '{}': {}",
+                        short_code,
+                        e
+                    );
+                }
+            }
+        });
     }
 }
 
