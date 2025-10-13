@@ -2,9 +2,11 @@ use crate::models::ShortenedUrl;
 use crate::storage::{LookupMetadata, LookupResult, Storage, StorageError, StorageResult};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use std::convert::TryFrom;
+use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -14,9 +16,21 @@ pub struct SqliteStorage {
 
 impl SqliteStorage {
     pub async fn new(database_url: &str, max_connections: u32) -> Result<Self> {
+        let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
+
+        let db_path = options.get_filename();
+
+        if db_path != Path::new(":memory:") {
+            if let Some(parent) = db_path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+            }
+        }
+
         let pool = SqlitePoolOptions::new()
             .max_connections(max_connections)
-            .connect(database_url)
+            .connect_with(options)
             .await?;
         Ok(Self {
             pool: Arc::new(pool),

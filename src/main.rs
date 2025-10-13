@@ -157,7 +157,7 @@ async fn run_server() -> Result<()> {
     // Wrap with cached storage for performance
     info!(
         "Initializing cache with max {} entries, {} second DB flush interval, {} ms actor flush interval, and {} actor buffer size",
-        config.cache.max_entries, 
+        config.cache.max_entries,
         config.cache.flush_interval_secs,
         config.cache.actor_flush_interval_ms,
         config.cache.actor_buffer_size
@@ -244,12 +244,12 @@ async fn run_server() -> Result<()> {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{signal, SignalKind};
-            
-            let mut sigint = signal(SignalKind::interrupt())
-                .expect("Failed to install SIGINT signal handler");
-            let mut sigterm = signal(SignalKind::terminate())
-                .expect("Failed to install SIGTERM signal handler");
-            
+
+            let mut sigint =
+                signal(SignalKind::interrupt()).expect("Failed to install SIGINT signal handler");
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to install SIGTERM signal handler");
+
             tokio::select! {
                 _ = sigint.recv() => {
                     info!("Received shutdown signal (SIGINT), initiating graceful shutdown...");
@@ -259,7 +259,7 @@ async fn run_server() -> Result<()> {
                 }
             }
         }
-        
+
         #[cfg(not(unix))]
         {
             tokio::signal::ctrl_c()
@@ -267,7 +267,7 @@ async fn run_server() -> Result<()> {
                 .expect("Failed to install CTRL+C signal handler");
             info!("Received shutdown signal (SIGINT), initiating graceful shutdown...");
         }
-        
+
         let _ = shutdown_tx.send(());
     });
 

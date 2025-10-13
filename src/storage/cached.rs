@@ -38,11 +38,11 @@ impl ClickCounterActor {
     async fn run(mut self) {
         let mut fast_flush_ticker = time::interval(self.fast_flush_interval);
         let mut slow_flush_ticker = time::interval(self.slow_flush_interval);
-        
+
         // Skip the first tick which fires immediately
         fast_flush_ticker.tick().await;
         slow_flush_ticker.tick().await;
-        
+
         loop {
             tokio::select! {
                 // Handle incoming click events
@@ -93,14 +93,14 @@ impl ClickCounterActor {
             }
         }
     }
-    
+
     /// Flush Layer 1 (buffer) → Layer 2 (read_view DashMap)
     /// This is fast and non-blocking
     fn flush_buffer_to_read_view(&mut self) {
         if self.buffer.is_empty() {
             return;
         }
-        
+
         for (short_code, count) in self.buffer.drain() {
             self.read_view
                 .entry(short_code)
@@ -108,14 +108,15 @@ impl ClickCounterActor {
                 .or_insert(count);
         }
     }
-    
+
     /// Flush Layer 2 (read_view) → Layer 3 (database)
     /// This can be slow but doesn't block Layer 1 ingestion
     /// Returns a JoinHandle to the background flush task
     fn flush_read_view_to_storage(&self) -> Option<tokio::task::JoinHandle<()>> {
         // Atomically collect and zero out counts from DashMap
         // This is fast and happens synchronously to maintain data consistency
-        let pending_updates: Vec<(String, u64)> = self.read_view
+        let pending_updates: Vec<(String, u64)> = self
+            .read_view
             .iter_mut()
             .filter_map(|mut entry| {
                 let count = *entry.value();
@@ -127,15 +128,15 @@ impl ClickCounterActor {
                 Some((entry.key().clone(), count))
             })
             .collect();
-        
+
         // Remove zero entries (fast operation)
         self.read_view.retain(|_, v| *v > 0);
-        
+
         // Skip spawning if there's nothing to flush
         if pending_updates.is_empty() {
             return None;
         }
-        
+
         // Spawn the slow database writes in a separate task
         // This doesn't block the actor from processing new clicks
         // Return the JoinHandle so callers can optionally wait for completion
@@ -143,11 +144,7 @@ impl ClickCounterActor {
         Some(tokio::spawn(async move {
             for (short_code, count) in pending_updates {
                 if let Err(e) = storage.increment_clicks(&short_code, count).await {
-                    tracing::error!(
-                        "Failed to persist click count for '{}': {}",
-                        short_code,
-                        e
-                    );
+                    tracing::error!("Failed to persist click count for '{}': {}", short_code, e);
                 }
             }
         }))
@@ -178,13 +175,13 @@ impl CachedStorage {
     ) -> Self {
         let read_cache = Cache::builder().max_capacity(max_cache_entries).build();
         let read_view = Arc::new(DashMap::new());
-        
+
         // Create actor channel with large buffer to prevent message loss
         let (actor_tx, actor_rx) = mpsc::channel(actor_buffer_size);
-        
+
         // Backward compatibility shutdown channel
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-        
+
         // Spawn the click counter actor
         let actor = ClickCounterActor {
             receiver: actor_rx,
@@ -194,7 +191,7 @@ impl CachedStorage {
             fast_flush_interval: Duration::from_millis(actor_flush_interval_ms),
             slow_flush_interval: Duration::from_secs(flush_interval_secs),
         };
-        
+
         tokio::spawn(async move {
             actor.run().await;
         });
@@ -215,7 +212,7 @@ impl CachedStorage {
         tokio::spawn(async move {
             let _ = tx.send(ActorMessage::Shutdown).await;
         });
-        
+
         // Also signal the old shutdown channel for backward compatibility
         let _ = self.shutdown_tx.send(true);
     }
@@ -233,7 +230,6 @@ impl CachedStorage {
         self.read_cache.invalidate(short_code).await;
     }
 }
-
 
 #[async_trait]
 impl Storage for CachedStorage {
@@ -348,7 +344,7 @@ impl Storage for CachedStorage {
             // Clone the sender to avoid holding a reference
             let tx = self.actor_tx.clone();
             let short_code = short_code.to_string();
-            
+
             // Use blocking send to ensure no data loss
             // This applies backpressure if the actor buffer is full
             if let Err(e) = tx.send(ActorMessage::IncrementClick(short_code)).await {
