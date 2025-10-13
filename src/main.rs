@@ -156,13 +156,18 @@ async fn run_server() -> Result<()> {
 
     // Wrap with cached storage for performance
     info!(
-        "Initializing cache with max {} entries, {} second flush interval, and DB pool with max {} connections",
-        config.cache.max_entries, config.cache.flush_interval_secs, config.database.max_connections
+        "Initializing cache with max {} entries, {} second DB flush interval, {} ms actor flush interval, and {} actor buffer size",
+        config.cache.max_entries, 
+        config.cache.flush_interval_secs,
+        config.cache.actor_flush_interval_ms,
+        config.cache.actor_buffer_size
     );
     let cached_storage = Arc::new(CachedStorage::new(
         base_storage,
         config.cache.max_entries,
         config.cache.flush_interval_secs,
+        config.cache.actor_buffer_size,
+        config.cache.actor_flush_interval_ms,
     ));
     let storage: Arc<dyn Storage> = Arc::clone(&cached_storage) as Arc<dyn Storage>;
 
@@ -234,12 +239,35 @@ async fn run_server() -> Result<()> {
     // Set up graceful shutdown signal
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-    // Spawn signal handler
+    // Spawn signal handler for both SIGINT and SIGTERM
     tokio::spawn(async move {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to install CTRL+C signal handler");
-        info!("Received shutdown signal (SIGINT), initiating graceful shutdown...");
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            
+            let mut sigint = signal(SignalKind::interrupt())
+                .expect("Failed to install SIGINT signal handler");
+            let mut sigterm = signal(SignalKind::terminate())
+                .expect("Failed to install SIGTERM signal handler");
+            
+            tokio::select! {
+                _ = sigint.recv() => {
+                    info!("Received shutdown signal (SIGINT), initiating graceful shutdown...");
+                }
+                _ = sigterm.recv() => {
+                    info!("Received shutdown signal (SIGTERM), initiating graceful shutdown...");
+                }
+            }
+        }
+        
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("Failed to install CTRL+C signal handler");
+            info!("Received shutdown signal (SIGINT), initiating graceful shutdown...");
+        }
+        
         let _ = shutdown_tx.send(());
     });
 
@@ -259,7 +287,8 @@ async fn run_server() -> Result<()> {
     // Flush cached data on shutdown
     info!("Flushing cached data before shutdown...");
     cached_storage.shutdown();
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    // Wait longer to ensure both fast and slow flushes complete
+    tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
     info!("Shutdown complete");
 
     result?;
