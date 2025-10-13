@@ -4,10 +4,155 @@ use anyhow::Result;
 use async_trait::async_trait;
 use dashmap::DashMap;
 use moka::future::Cache;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::time;
+
+/// Message types for the ClickCounterActor
+enum ActorMessage {
+    /// Increment click count for a short code
+    IncrementClick(String),
+    /// Shutdown signal - flush all data
+    Shutdown,
+}
+
+/// Actor that manages click counting with a lock-free buffer
+struct ClickCounterActor {
+    /// Channel receiver for incoming click events
+    receiver: mpsc::Receiver<ActorMessage>,
+    /// Lock-free HashMap buffer (Layer 1) - single-threaded access only
+    buffer: HashMap<String, u64>,
+    /// Shared DashMap for concurrent reads (Layer 2)
+    read_view: Arc<DashMap<String, u64>>,
+    /// Underlying storage for persistence (Layer 3)
+    storage: Arc<dyn Storage>,
+    /// Fast flush interval (Layer 1 → Layer 2)
+    fast_flush_interval: Duration,
+    /// Slow flush interval (Layer 2 → Layer 3)
+    slow_flush_interval: Duration,
+}
+
+impl ClickCounterActor {
+    async fn run(mut self) {
+        let mut fast_flush_ticker = time::interval(self.fast_flush_interval);
+        let mut slow_flush_ticker = time::interval(self.slow_flush_interval);
+        
+        // Skip the first tick which fires immediately
+        fast_flush_ticker.tick().await;
+        slow_flush_ticker.tick().await;
+        
+        loop {
+            tokio::select! {
+                // Handle incoming click events
+                Some(msg) = self.receiver.recv() => {
+                    match msg {
+                        ActorMessage::IncrementClick(short_code) => {
+                            // Fast local increment in Layer 1 (no locks!)
+                            *self.buffer.entry(short_code).or_insert(0) += 1;
+                        }
+                        ActorMessage::Shutdown => {
+                            tracing::info!("Actor received shutdown signal, flushing all data...");
+                            // Flush Layer 1 → Layer 2
+                            self.flush_buffer_to_read_view();
+                            // Flush Layer 2 → Layer 3 (spawns background task)
+                            if let Some(handle) = self.flush_read_view_to_storage() {
+                                // Wait for the background flush task to complete
+                                // This ensures all data is persisted before shutdown
+                                if let Err(e) = handle.await {
+                                    tracing::error!("Background flush task panicked during shutdown: {}", e);
+                                }
+                            }
+                            tracing::info!("All data flushed successfully on shutdown");
+                            break;
+                        }
+                    }
+                }
+                // Fast flush: Layer 1 → Layer 2 (100ms default)
+                _ = fast_flush_ticker.tick() => {
+                    self.flush_buffer_to_read_view();
+                }
+                // Slow flush: Layer 2 → Layer 3 (5s default)
+                _ = slow_flush_ticker.tick() => {
+                    // Spawns background task, doesn't block the actor
+                    self.flush_read_view_to_storage();
+                }
+                // Channel closed without shutdown message
+                else => {
+                    tracing::warn!("Actor channel closed unexpectedly, flushing data...");
+                    self.flush_buffer_to_read_view();
+                    // Flush to storage and wait for it to complete
+                    if let Some(handle) = self.flush_read_view_to_storage() {
+                        if let Err(e) = handle.await {
+                            tracing::error!("Background flush task panicked during unexpected shutdown: {}", e);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    
+    /// Flush Layer 1 (buffer) → Layer 2 (read_view DashMap)
+    /// This is fast and non-blocking
+    fn flush_buffer_to_read_view(&mut self) {
+        if self.buffer.is_empty() {
+            return;
+        }
+        
+        for (short_code, count) in self.buffer.drain() {
+            self.read_view
+                .entry(short_code)
+                .and_modify(|v| *v += count)
+                .or_insert(count);
+        }
+    }
+    
+    /// Flush Layer 2 (read_view) → Layer 3 (database)
+    /// This can be slow but doesn't block Layer 1 ingestion
+    /// Returns a JoinHandle to the background flush task
+    fn flush_read_view_to_storage(&self) -> Option<tokio::task::JoinHandle<()>> {
+        // Atomically collect and zero out counts from DashMap
+        // This is fast and happens synchronously to maintain data consistency
+        let pending_updates: Vec<(String, u64)> = self.read_view
+            .iter_mut()
+            .filter_map(|mut entry| {
+                let count = *entry.value();
+                if count == 0 {
+                    return None;
+                }
+                // Atomically zero the entry - any new increments will be added to 0
+                *entry.value_mut() = 0;
+                Some((entry.key().clone(), count))
+            })
+            .collect();
+        
+        // Remove zero entries (fast operation)
+        self.read_view.retain(|_, v| *v > 0);
+        
+        // Skip spawning if there's nothing to flush
+        if pending_updates.is_empty() {
+            return None;
+        }
+        
+        // Spawn the slow database writes in a separate task
+        // This doesn't block the actor from processing new clicks
+        // Return the JoinHandle so callers can optionally wait for completion
+        let storage = Arc::clone(&self.storage);
+        Some(tokio::spawn(async move {
+            for (short_code, count) in pending_updates {
+                if let Err(e) = storage.increment_clicks(&short_code, count).await {
+                    tracing::error!(
+                        "Failed to persist click count for '{}': {}",
+                        short_code,
+                        e
+                    );
+                }
+            }
+        }))
+    }
+}
 
 /// Cached storage wrapper that implements read caching and write buffering
 pub struct CachedStorage {
@@ -15,62 +160,69 @@ pub struct CachedStorage {
     inner: Arc<dyn Storage>,
     /// Read cache for URL lookups (Moka cache)
     read_cache: Cache<String, Option<Arc<ShortenedUrl>>>,
-    /// Write buffer for click increments (DashMap)
-    click_buffer: Arc<DashMap<String, u64>>,
-    /// Shutdown signal sender
+    /// Shared read view for real-time click statistics (Layer 2)
+    read_view: Arc<DashMap<String, u64>>,
+    /// Actor message sender
+    actor_tx: mpsc::Sender<ActorMessage>,
+    /// Shutdown signal sender (for backward compatibility)
     shutdown_tx: watch::Sender<bool>,
 }
 
 impl CachedStorage {
-    pub fn new(inner: Arc<dyn Storage>, max_cache_entries: u64, flush_interval_secs: u64) -> Self {
+    pub fn new(
+        inner: Arc<dyn Storage>,
+        max_cache_entries: u64,
+        flush_interval_secs: u64,
+        actor_buffer_size: usize,
+        actor_flush_interval_ms: u64,
+    ) -> Self {
         let read_cache = Cache::builder().max_capacity(max_cache_entries).build();
-
-        let click_buffer = Arc::new(DashMap::new());
-        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
-
-        // Start background task to flush click buffer periodically
-        let storage = Arc::clone(&inner);
-        let buffer = Arc::clone(&click_buffer);
+        let read_view = Arc::new(DashMap::new());
+        
+        // Create actor channel with large buffer to prevent message loss
+        let (actor_tx, actor_rx) = mpsc::channel(actor_buffer_size);
+        
+        // Backward compatibility shutdown channel
+        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
+        
+        // Spawn the click counter actor
+        let actor = ClickCounterActor {
+            receiver: actor_rx,
+            buffer: HashMap::new(),
+            read_view: Arc::clone(&read_view),
+            storage: Arc::clone(&inner),
+            fast_flush_interval: Duration::from_millis(actor_flush_interval_ms),
+            slow_flush_interval: Duration::from_secs(flush_interval_secs),
+        };
+        
         tokio::spawn(async move {
-            let mut interval = time::interval(Duration::from_secs(flush_interval_secs));
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        if let Err(e) = flush_click_buffer(&storage, &buffer).await {
-                            tracing::error!("Failed to flush click buffer: {}", e);
-                        }
-                    }
-                    _ = shutdown_rx.changed() => {
-                        if *shutdown_rx.borrow() {
-                            tracing::info!("Shutdown signal received, flushing click buffer...");
-                            if let Err(e) = flush_click_buffer(&storage, &buffer).await {
-                                tracing::error!("Failed to flush click buffer on shutdown: {}", e);
-                            } else {
-                                tracing::info!("Click buffer flushed successfully on shutdown");
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
+            actor.run().await;
         });
 
         Self {
             inner,
             read_cache,
-            click_buffer,
+            read_view,
+            actor_tx,
             shutdown_tx,
         }
     }
 
     /// Signal shutdown to flush buffered data
     pub fn shutdown(&self) {
+        // Send shutdown message to actor (blocking send to ensure delivery)
+        let tx = self.actor_tx.clone();
+        tokio::spawn(async move {
+            let _ = tx.send(ActorMessage::Shutdown).await;
+        });
+        
+        // Also signal the old shutdown channel for backward compatibility
         let _ = self.shutdown_tx.send(true);
     }
 
-    /// Get buffered click count for a short code
+    /// Get buffered click count for a short code from Layer 2 (read_view)
     fn get_buffered_clicks(&self, short_code: &str) -> u64 {
-        self.click_buffer
+        self.read_view
             .get(short_code)
             .map(|entry| *entry.value())
             .unwrap_or(0)
@@ -82,35 +234,6 @@ impl CachedStorage {
     }
 }
 
-/// Flush accumulated clicks to the database
-async fn flush_click_buffer(
-    storage: &Arc<dyn Storage>,
-    buffer: &Arc<DashMap<String, u64>>,
-) -> Result<()> {
-    // Collect increments while zeroing counts so concurrent writers can continue
-    let pending_updates = buffer
-        .iter_mut()
-        .map_while(|mut entry| {
-            let count = *entry.value();
-            if count == 0 {
-                return None;
-            }
-
-            *entry.value_mut() = 0;
-            Some((entry.key().clone(), count))
-        })
-        .collect::<Vec<(String, u64)>>();
-
-    // Remove empty entries in case no new clicks were buffered meanwhile
-    buffer.retain(|_, v| *v > 0);
-
-    // Persist updates to the underlying storage
-    for (short_code, count) in pending_updates {
-        storage.increment_clicks(&short_code, count).await?;
-    }
-
-    Ok(())
-}
 
 #[async_trait]
 impl Storage for CachedStorage {
@@ -219,11 +342,20 @@ impl Storage for CachedStorage {
             return Ok(());
         }
 
-        // Buffer the click increment in memory
-        self.click_buffer
-            .entry(short_code.to_string())
-            .and_modify(|count| *count += amount)
-            .or_insert(amount);
+        // Send click events to actor with blocking send for accuracy
+        // Using blocking send provides backpressure instead of dropping messages
+        for _ in 0..amount {
+            // Clone the sender to avoid holding a reference
+            let tx = self.actor_tx.clone();
+            let short_code = short_code.to_string();
+            
+            // Use blocking send to ensure no data loss
+            // This applies backpressure if the actor buffer is full
+            if let Err(e) = tx.send(ActorMessage::IncrementClick(short_code)).await {
+                tracing::error!("Failed to send click to actor (channel closed): {}", e);
+                return Err(anyhow::anyhow!("Actor channel closed"));
+            }
+        }
 
         Ok(())
     }

@@ -18,6 +18,10 @@ pub struct CacheConfig {
     pub max_entries: u64,
     #[serde(default = "CacheConfig::default_flush_interval_secs")]
     pub flush_interval_secs: u64,
+    #[serde(default = "CacheConfig::default_actor_buffer_size")]
+    pub actor_buffer_size: usize,
+    #[serde(default = "CacheConfig::default_actor_flush_interval_ms")]
+    pub actor_flush_interval_ms: u64,
 }
 
 impl CacheConfig {
@@ -27,6 +31,14 @@ impl CacheConfig {
 
     const fn default_flush_interval_secs() -> u64 {
         5
+    }
+
+    const fn default_actor_buffer_size() -> usize {
+        1_000_000
+    }
+
+    const fn default_actor_flush_interval_ms() -> u64 {
+        100
     }
 }
 
@@ -140,6 +152,16 @@ impl Config {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or_else(CacheConfig::default_flush_interval_secs);
+
+        let actor_buffer_size = std::env::var("ACTOR_BUFFER_SIZE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or_else(CacheConfig::default_actor_buffer_size);
+
+        let actor_flush_interval_ms = std::env::var("ACTOR_FLUSH_INTERVAL_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or_else(CacheConfig::default_actor_flush_interval_ms);
 
         let api_host = std::env::var("API_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
         let api_port = std::env::var("API_PORT")
@@ -267,6 +289,8 @@ impl Config {
             cache: CacheConfig {
                 max_entries: cache_max_entries,
                 flush_interval_secs: cache_flush_interval_secs,
+                actor_buffer_size,
+                actor_flush_interval_ms,
             },
         })
     }
