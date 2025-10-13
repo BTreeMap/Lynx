@@ -21,16 +21,18 @@ pub async fn redirect_url(
 ) -> impl IntoResponse {
     let start = Instant::now();
     
-    // Measure lookup time and get cache hit info
-    let lookup_start = Instant::now();
-    let lookup_result = state.storage.get_with_metadata(&code).await;
-    let lookup_time = lookup_start.elapsed();
+    // Get URL with metadata
+    let lookup_result = state.storage.get(&code).await;
     
     match lookup_result {
         Ok(result) => {
             let cache_hit = result.metadata.cache_hit;
-            let cache_time_ms = if cache_hit { lookup_time.as_millis() } else { 0 };
-            let db_time_ms = if cache_hit { 0 } else { lookup_time.as_millis() };
+            let cache_time_ms = result.metadata.cache_duration
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let db_time_ms = result.metadata.db_duration
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
             
             match result.url {
                 Some(url) => {
@@ -59,10 +61,6 @@ pub async fn redirect_url(
                     headers.insert(
                         "x-lynx-timing-total-ms",
                         total_time.as_millis().to_string().parse().unwrap(),
-                    );
-                    headers.insert(
-                        "x-lynx-timing-lookup-ms",
-                        lookup_time.as_millis().to_string().parse().unwrap(),
                     );
                     headers.insert(
                         "x-lynx-timing-cache-ms",

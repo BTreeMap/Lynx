@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use moka::future::Cache;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tokio::time;
 
@@ -140,43 +140,39 @@ impl Storage for CachedStorage {
         Ok(result)
     }
 
-    async fn get(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {
+    async fn get(&self, short_code: &str) -> Result<LookupResult> {
         // Try to get from cache first
+        let cache_start = Instant::now();
         if let Some(cached) = self.read_cache.get(short_code).await {
-            return Ok(cached);
+            let cache_duration = cache_start.elapsed();
+            return Ok(LookupResult {
+                url: cached,
+                metadata: LookupMetadata {
+                    cache_hit: true,
+                    cache_duration: Some(cache_duration),
+                    db_duration: None,
+                },
+            });
         }
+        let cache_duration = cache_start.elapsed();
 
         // Cache miss - fetch from underlying storage
+        let db_start = Instant::now();
         let result = self.inner.get(short_code).await?;
+        let db_duration = db_start.elapsed();
 
         // Cache the result from database (without buffered clicks to avoid double-counting)
         self.read_cache
-            .insert(short_code.to_string(), result.clone())
-            .await;
-
-        Ok(result)
-    }
-
-    async fn get_with_metadata(&self, short_code: &str) -> Result<LookupResult> {
-        // Try to get from cache first
-        if let Some(cached) = self.read_cache.get(short_code).await {
-            return Ok(LookupResult {
-                url: cached,
-                metadata: LookupMetadata { cache_hit: true },
-            });
-        }
-
-        // Cache miss - fetch from underlying storage
-        let result = self.inner.get(short_code).await?;
-
-        // Cache the result from database
-        self.read_cache
-            .insert(short_code.to_string(), result.clone())
+            .insert(short_code.to_string(), result.url.clone())
             .await;
 
         Ok(LookupResult {
-            url: result,
-            metadata: LookupMetadata { cache_hit: false },
+            url: result.url,
+            metadata: LookupMetadata {
+                cache_hit: false,
+                cache_duration: Some(cache_duration),
+                db_duration: Some(db_duration),
+            },
         })
     }
 

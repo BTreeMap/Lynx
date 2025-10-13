@@ -326,7 +326,6 @@ Response: 301 Permanent Redirect
 Location: https://example.com/original/url
 X-Lynx-Cache-Hit: true
 X-Lynx-Timing-Total-Ms: 1
-X-Lynx-Timing-Lookup-Ms: 0
 X-Lynx-Timing-Cache-Ms: 0
 X-Lynx-Timing-Db-Ms: 0
 ```
@@ -334,9 +333,8 @@ X-Lynx-Timing-Db-Ms: 0
 The redirect endpoint includes tracing headers to help monitor performance:
 - `X-Lynx-Cache-Hit`: Whether the URL was served from cache (`true`) or database (`false`)
 - `X-Lynx-Timing-Total-Ms`: Total request processing time in milliseconds
-- `X-Lynx-Timing-Lookup-Ms`: Time spent looking up the URL in milliseconds
-- `X-Lynx-Timing-Cache-Ms`: Time spent in cache lookup (0 if cache miss)
-- `X-Lynx-Timing-Db-Ms`: Time spent in database lookup (0 if cache hit)
+- `X-Lynx-Timing-Cache-Ms`: Time spent in cache lookup in milliseconds (measured for both hits and misses to detect contention)
+- `X-Lynx-Timing-Db-Ms`: Time spent in database lookup in milliseconds (0 if cache hit)
 
 ## Example Usage
 
