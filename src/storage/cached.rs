@@ -1,5 +1,5 @@
 use crate::models::ShortenedUrl;
-use crate::storage::{Storage, StorageResult};
+use crate::storage::{LookupMetadata, LookupResult, Storage, StorageResult};
 use anyhow::Result;
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -155,6 +155,29 @@ impl Storage for CachedStorage {
             .await;
 
         Ok(result)
+    }
+
+    async fn get_with_metadata(&self, short_code: &str) -> Result<LookupResult> {
+        // Try to get from cache first
+        if let Some(cached) = self.read_cache.get(short_code).await {
+            return Ok(LookupResult {
+                url: cached,
+                metadata: LookupMetadata { cache_hit: true },
+            });
+        }
+
+        // Cache miss - fetch from underlying storage
+        let result = self.inner.get(short_code).await?;
+
+        // Cache the result from database
+        self.read_cache
+            .insert(short_code.to_string(), result.clone())
+            .await;
+
+        Ok(LookupResult {
+            url: result,
+            metadata: LookupMetadata { cache_hit: false },
+        })
     }
 
     async fn get_authoritative(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {

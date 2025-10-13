@@ -13,6 +13,22 @@ pub enum StorageError {
 
 pub type StorageResult<T> = Result<T, StorageError>;
 
+/// Metadata about a storage lookup operation
+#[derive(Debug, Clone)]
+pub struct LookupMetadata {
+    /// Whether the result was served from cache
+    pub cache_hit: bool,
+}
+
+/// Result of a storage lookup with metadata
+#[derive(Debug, Clone)]
+pub struct LookupResult {
+    /// The URL data, if found
+    pub url: Option<ShortenedUrl>,
+    /// Metadata about the lookup operation
+    pub metadata: LookupMetadata,
+}
+
 #[async_trait]
 pub trait Storage: Send + Sync {
     /// Initialize the storage (run migrations, etc.)
@@ -30,6 +46,16 @@ pub trait Storage: Send + Sync {
 
     /// Get a shortened URL by short code (may serve cached, potentially stale statistics)
     async fn get(&self, short_code: &str) -> Result<Option<ShortenedUrl>>;
+
+    /// Get a shortened URL by short code with lookup metadata (cache hit/miss info)
+    async fn get_with_metadata(&self, short_code: &str) -> Result<LookupResult> {
+        // Default implementation for backward compatibility
+        let url = self.get(short_code).await?;
+        Ok(LookupResult {
+            url,
+            metadata: LookupMetadata { cache_hit: false },
+        })
+    }
 
     /// Get a shortened URL by short code with authoritative statistics
     async fn get_authoritative(&self, short_code: &str) -> Result<Option<ShortenedUrl>>;
