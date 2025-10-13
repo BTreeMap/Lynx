@@ -14,7 +14,7 @@ pub struct CachedStorage {
     /// Underlying storage implementation
     inner: Arc<dyn Storage>,
     /// Read cache for URL lookups (Moka cache)
-    read_cache: Cache<String, Option<ShortenedUrl>>,
+    read_cache: Cache<String, Option<Arc<ShortenedUrl>>>,
     /// Write buffer for click increments (DashMap)
     click_buffer: Arc<DashMap<String, u64>>,
     /// Shutdown signal sender
@@ -123,7 +123,7 @@ impl Storage for CachedStorage {
         short_code: &str,
         original_url: &str,
         created_by: Option<&str>,
-    ) -> StorageResult<ShortenedUrl> {
+    ) -> StorageResult<Arc<ShortenedUrl>> {
         let result = self
             .inner
             .create_with_code(short_code, original_url, created_by)
@@ -131,7 +131,7 @@ impl Storage for CachedStorage {
 
         // Cache the newly created URL
         self.read_cache
-            .insert(short_code.to_string(), Some(result.clone()))
+            .insert(short_code.to_string(), Some(Arc::clone(&result)))
             .await;
 
         Ok(result)
@@ -173,17 +173,20 @@ impl Storage for CachedStorage {
         })
     }
 
-    async fn get_authoritative(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {
-        let db_value = self.inner.get_authoritative(short_code).await?;
+    async fn get_authoritative(&self, short_code: &str) -> Result<Option<Arc<ShortenedUrl>>> {
+        let mut result = self.inner.get_authoritative(short_code).await?;
 
-        // Keep cache in sync with the latest database read
-        self.read_cache
-            .insert(short_code.to_string(), db_value.clone())
-            .await;
+        if let Some(url) = result.as_mut() {
+            let buffered = self.get_buffered_clicks(short_code);
+            if buffered > 0 {
+                Arc::make_mut(url).clicks += buffered as i64;
+            }
 
-        let mut result = db_value;
-        if let Some(ref mut url) = result {
-            url.clicks += self.get_buffered_clicks(short_code) as i64;
+            self.read_cache
+                .insert(short_code.to_string(), Some(Arc::clone(url)))
+                .await;
+        } else {
+            self.read_cache.insert(short_code.to_string(), None).await;
         }
 
         Ok(result)
@@ -231,13 +234,16 @@ impl Storage for CachedStorage {
         offset: i64,
         is_admin: bool,
         user_id: Option<&str>,
-    ) -> Result<Vec<ShortenedUrl>> {
+    ) -> Result<Vec<Arc<ShortenedUrl>>> {
         // Get results from database
         let mut urls = self.inner.list(limit, offset, is_admin, user_id).await?;
 
         // Add buffered clicks to each URL
         for url in &mut urls {
-            url.clicks += self.get_buffered_clicks(&url.short_code) as i64;
+            let buffered = self.get_buffered_clicks(&url.short_code);
+            if buffered > 0 {
+                Arc::make_mut(url).clicks += buffered as i64;
+            }
         }
 
         Ok(urls)

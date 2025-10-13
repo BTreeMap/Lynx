@@ -90,7 +90,7 @@ impl Storage for PostgresStorage {
         short_code: &str,
         original_url: &str,
         created_by: Option<&str>,
-    ) -> StorageResult<ShortenedUrl> {
+    ) -> StorageResult<Arc<ShortenedUrl>> {
         let created_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| StorageError::Other(e.into()))?
@@ -127,7 +127,7 @@ impl Storage for PostgresStorage {
         .await
         .map_err(|e| StorageError::Other(e.into()))?;
 
-        Ok(row)
+        Ok(Arc::new(row))
     }
 
     async fn get(&self, short_code: &str) -> Result<LookupResult> {
@@ -145,7 +145,7 @@ impl Storage for PostgresStorage {
         })
     }
 
-    async fn get_authoritative(&self, short_code: &str) -> Result<Option<ShortenedUrl>> {
+    async fn get_authoritative(&self, short_code: &str) -> Result<Option<Arc<ShortenedUrl>>> {
         let url = sqlx::query_as::<_, ShortenedUrl>(
             r#"
             SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
@@ -157,7 +157,7 @@ impl Storage for PostgresStorage {
         .fetch_optional(self.pool.as_ref())
         .await?;
 
-        Ok(url)
+        Ok(url.map(Arc::new))
     }
 
     async fn deactivate(&self, short_code: &str) -> Result<bool> {
@@ -218,7 +218,7 @@ impl Storage for PostgresStorage {
         offset: i64,
         is_admin: bool,
         user_id: Option<&str>,
-    ) -> Result<Vec<ShortenedUrl>> {
+    ) -> Result<Vec<Arc<ShortenedUrl>>> {
         let urls = if is_admin || user_id.is_none() {
             // Admin sees all URLs, or when auth is disabled (no user_id), show all
             sqlx::query_as::<_, ShortenedUrl>(
@@ -254,7 +254,7 @@ impl Storage for PostgresStorage {
             vec![]
         };
 
-        Ok(urls)
+        Ok(urls.into_iter().map(Arc::new).collect())
     }
 
     async fn upsert_user(

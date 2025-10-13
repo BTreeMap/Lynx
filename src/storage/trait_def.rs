@@ -1,6 +1,7 @@
 use crate::models::ShortenedUrl;
 use anyhow::Result;
 use async_trait::async_trait;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -29,7 +30,7 @@ pub struct LookupMetadata {
 #[derive(Debug, Clone)]
 pub struct LookupResult {
     /// The URL data, if found
-    pub url: Option<ShortenedUrl>,
+    pub url: Option<Arc<ShortenedUrl>>,
     /// Metadata about the lookup operation
     pub metadata: LookupMetadata,
 }
@@ -45,7 +46,7 @@ pub trait Storage: Send + Sync {
         short_code: &str,
         original_url: &str,
         created_by: Option<&str>,
-    ) -> StorageResult<ShortenedUrl>;
+    ) -> StorageResult<Arc<ShortenedUrl>>;
 
     // Additional helper methods may be added for automatic code generation if storage-backed.
 
@@ -53,7 +54,7 @@ pub trait Storage: Send + Sync {
     async fn get(&self, short_code: &str) -> Result<LookupResult>;
 
     /// Get a shortened URL by short code with authoritative statistics
-    async fn get_authoritative(&self, short_code: &str) -> Result<Option<ShortenedUrl>>;
+    async fn get_authoritative(&self, short_code: &str) -> Result<Option<Arc<ShortenedUrl>>>;
 
     /// Deactivate a shortened URL (soft delete)
     async fn deactivate(&self, short_code: &str) -> Result<bool>;
@@ -78,7 +79,7 @@ pub trait Storage: Send + Sync {
         offset: i64,
         is_admin: bool,
         user_id: Option<&str>,
-    ) -> Result<Vec<ShortenedUrl>>;
+    ) -> Result<Vec<Arc<ShortenedUrl>>>;
 
     /// Register or update user metadata
     async fn upsert_user(

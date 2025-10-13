@@ -32,13 +32,13 @@ pub struct SuccessResponse {
 #[derive(Serialize)]
 pub struct ShortenedUrlResponse {
     #[serde(flatten)]
-    pub inner: ShortenedUrl,
+    pub inner: Arc<ShortenedUrl>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redirect_base_url: Option<String>,
 }
 
 impl ShortenedUrlResponse {
-    fn with_base(url: ShortenedUrl, base: Option<&str>) -> Self {
+    fn with_base(url: Arc<ShortenedUrl>, base: Option<&str>) -> Self {
         Self {
             inner: url,
             redirect_base_url: base.map(|value| value.to_owned()),
@@ -100,7 +100,7 @@ async fn create_with_random_code(
     storage: &dyn Storage,
     original_url: &str,
     created_by: Option<&str>,
-) -> Result<ShortenedUrl, StorageError> {
+) -> Result<Arc<ShortenedUrl>, StorageError> {
     for length in MIN_SHORT_CODE_LENGTH..=MAX_SHORT_CODE_LENGTH {
         let mut attempts = 0usize;
         let mut failures = 0usize;
