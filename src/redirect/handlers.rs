@@ -20,25 +20,30 @@ pub async fn redirect_url(
     Path(code): Path<String>,
 ) -> impl IntoResponse {
     let start = Instant::now();
-    
+
     // Get URL with metadata
     let lookup_result = state.storage.get(&code).await;
-    
+
     match lookup_result {
         Ok(result) => {
             let cache_hit = result.metadata.cache_hit;
-            let cache_time_ms = result.metadata.cache_duration
+            let cache_time_ms = result
+                .metadata
+                .cache_duration
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
-            let db_time_ms = result.metadata.db_duration
+            let db_time_ms = result
+                .metadata
+                .db_duration
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
-            
+
             match result.url {
                 Some(url) => {
                     // Check if URL is active
                     if !url.is_active {
-                        return (StatusCode::GONE, "This link has been deactivated").into_response();
+                        return (StatusCode::GONE, "This link has been deactivated")
+                            .into_response();
                     }
 
                     // Increment clicks asynchronously (fire and forget)
@@ -49,14 +54,12 @@ pub async fn redirect_url(
                     });
 
                     let total_time = start.elapsed();
-                    
+
                     // Create headers with tracing info
                     let mut headers = HeaderMap::new();
                     headers.insert(
                         "x-lynx-cache-hit",
-                        if cache_hit { "true" } else { "false" }
-                            .parse()
-                            .unwrap(),
+                        if cache_hit { "true" } else { "false" }.parse().unwrap(),
                     );
                     headers.insert(
                         "x-lynx-timing-total-ms",
@@ -87,7 +90,7 @@ pub async fn health_check() -> impl IntoResponse {
     struct HealthResponse {
         status: String,
     }
-    
+
     Json(HealthResponse {
         status: "OK".to_string(),
     })

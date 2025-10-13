@@ -23,10 +23,7 @@ pub struct CachedStorage {
 
 impl CachedStorage {
     pub fn new(inner: Arc<dyn Storage>, max_cache_entries: u64, flush_interval_secs: u64) -> Self {
-        let read_cache = Cache::builder()
-            .max_capacity(max_cache_entries)
-            .time_to_live(Duration::from_secs(300)) // 5 minutes TTL
-            .build();
+        let read_cache = Cache::builder().max_capacity(max_cache_entries).build();
 
         let click_buffer = Arc::new(DashMap::new());
         let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
