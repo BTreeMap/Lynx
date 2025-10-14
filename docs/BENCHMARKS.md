@@ -329,9 +329,10 @@ Track trends over time:
 
 ## Related Documentation
 
-- [Performance Optimizations](../docs/PERFORMANCE_OPTIMIZATIONS.md) - Detailed explanation of caching and optimization strategies
-- [Integration Tests](./README.md) - Functional correctness tests
-- [Concurrent Tests](./concurrent_test.sh) - Concurrency and data consistency tests
+- [Interpreting Benchmark Results](./BENCHMARK_RESULTS.md) - How to read and analyze benchmark output
+- [Performance Optimizations](./PERFORMANCE_OPTIMIZATIONS.md) - Detailed explanation of caching and optimization strategies
+- [Integration Tests](../tests/README.md) - Functional correctness tests
+- [Concurrent Tests](../tests/concurrent_test.sh) - Concurrency and data consistency tests
 
 ## Contributing
 
