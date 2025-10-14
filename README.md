@@ -505,8 +505,20 @@ cargo build
 ### Running Tests
 
 ```bash
+# Unit and integration tests
 cargo test
+
+# Functional integration tests (requires running service)
+bash tests/integration_test.sh http://localhost:8080 http://localhost:3000
+
+# Concurrent load tests
+bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 100
+
+# Performance benchmarks (requires wrk)
+bash tests/benchmark.sh http://localhost:8080 http://localhost:3000 ./results 30s
 ```
+
+See [tests/README.md](tests/README.md) for comprehensive testing documentation and [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for performance benchmark details.
 
 ### Running with Logging
 
@@ -521,6 +533,25 @@ RUST_LOG=debug cargo run
 3. **Network Isolation**: Consider running the API server on a private network
 4. **Rate Limiting**: Implement rate limiting at the reverse proxy level
 5. **Database Credentials**: Use strong database passwords and restrict network access
+
+## Documentation
+
+### Core Documentation
+
+- [Performance Optimizations](docs/PERFORMANCE_OPTIMIZATIONS.md) - Detailed explanation of caching strategies and actor pattern
+- [Performance Benchmarks](docs/BENCHMARKS.md) - Comprehensive benchmarking guide and methodology
+- [Benchmark Results](docs/BENCHMARK_RESULTS.md) - How to interpret and analyze benchmark output
+
+### Testing Documentation
+
+- [Tests Overview](tests/README.md) - Integration, concurrent, and benchmark test documentation
+- [Frontend README](frontend/README.md) - Frontend development and deployment guide
+
+### GitHub Actions Workflows
+
+- **Build and Publish** - Builds Docker images for amd64 and arm64, publishes to GHCR
+- **Integration Tests** - Runs functional tests on SQLite and PostgreSQL backends
+- **Performance Benchmarks** - Measures throughput and latency under various load conditions
 
 ## License
 

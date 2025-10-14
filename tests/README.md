@@ -58,9 +58,48 @@ bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 100
 bash tests/concurrent_test.sh http://api.example.com http://r.example.com 200
 ```
 
-## GitHub Actions Workflow
+### `benchmark.sh`
+Performance benchmark suite to measure throughput and latency under various load conditions:
 
-The `.github/workflows/integration-tests.yml` workflow automatically runs these tests:
+**Focus Areas:**
+1. **Redirect Endpoint** (primary focus - caching optimizations)
+   - Single hot URL @ 1000 concurrency
+   - Single hot URL @ 5000 concurrency  
+   - Distributed load across 100 URLs
+   - Extreme load @ 10,000 concurrency
+2. **Management Endpoints** (expected lower performance - database queries)
+   - POST /api/urls (create)
+   - GET /api/urls/:code (read single)
+   - GET /api/urls (list)
+   - PUT /api/urls/:code/deactivate (update)
+   - GET /api/health (health check)
+
+**Tools Used:**
+- **wrk**: High-performance HTTP benchmarking (primary)
+- **Apache Bench (ab)**: Fallback for simple scenarios
+
+**Metrics Collected:**
+- Requests per second (RPS)
+- Latency percentiles (p50, p90, p99)
+- Error rates
+- Transfer rates
+
+**Usage:**
+```bash
+bash tests/benchmark.sh [API_URL] [REDIRECT_URL] [OUTPUT_DIR] [DURATION]
+
+# Examples:
+bash tests/benchmark.sh http://localhost:8080 http://localhost:3000 ./results 30s
+bash tests/benchmark.sh http://localhost:8080 http://localhost:3000 ./results 60s
+```
+
+**See Also:** [BENCHMARKS.md](../docs/BENCHMARKS.md) for detailed documentation
+
+## GitHub Actions Workflows
+
+### Integration Tests (`.github/workflows/integration-tests.yml`)
+
+Automatically runs functional and data consistency tests:
 
 **Triggers:**
 - After successful Docker image build
@@ -80,6 +119,34 @@ Both backends are tested with:
 **Requirements:**
 - Docker image must be published to GHCR
 - Tests run on ubuntu-24.04 (linux/amd64)
+
+### Performance Benchmarks (`.github/workflows/performance-benchmark.yml`)
+
+Automatically runs performance benchmarks to validate caching optimizations:
+
+**Triggers:**
+- After successful Docker image build
+- Manual workflow dispatch (with configurable duration)
+
+**Configuration:**
+- Database: PostgreSQL 16
+- Network: `--network host` (bypasses userland proxy for max performance)
+- Cache: 500k entries, 5s flush interval, 100ms actor flush
+- Connections: 50 database connections
+
+**Tests:**
+- Redirect endpoint at various concurrency levels (1k, 5k, 10k)
+- All management endpoints (POST, GET, PUT)
+- Mixed workload scenarios
+
+**Outputs:**
+- Detailed wrk benchmark results
+- JSON structured data for analysis
+- Performance report (markdown)
+- Service logs
+- Artifacts retained for 90 days
+
+**See:** [BENCHMARKS.md](../docs/BENCHMARKS.md) for complete documentation
 
 ## Test Features
 
