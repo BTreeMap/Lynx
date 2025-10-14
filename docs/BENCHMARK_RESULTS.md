@@ -185,6 +185,24 @@ The benchmark generates a JSON file with structured results:
 
 You can use various tools to visualize the JSON data:
 
+#### Automated Visualization Script
+
+The repository includes a Python script for automatic graph generation:
+
+```bash
+# Install dependencies
+pip3 install matplotlib numpy
+
+# Generate visualizations
+python3 tests/visualize_benchmarks.py benchmark-results.json -o ./graphs
+```
+
+This generates:
+- `rps_comparison.png` - Bar chart of throughput across all tests
+- `latency_percentiles.png` - Grouped bar chart of p50/p90/p99 latencies
+- `performance_heatmap.png` - Normalized heatmap of all metrics
+- `summary.txt` - Text summary with top performers
+
 #### Python (matplotlib)
 
 ```python

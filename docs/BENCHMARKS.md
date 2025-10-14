@@ -193,6 +193,26 @@ ACTOR_FLUSH_INTERVAL_MS=100
    - Any warnings or errors
    - Useful for debugging
 
+### Automated Visualization
+
+The repository includes `tests/visualize_benchmarks.py` for automatic graph generation:
+
+```bash
+# Install dependencies (if not already installed)
+pip3 install matplotlib numpy
+
+# Generate graphs from JSON results
+python3 tests/visualize_benchmarks.py benchmark-results-*.json -o ./graphs
+```
+
+This creates:
+- RPS comparison bar chart
+- Latency percentiles grouped chart
+- Performance heatmap with normalized metrics
+- Text summary with top performers
+
+See [BENCHMARK_RESULTS.md](./BENCHMARK_RESULTS.md#visualizing-results) for more visualization options.
+
 ### Metrics Collected
 
 For each test:
