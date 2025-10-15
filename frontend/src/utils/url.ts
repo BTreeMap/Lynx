@@ -30,3 +30,17 @@ export const buildShortLink = (code: string, candidateBase?: string | null): str
 };
 
 export const getRedirectBase = () => resolveEnvRedirectBase();
+
+export const normalizeOriginalUrl = (value: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return trimmed;
+    }
+
+    try {
+        const parsed = new URL(trimmed);
+        return parsed.toString();
+    } catch (_error) {
+        return trimmed;
+    }
+};

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type { ShortenedUrl, CreateUrlRequest, UserInfo, SuccessResponse, AuthModeResponse } from './types';
+import { normalizeOriginalUrl } from './utils/url';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -28,7 +29,12 @@ export const apiClient = {
   },
 
   async createUrl(request: CreateUrlRequest): Promise<ShortenedUrl> {
-    const { data } = await api.post<ShortenedUrl>('/urls', request);
+    const normalizedRequest: CreateUrlRequest = {
+      ...request,
+      url: normalizeOriginalUrl(request.url),
+    };
+
+    const { data } = await api.post<ShortenedUrl>('/urls', normalizedRequest);
     return data;
   },
 
