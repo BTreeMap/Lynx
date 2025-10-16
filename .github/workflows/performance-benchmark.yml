@@ -121,7 +121,8 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           source $HOME/.cargo/env
           
-          # Install cargo-flamegraph
+          # Install cargo-flamegraph (this may take a few minutes)
+          echo "Installing cargo-flamegraph (this may take 2-5 minutes)..."
           cargo install flamegraph
           
           # Install perf tools for flamegraph profiling
