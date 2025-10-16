@@ -62,3 +62,7 @@ clap = { version = "4", features = ["derive"] }
 
 [build-dependencies]
 statrs = "0.18"
+
+[profile.profiling]
+inherits = "release"
+debug = true

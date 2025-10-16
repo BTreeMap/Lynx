@@ -115,6 +115,26 @@ jobs:
           # Install Apache Bench as fallback
           sudo apt-get install -y apache2-utils
 
+      - name: Install Rust toolchain and profiling tools
+        run: |
+          # Install Rust
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source $HOME/.cargo/env
+          
+          # Install cargo-flamegraph
+          cargo install flamegraph
+          
+          # Install perf tools for flamegraph profiling
+          sudo apt-get install -y linux-tools-common linux-tools-generic linux-tools-$(uname -r) || true
+          
+          # Configure perf to allow profiling without sudo
+          sudo sysctl -w kernel.perf_event_paranoid=-1 || true
+          
+          # Verify installations
+          cargo --version
+          cargo flamegraph --version || echo "flamegraph installed"
+          perf --version || echo "perf may not be available, flamegraph will try alternatives"
+
       - name: Create benchmark results directory
         run: mkdir -p benchmark-results
 
@@ -205,6 +225,19 @@ jobs:
           - `benchmark-results-*.txt`: Detailed wrk output
           - `benchmark-results-*.json`: Structured results data
           - `PERFORMANCE_REPORT.md`: This summary report
+          - `flamegraphs/*.svg`: Flamegraph visualizations for detailed profiling analysis
+
+          ## Flamegraph Profiling
+
+          This benchmark includes flamegraph profiling for detailed CPU usage analysis:
+
+          - **Redirect Endpoint (Cached)**: Shows hot paths in cached request handling
+          - **API Operations**: Shows time distribution across database operations
+
+          Flamegraphs are interactive SVG files that can be opened in any browser.
+          See `flamegraphs/README.md` for interpretation guide.
+
+          For more information on profiling, see `docs/profiling_rust.md`.
 
           ## Analysis
 
@@ -300,6 +333,227 @@ jobs:
           docker stop postgres || true
           docker rm postgres || true
 
+      - name: Build Lynx with profiling symbols
+        run: |
+          source $HOME/.cargo/env
+          cargo build --profile profiling
+          echo "Built Lynx with profiling profile"
+
+      - name: Setup environment for profiling
+        run: |
+          # Create flamegraph output directory
+          mkdir -p benchmark-results/flamegraphs
+          
+          # Copy the profiling binary to a known location
+          cp target/profiling/lynx ./lynx-profiling
+          chmod +x ./lynx-profiling
+
+      - name: Start PostgreSQL for profiling run
+        run: |
+          docker run -d \
+            --name postgres-profiling \
+            -e POSTGRES_USER=lynx \
+            -e POSTGRES_PASSWORD=lynx_benchmark_pass \
+            -e POSTGRES_DB=lynx \
+            -p 5432:5432 \
+            postgres:16-alpine
+
+          # Wait for PostgreSQL to be ready
+          for i in {1..30}; do
+            if docker exec postgres-profiling pg_isready -U lynx > /dev/null 2>&1; then
+              echo "PostgreSQL is ready for profiling!"
+              break
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 2
+          done
+
+      - name: Profile redirect endpoint (cached requests)
+        run: |
+          source $HOME/.cargo/env
+          
+          # Set environment variables for Lynx
+          export DATABASE_BACKEND=postgres
+          export DATABASE_URL=postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
+          export DATABASE_MAX_CONNECTIONS=50
+          export AUTH_MODE=none
+          export API_HOST=0.0.0.0
+          export API_PORT=8080
+          export REDIRECT_HOST=0.0.0.0
+          export REDIRECT_PORT=3000
+          export CACHE_MAX_ENTRIES=500000
+          export RUST_LOG=info
+          
+          # Start Lynx under flamegraph profiling in background
+          cargo flamegraph --profile profiling -o benchmark-results/flamegraphs/flamegraph-redirect-cached.svg --notes "Redirect endpoint with cached requests" &
+          FLAMEGRAPH_PID=$!
+          
+          # Wait for service to be ready
+          for i in {1..60}; do
+            if curl -f http://localhost:8080/api/health > /dev/null 2>&1; then
+              echo "Lynx service is ready for profiling!"
+              break
+            fi
+            echo "Waiting for Lynx service... ($i/60)"
+            sleep 2
+          done
+          
+          # Create test URLs for profiling
+          for i in {1..10}; do
+            curl -s -X POST http://localhost:8080/api/urls \
+              -H "Content-Type: application/json" \
+              -d "{\"url\": \"https://example.com/profile-target-$i\", \"custom_code\": \"prof-$i\"}" > /dev/null 2>&1 || true
+          done
+          
+          # Run benchmark load to generate profiling data
+          echo "Running benchmark load for 60 seconds to capture flamegraph..."
+          wrk -t 8 -c 1000 -d 60s http://localhost:3000/prof-1 || true
+          
+          # Give it a moment to finish profiling data collection
+          sleep 5
+          
+          # Stop the flamegraph profiling
+          kill -SIGINT $FLAMEGRAPH_PID 2>/dev/null || true
+          wait $FLAMEGRAPH_PID 2>/dev/null || true
+          
+          echo "Flamegraph for redirect endpoint (cached) generated"
+
+      - name: Profile API endpoint (database operations)
+        run: |
+          source $HOME/.cargo/env
+          
+          # Set environment variables for Lynx
+          export DATABASE_BACKEND=postgres
+          export DATABASE_URL=postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
+          export DATABASE_MAX_CONNECTIONS=50
+          export AUTH_MODE=none
+          export API_HOST=0.0.0.0
+          export API_PORT=8080
+          export REDIRECT_HOST=0.0.0.0
+          export REDIRECT_PORT=3000
+          export CACHE_MAX_ENTRIES=500000
+          export RUST_LOG=info
+          
+          # Start Lynx under flamegraph profiling in background
+          cargo flamegraph --profile profiling -o benchmark-results/flamegraphs/flamegraph-api-operations.svg --notes "API endpoint with database operations" &
+          FLAMEGRAPH_PID=$!
+          
+          # Wait for service to be ready
+          for i in {1..60}; do
+            if curl -f http://localhost:8080/api/health > /dev/null 2>&1; then
+              echo "Lynx service is ready for profiling!"
+              break
+            fi
+            echo "Waiting for Lynx service... ($i/60)"
+            sleep 2
+          done
+          
+          # Create Lua script for mixed API operations
+          cat > /tmp/profile-api.lua << 'EOLUA'
+          wrk.method = "POST"
+          wrk.headers["Content-Type"] = "application/json"
+          
+          counter = 0
+          
+          request = function()
+              counter = counter + 1
+              local rand = math.random(100)
+              
+              if rand <= 50 then
+                  -- 50% creates
+                  local body = string.format('{"url": "https://example.com/prof-api-%d"}', counter)
+                  return wrk.format("POST", "/api/urls", wrk.headers, body)
+              else
+                  -- 50% reads
+                  local code = "prof-" .. math.random(10)
+                  return wrk.format("GET", "/api/urls/" .. code)
+              end
+          end
+          EOLUA
+          
+          # Run benchmark load with mixed operations
+          echo "Running API benchmark for 60 seconds to capture flamegraph..."
+          wrk -t 4 -c 100 -d 60s -s /tmp/profile-api.lua http://localhost:8080 || true
+          
+          # Give it a moment to finish profiling data collection
+          sleep 5
+          
+          # Stop the flamegraph profiling
+          kill -SIGINT $FLAMEGRAPH_PID 2>/dev/null || true
+          wait $FLAMEGRAPH_PID 2>/dev/null || true
+          
+          echo "Flamegraph for API endpoint (database operations) generated"
+
+      - name: Stop PostgreSQL profiling container
+        if: always()
+        run: |
+          docker stop postgres-profiling || true
+          docker rm postgres-profiling || true
+
+      - name: Generate flamegraph summary
+        if: always()
+        run: |
+          cat > benchmark-results/flamegraphs/README.md << 'EOREADME'
+          # Flamegraph Profiling Results
+          
+          This directory contains flamegraph visualizations of Lynx performance under load.
+          
+          ## What are Flamegraphs?
+          
+          Flamegraphs show CPU usage over time and call stacks:
+          - **Width**: Represents the total time spent in a function (including its callees)
+          - **Height**: Represents the call stack depth
+          - **Color**: Randomized for visual separation
+          
+          ## Files
+          
+          ### flamegraph-redirect-cached.svg
+          Profiling data from the redirect endpoint with cached requests.
+          
+          **Test Configuration:**
+          - 8 threads, 1000 concurrent connections
+          - 60 second duration
+          - Single hot URL (maximum cache effectiveness)
+          
+          **Expected Patterns:**
+          - Wide sections in tokio runtime and axum handlers
+          - Minimal time in database operations (cache hits)
+          - Fast cache lookup paths
+          
+          ### flamegraph-api-operations.svg
+          Profiling data from API endpoints with database operations.
+          
+          **Test Configuration:**
+          - 4 threads, 100 concurrent connections
+          - 60 second duration
+          - Mixed workload: 50% creates (POST), 50% reads (GET)
+          
+          **Expected Patterns:**
+          - Time in sqlx and database drivers
+          - Serialization/deserialization overhead
+          - Database connection pool management
+          
+          ## How to Use
+          
+          1. Download the SVG files from the artifacts
+          2. Open in a web browser
+          3. Click on any section to zoom in
+          4. Search for specific function names using the search box
+          
+          ## Interpreting Results
+          
+          - Look for wide plateaus indicating hot code paths
+          - Investigate tall stacks that may indicate inefficiencies
+          - Compare relative widths to understand time distribution
+          - Focus optimization efforts on the widest sections
+          
+          For more information, see [docs/profiling_rust.md](../../../docs/profiling_rust.md)
+          EOREADME
+          
+          # List generated flamegraphs
+          echo "Generated flamegraphs:"
+          ls -lh benchmark-results/flamegraphs/*.svg || echo "No SVG files found (profiling may have failed)"
+
       - name: Print benchmark summary
         if: always()
         run: |
@@ -314,12 +568,20 @@ jobs:
           echo "   - JSON structured data"
           echo "   - Performance report"
           echo "   - Service logs"
+          echo "   - Flamegraph profiling (SVG)"
+          echo ""
+          echo "🔥 Flamegraph Profiling:"
+          echo "   - Redirect endpoint (cached requests)"
+          echo "   - API operations (database queries)"
+          echo "   - Interactive SVG visualization"
+          echo "   - See flamegraphs/README.md for details"
           echo ""
           echo "🔍 Key focus areas:"
           echo "   1. Redirect endpoint caching performance"
           echo "   2. Management endpoint database query performance"
           echo "   3. Concurrent load handling"
           echo "   4. Latency percentiles (p50, p90, p99)"
+          echo "   5. CPU profiling and hot code paths"
           echo ""
           echo "📈 Expected results:"
           echo "   - Redirect (cached): ~70k RPS @ 1000 concurrency"
