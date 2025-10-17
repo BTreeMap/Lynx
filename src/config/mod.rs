@@ -10,6 +10,7 @@ pub struct Config {
     pub auth: AuthConfig,
     pub frontend: FrontendConfig,
     pub cache: CacheConfig,
+    pub pagination: PaginationConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +23,13 @@ pub struct CacheConfig {
     pub actor_buffer_size: usize,
     #[serde(default = "CacheConfig::default_actor_flush_interval_ms")]
     pub actor_flush_interval_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginationConfig {
+    /// HMAC secret for cursor signing
+    /// If None, a dynamic key is generated at startup (not recommended for production)
+    pub cursor_hmac_secret: Option<String>,
 }
 
 impl CacheConfig {
@@ -263,6 +271,17 @@ impl Config {
 
         let frontend_static_dir = std::env::var("FRONTEND_STATIC_DIR").ok();
 
+        let cursor_hmac_secret = std::env::var("CURSOR_HMAC_SECRET").ok();
+
+        // Warn if cursor HMAC secret is not set
+        if cursor_hmac_secret.is_none() {
+            tracing::warn!(
+                "CURSOR_HMAC_SECRET is not set. Using a dynamic key generated at runtime. \
+                Previous cursors won't work after server restart. \
+                For production, set CURSOR_HMAC_SECRET in your environment."
+            );
+        }
+
         Ok(Config {
             database: DatabaseConfig {
                 backend,
@@ -291,6 +310,9 @@ impl Config {
                 flush_interval_secs: cache_flush_interval_secs,
                 actor_buffer_size,
                 actor_flush_interval_ms,
+            },
+            pagination: PaginationConfig {
+                cursor_hmac_secret,
             },
         })
     }

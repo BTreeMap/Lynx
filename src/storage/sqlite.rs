@@ -66,6 +66,20 @@ impl Storage for SqliteStorage {
             .execute(self.pool.as_ref())
             .await?;
 
+        // Index for cursor-based pagination (created_at DESC, id DESC)
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_urls_created_at_id ON urls(created_at DESC, id DESC)",
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Index for user-specific cursor pagination
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_urls_created_by_created_at_id ON urls(created_by, created_at DESC, id DESC)",
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
         // Create users table to track user metadata
         sqlx::query(
             r#"
@@ -226,43 +240,78 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
-    async fn list(
+    async fn list_with_cursor(
         &self,
         limit: i64,
-        offset: i64,
+        cursor: Option<(i64, i64)>,
         is_admin: bool,
         user_id: Option<&str>,
     ) -> Result<Vec<Arc<ShortenedUrl>>> {
         let urls = if is_admin || user_id.is_none() {
             // Admin sees all URLs, or when auth is disabled (no user_id), show all
-            sqlx::query_as::<_, ShortenedUrl>(
-                r#"
-                SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
-                FROM urls
-                ORDER BY created_at DESC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(self.pool.as_ref())
-            .await?
+            if let Some((cursor_created_at, cursor_id)) = cursor {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (created_at < ?) OR (created_at = ? AND id < ?)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(limit)
+                .fetch_all(self.pool.as_ref())
+                .await?
+            } else {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(limit)
+                .fetch_all(self.pool.as_ref())
+                .await?
+            }
         } else if let Some(uid) = user_id {
             // Regular user sees only their own URLs
-            sqlx::query_as::<_, ShortenedUrl>(
-                r#"
-                SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
-                FROM urls
-                WHERE created_by = ?
-                ORDER BY created_at DESC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(uid)
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(self.pool.as_ref())
-            .await?
+            if let Some((cursor_created_at, cursor_id)) = cursor {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE created_by = ? AND ((created_at < ?) OR (created_at = ? AND id < ?))
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(uid)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(limit)
+                .fetch_all(self.pool.as_ref())
+                .await?
+            } else {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE created_by = ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(uid)
+                .bind(limit)
+                .fetch_all(self.pool.as_ref())
+                .await?
+            }
         } else {
             // Should not reach here, but return empty list
             vec![]

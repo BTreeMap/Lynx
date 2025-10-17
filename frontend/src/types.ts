@@ -9,6 +9,12 @@ export interface ShortenedUrl {
   redirect_base_url?: string | null;
 }
 
+export interface PaginatedUrlsResponse {
+  urls: ShortenedUrl[];
+  next_cursor?: string | null;
+  has_more: boolean;
+}
+
 export interface CreateUrlRequest {
   url: string;
   custom_code?: string;

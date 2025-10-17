@@ -356,15 +356,18 @@ impl Storage for CachedStorage {
         Ok(())
     }
 
-    async fn list(
+    async fn list_with_cursor(
         &self,
         limit: i64,
-        offset: i64,
+        cursor: Option<(i64, i64)>,
         is_admin: bool,
         user_id: Option<&str>,
     ) -> Result<Vec<Arc<ShortenedUrl>>> {
         // Get results from database
-        let mut urls = self.inner.list(limit, offset, is_admin, user_id).await?;
+        let mut urls = self
+            .inner
+            .list_with_cursor(limit, cursor, is_admin, user_id)
+            .await?;
 
         // Add buffered clicks to each URL
         for url in &mut urls {

@@ -19,6 +19,8 @@ pub struct AppState {
     pub config: Arc<Config>,
 }
 
+use crate::cursor::{create_cursor, CursorData};
+
 #[derive(Serialize)]
 pub struct ErrorResponse {
     pub error: String,
@@ -46,12 +48,20 @@ impl ShortenedUrlResponse {
     }
 }
 
+#[derive(Serialize)]
+pub struct PaginatedUrlsResponse {
+    pub urls: Vec<ShortenedUrlResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+}
+
 #[derive(Deserialize)]
 pub struct ListQuery {
     #[serde(default = "default_limit")]
     pub limit: i64,
-    #[serde(default)]
-    pub offset: i64,
+    /// Cursor for cursor-based pagination
+    pub cursor: Option<String>,
 }
 
 fn default_limit() -> i64 {
@@ -319,21 +329,62 @@ pub async fn list_urls(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<Vec<ShortenedUrlResponse>>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<PaginatedUrlsResponse>, (StatusCode, Json<ErrorResponse>)> {
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     let user_id = claims.as_ref().and_then(|c| c.user_id());
 
-    match state
+    // Decode cursor if provided
+    let cursor = if let Some(cursor_str) = query.cursor {
+        let cursor_data = crate::cursor::verify_cursor(&cursor_str).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!("Invalid cursor: {}", e),
+                }),
+            )
+        })?;
+        Some((cursor_data.created_at, cursor_data.id))
+    } else {
+        None
+    };
+
+    // Fetch limit+1 to determine if there are more pages
+    let urls = state
         .storage
-        .list(query.limit, query.offset, is_admin, user_id.as_deref())
-        .await
-    {
-        Ok(urls) => {
+        .list_with_cursor(query.limit + 1, cursor, is_admin, user_id.as_deref())
+        .await;
+
+    match urls {
+        Ok(mut urls) => {
             let base = Some(state.config.redirect_base_url.as_str());
-            let response = urls
-                .into_iter()
-                .map(|url| ShortenedUrlResponse::with_base(url, base))
-                .collect();
+
+            // Check if there are more pages
+            let has_more = urls.len() > query.limit as usize;
+            if has_more {
+                urls.pop(); // Remove the extra item
+            }
+
+            // Generate next cursor if there are more pages
+            let next_cursor = if has_more && !urls.is_empty() {
+                let last = urls.last().unwrap();
+                let cursor_data = CursorData {
+                    created_at: last.created_at,
+                    id: last.id,
+                };
+                create_cursor(&cursor_data).ok()
+            } else {
+                None
+            };
+
+            let response = PaginatedUrlsResponse {
+                urls: urls
+                    .into_iter()
+                    .map(|url| ShortenedUrlResponse::with_base(url, base))
+                    .collect(),
+                next_cursor,
+                has_more,
+            };
+
             Ok(Json(response))
         }
         Err(e) => Err((

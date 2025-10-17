@@ -70,13 +70,14 @@ pub trait Storage: Send + Sync {
         self.increment_clicks(short_code, 1).await
     }
 
-    /// List all URLs (with pagination and optional user filtering)
-    /// If is_admin is true, returns all URLs regardless of user_id
-    /// Otherwise, returns only URLs created by the specified user_id
-    async fn list(
+    /// List URLs with cursor-based pagination
+    /// Returns URLs ordered by created_at DESC, id DESC
+    /// If cursor is provided, returns URLs created before that cursor position
+    /// Returns up to limit results (caller should request limit+1 to determine if there are more pages)
+    async fn list_with_cursor(
         &self,
         limit: i64,
-        offset: i64,
+        cursor: Option<(i64, i64)>, // (created_at, id)
         is_admin: bool,
         user_id: Option<&str>,
     ) -> Result<Vec<Arc<ShortenedUrl>>>;
