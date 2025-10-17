@@ -375,4 +375,37 @@ impl Storage for SqliteStorage {
 
         Ok(admins)
     }
+
+    async fn patch_created_by(&self, short_code: &str, new_created_by: &str) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            UPDATE urls
+            SET created_by = ?
+            WHERE short_code = ?
+            "#,
+        )
+        .bind(new_created_by)
+        .bind(short_code)
+        .execute(self.pool.as_ref())
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn patch_all_malformed_created_by(&self, new_created_by: &str) -> Result<i64> {
+        let result = sqlx::query(
+            r#"
+            UPDATE urls
+            SET created_by = ?
+            WHERE created_by IS NULL 
+               OR created_by = '' 
+               OR created_by = '00000000-0000-0000-0000-000000000000'
+            "#,
+        )
+        .bind(new_created_by)
+        .execute(self.pool.as_ref())
+        .await?;
+
+        Ok(result.rows_affected() as i64)
+    }
 }
