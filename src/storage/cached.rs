@@ -418,4 +418,31 @@ impl Storage for CachedStorage {
             .patch_all_malformed_created_by(new_created_by)
             .await
     }
+
+    async fn list_all_users(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<(String, String, String, i64)>> {
+        self.inner.list_all_users(limit, offset).await
+    }
+
+    async fn list_user_links(
+        &self,
+        user_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Arc<ShortenedUrl>>> {
+        self.inner.list_user_links(user_id, limit, offset).await
+    }
+
+    async fn bulk_deactivate_user_links(&self, user_id: &str) -> Result<i64> {
+        // Note: This does not invalidate cache - cache purge happens on instance restart
+        self.inner.bulk_deactivate_user_links(user_id).await
+    }
+
+    async fn bulk_reactivate_user_links(&self, user_id: &str) -> Result<i64> {
+        // Note: This does not invalidate cache - cache purge happens on instance restart
+        self.inner.bulk_reactivate_user_links(user_id).await
+    }
 }

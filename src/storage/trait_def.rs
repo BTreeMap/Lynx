@@ -108,4 +108,30 @@ pub trait Storage: Send + Sync {
     /// Patch all malformed created_by values (all-zero UUID or null) to a new value
     /// Returns the number of rows updated
     async fn patch_all_malformed_created_by(&self, new_created_by: &str) -> Result<i64>;
+
+    /// List all users with pagination support
+    /// Returns users ordered by created_at DESC
+    /// Returns up to limit results
+    async fn list_all_users(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<(String, String, String, i64)>>; // (user_id, auth_method, email, created_at)
+
+    /// List all links created by a specific user with pagination
+    /// Returns links ordered by created_at DESC
+    async fn list_user_links(
+        &self,
+        user_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Arc<ShortenedUrl>>>;
+
+    /// Deactivate all links created by a specific user
+    /// Returns the number of links deactivated
+    async fn bulk_deactivate_user_links(&self, user_id: &str) -> Result<i64>;
+
+    /// Reactivate all links created by a specific user
+    /// Returns the number of links reactivated
+    async fn bulk_reactivate_user_links(&self, user_id: &str) -> Result<i64>;
 }

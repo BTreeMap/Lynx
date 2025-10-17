@@ -35,6 +35,11 @@ enum Commands {
         #[command(subcommand)]
         patch_command: PatchCommands,
     },
+    /// User management commands
+    User {
+        #[command(subcommand)]
+        user_command: UserCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -73,6 +78,42 @@ enum PatchCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum UserCommands {
+    /// List all users
+    List {
+        /// Number of results per page (default: 50)
+        #[arg(short, long, default_value_t = 50)]
+        limit: i64,
+        /// Page number (starts from 1)
+        #[arg(short, long, default_value_t = 1)]
+        page: i64,
+    },
+    /// List all admin users
+    ListAdmins,
+    /// List all links created by a specific user
+    Links {
+        /// User ID to list links for
+        user_id: String,
+        /// Number of results per page (default: 50)
+        #[arg(short, long, default_value_t = 50)]
+        limit: i64,
+        /// Page number (starts from 1)
+        #[arg(short, long, default_value_t = 1)]
+        page: i64,
+    },
+    /// Deactivate all links created by a user
+    DeactivateLinks {
+        /// User ID whose links to deactivate
+        user_id: String,
+    },
+    /// Reactivate all links created by a user
+    ReactivateLinks {
+        /// User ID whose links to reactivate
+        user_id: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize tracing
@@ -88,6 +129,11 @@ async fn main() -> Result<()> {
     // Handle patch commands
     if let Some(Commands::Patch { patch_command }) = cli.command {
         return handle_patch_command(patch_command).await;
+    }
+
+    // Handle user commands
+    if let Some(Commands::User { user_command }) = cli.command {
+        return handle_user_command(user_command).await;
     }
 
     // Otherwise, run the server
@@ -217,6 +263,139 @@ async fn handle_patch_command(command: PatchCommands) -> Result<()> {
                 );
             } else {
                 println!("✓ No malformed created_by values found. Database is clean!");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_user_command(command: UserCommands) -> Result<()> {
+    let config = Config::from_env()?;
+
+    let storage: Arc<dyn Storage> = match config.database.backend {
+        DatabaseBackend::Sqlite => Arc::new(
+            SqliteStorage::new(&config.database.url, config.database.max_connections).await?,
+        ),
+        DatabaseBackend::Postgres => Arc::new(
+            PostgresStorage::new(&config.database.url, config.database.max_connections).await?,
+        ),
+    };
+
+    // Ensure database is initialized
+    storage.init().await?;
+
+    match command {
+        UserCommands::List { limit, page } => {
+            if page < 1 {
+                println!("✗ Page number must be >= 1");
+                return Ok(());
+            }
+            if limit < 1 {
+                println!("✗ Limit must be >= 1");
+                return Ok(());
+            }
+
+            let offset = (page - 1) * limit;
+            let users = storage.list_all_users(limit, offset).await?;
+            
+            if users.is_empty() {
+                if page == 1 {
+                    println!("No users found.");
+                } else {
+                    println!("No more users found (page {}).", page);
+                }
+            } else {
+                println!("Users (page {}, showing {} results):", page, users.len());
+                println!("{:<40} {:<15} {:<40} {}", "User ID", "Auth Method", "Email", "Created At");
+                println!("{}", "-".repeat(120));
+                for (user_id, auth_method, email, created_at) in users {
+                    let datetime = chrono::DateTime::from_timestamp(created_at, 0)
+                        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                        .unwrap_or_else(|| created_at.to_string());
+                    println!("{:<40} {:<15} {:<40} {}", user_id, auth_method, email, datetime);
+                }
+                println!();
+                println!("To see more results, use: --page {}", page + 1);
+            }
+        }
+        UserCommands::ListAdmins => {
+            let admins = storage.list_manual_admins().await?;
+            if admins.is_empty() {
+                println!("No manually promoted admins found.");
+            } else {
+                println!("Manually promoted admins:");
+                println!("{:<40} {:<15} {}", "User ID", "Auth Method", "Email");
+                println!("{}", "-".repeat(80));
+                for (user_id, auth_method, email) in admins {
+                    println!("{:<40} {:<15} {}", user_id, auth_method, email);
+                }
+            }
+        }
+        UserCommands::Links { user_id, limit, page } => {
+            if page < 1 {
+                println!("✗ Page number must be >= 1");
+                return Ok(());
+            }
+            if limit < 1 {
+                println!("✗ Limit must be >= 1");
+                return Ok(());
+            }
+
+            let offset = (page - 1) * limit;
+            let links = storage.list_user_links(&user_id, limit, offset).await?;
+            
+            if links.is_empty() {
+                if page == 1 {
+                    println!("No links found for user '{}'.", user_id);
+                } else {
+                    println!("No more links found for user '{}' (page {}).", user_id, page);
+                }
+            } else {
+                println!("Links for user '{}' (page {}, showing {} results):", user_id, page, links.len());
+                println!("{:<15} {:<60} {:<10} {:<10} {}", "Short Code", "Original URL", "Clicks", "Active", "Created At");
+                println!("{}", "-".repeat(120));
+                for link in links {
+                    let url_display = if link.original_url.len() > 57 {
+                        format!("{}...", &link.original_url[..57])
+                    } else {
+                        link.original_url.clone()
+                    };
+                    let active_str = if link.is_active { "✓" } else { "✗" };
+                    let datetime = chrono::DateTime::from_timestamp(link.created_at, 0)
+                        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                        .unwrap_or_else(|| link.created_at.to_string());
+                    println!("{:<15} {:<60} {:<10} {:<10} {}", 
+                        link.short_code, url_display, link.clicks, active_str, datetime);
+                }
+                println!();
+                println!("To see more results, use: --page {}", page + 1);
+            }
+        }
+        UserCommands::DeactivateLinks { user_id } => {
+            println!("⚠ This will mark all links created by user '{}' as inactive.", user_id);
+            println!("   Note: Cached links will remain active until instance restart.");
+            println!();
+            
+            let count = storage.bulk_deactivate_user_links(&user_id).await?;
+            
+            if count > 0 {
+                println!("✓ Deactivated {} link(s) for user '{}'", count, user_id);
+            } else {
+                println!("⚠ No active links found for user '{}'", user_id);
+            }
+        }
+        UserCommands::ReactivateLinks { user_id } => {
+            println!("⚠ This will mark all links created by user '{}' as active.", user_id);
+            println!("   Note: Links will become active in cache after instance restart.");
+            println!();
+            
+            let count = storage.bulk_reactivate_user_links(&user_id).await?;
+            
+            if count > 0 {
+                println!("✓ Reactivated {} link(s) for user '{}'", count, user_id);
+            } else {
+                println!("⚠ No inactive links found for user '{}'", user_id);
             }
         }
     }
