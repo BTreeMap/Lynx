@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::models::ShortenedUrl;
-    use crate::storage::{PostgresStorage, SqliteStorage, Storage};
+    use crate::storage::{SqliteStorage, Storage};
     use std::sync::Arc;
 
     async fn setup_sqlite() -> Arc<dyn Storage> {
