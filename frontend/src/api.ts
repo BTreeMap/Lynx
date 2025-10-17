@@ -43,15 +43,7 @@ export const apiClient = {
     return data;
   },
 
-  async listUrls(limit = 50, offset = 0): Promise<ShortenedUrl[]> {
-    const { data } = await api.get<PaginatedUrlsResponse>('/urls', {
-      params: { limit, offset },
-    });
-    // For backwards compatibility, return just the URLs array
-    return data.urls || data as any;
-  },
-
-  async listUrlsWithCursor(limit = 50, cursor?: string): Promise<PaginatedUrlsResponse> {
+  async listUrls(limit = 50, cursor?: string): Promise<PaginatedUrlsResponse> {
     const params: { limit: number; cursor?: string } = { limit };
     if (cursor) {
       params.cursor = cursor;

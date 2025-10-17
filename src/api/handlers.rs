@@ -60,9 +60,7 @@ pub struct PaginatedUrlsResponse {
 pub struct ListQuery {
     #[serde(default = "default_limit")]
     pub limit: i64,
-    #[serde(default)]
-    pub offset: i64,
-    /// Optional cursor for cursor-based pagination
+    /// Cursor for cursor-based pagination
     pub cursor: Option<String>,
 }
 
@@ -335,9 +333,8 @@ pub async fn list_urls(
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     let user_id = claims.as_ref().and_then(|c| c.user_id());
 
-    // Use cursor-based pagination if cursor is provided, otherwise use offset-based for backwards compatibility
-    let urls = if let Some(cursor_str) = query.cursor {
-        // Decode and verify cursor
+    // Decode cursor if provided
+    let cursor = if let Some(cursor_str) = query.cursor {
         let cursor_data = crate::cursor::verify_cursor(&cursor_str).map_err(|e| {
             (
                 StatusCode::BAD_REQUEST,
@@ -346,27 +343,16 @@ pub async fn list_urls(
                 }),
             )
         })?;
-
-        let cursor = Some((cursor_data.created_at, cursor_data.id));
-
-        // Fetch limit+1 to determine if there are more pages
-        state
-            .storage
-            .list_with_cursor(query.limit + 1, cursor, is_admin, user_id.as_deref())
-            .await
-    } else if query.offset > 0 {
-        // Legacy offset-based pagination (backwards compatibility)
-        state
-            .storage
-            .list(query.limit, query.offset, is_admin, user_id.as_deref())
-            .await
+        Some((cursor_data.created_at, cursor_data.id))
     } else {
-        // First page with cursor pagination
-        state
-            .storage
-            .list_with_cursor(query.limit + 1, None, is_admin, user_id.as_deref())
-            .await
+        None
     };
+
+    // Fetch limit+1 to determine if there are more pages
+    let urls = state
+        .storage
+        .list_with_cursor(query.limit + 1, cursor, is_admin, user_id.as_deref())
+        .await;
 
     match urls {
         Ok(mut urls) => {

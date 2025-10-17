@@ -22,7 +22,7 @@ const Dashboard: React.FC = () => {
     }
     setError(null);
     try {
-      const data = await apiClient.listUrlsWithCursor(50);
+      const data = await apiClient.listUrls(50);
       if (reset) {
         setUrls(data.urls);
       } else {
@@ -43,7 +43,7 @@ const Dashboard: React.FC = () => {
     setIsLoadingMore(true);
     setError(null);
     try {
-      const data = await apiClient.listUrlsWithCursor(50, nextCursor);
+      const data = await apiClient.listUrls(50, nextCursor);
       setUrls(prev => [...prev, ...data.urls]);
       setNextCursor(data.next_cursor || null);
       setHasMore(data.has_more);

@@ -240,51 +240,6 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
-    async fn list(
-        &self,
-        limit: i64,
-        offset: i64,
-        is_admin: bool,
-        user_id: Option<&str>,
-    ) -> Result<Vec<Arc<ShortenedUrl>>> {
-        let urls = if is_admin || user_id.is_none() {
-            // Admin sees all URLs, or when auth is disabled (no user_id), show all
-            sqlx::query_as::<_, ShortenedUrl>(
-                r#"
-                SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
-                FROM urls
-                ORDER BY created_at DESC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(self.pool.as_ref())
-            .await?
-        } else if let Some(uid) = user_id {
-            // Regular user sees only their own URLs
-            sqlx::query_as::<_, ShortenedUrl>(
-                r#"
-                SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
-                FROM urls
-                WHERE created_by = ?
-                ORDER BY created_at DESC
-                LIMIT ? OFFSET ?
-                "#,
-            )
-            .bind(uid)
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(self.pool.as_ref())
-            .await?
-        } else {
-            // Should not reach here, but return empty list
-            vec![]
-        };
-
-        Ok(urls.into_iter().map(Arc::new).collect())
-    }
-
     async fn list_with_cursor(
         &self,
         limit: i64,
