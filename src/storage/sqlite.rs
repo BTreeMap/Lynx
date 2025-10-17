@@ -457,4 +457,89 @@ impl Storage for SqliteStorage {
 
         Ok(result.rows_affected() as i64)
     }
+
+    async fn list_all_users(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<(String, String, String, i64)>> {
+        let users = sqlx::query_as::<_, (String, String, Option<String>, i64)>(
+            r#"
+            SELECT user_id, auth_method, email, created_at
+            FROM users
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+            "#,
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(self.pool.as_ref())
+        .await?
+        .into_iter()
+        .map(|(user_id, auth_method, email, created_at)| {
+            (
+                user_id,
+                auth_method,
+                email.unwrap_or_else(|| "N/A".to_string()),
+                created_at,
+            )
+        })
+        .collect();
+
+        Ok(users)
+    }
+
+    async fn list_user_links(
+        &self,
+        user_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Arc<ShortenedUrl>>> {
+        let urls = sqlx::query_as::<_, ShortenedUrl>(
+            r#"
+            SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+            FROM urls
+            WHERE created_by = ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+            "#,
+        )
+        .bind(user_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(self.pool.as_ref())
+        .await?;
+
+        Ok(urls.into_iter().map(Arc::new).collect())
+    }
+
+    async fn bulk_deactivate_user_links(&self, user_id: &str) -> Result<i64> {
+        let result = sqlx::query(
+            r#"
+            UPDATE urls
+            SET is_active = 0
+            WHERE created_by = ? AND is_active = 1
+            "#,
+        )
+        .bind(user_id)
+        .execute(self.pool.as_ref())
+        .await?;
+
+        Ok(result.rows_affected() as i64)
+    }
+
+    async fn bulk_reactivate_user_links(&self, user_id: &str) -> Result<i64> {
+        let result = sqlx::query(
+            r#"
+            UPDATE urls
+            SET is_active = 1
+            WHERE created_by = ? AND is_active = 0
+            "#,
+        )
+        .bind(user_id)
+        .execute(self.pool.as_ref())
+        .await?;
+
+        Ok(result.rows_affected() as i64)
+    }
 }

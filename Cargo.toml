@@ -64,6 +64,7 @@ mime_guess = "2"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+chrono = "0.4"
 
 [build-dependencies]
 statrs = "0.18"
