@@ -100,4 +100,11 @@ pub trait Storage: Send + Sync {
 
     /// List all manually promoted admins
     async fn list_manual_admins(&self) -> Result<Vec<(String, String, String)>>; // (user_id, auth_method, email)
+
+    /// Patch created_by for a specific short code
+    async fn patch_created_by(&self, short_code: &str, new_created_by: &str) -> Result<bool>;
+
+    /// Patch all malformed created_by values (all-zero UUID or null) to a new value
+    /// Returns the number of rows updated
+    async fn patch_all_malformed_created_by(&self, new_created_by: &str) -> Result<i64>;
 }

@@ -401,4 +401,16 @@ impl Storage for CachedStorage {
     async fn list_manual_admins(&self) -> Result<Vec<(String, String, String)>> {
         self.inner.list_manual_admins().await
     }
+
+    async fn patch_created_by(&self, short_code: &str, new_created_by: &str) -> Result<bool> {
+        // Also invalidate cache if the URL exists in cache
+        self.read_cache.invalidate(short_code).await;
+        self.inner.patch_created_by(short_code, new_created_by).await
+    }
+
+    async fn patch_all_malformed_created_by(&self, new_created_by: &str) -> Result<i64> {
+        // Clear entire cache since we don't know which URLs are affected
+        self.read_cache.invalidate_all();
+        self.inner.patch_all_malformed_created_by(new_created_by).await
+    }
 }

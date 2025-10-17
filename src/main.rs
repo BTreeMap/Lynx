@@ -29,6 +29,11 @@ enum Commands {
         #[command(subcommand)]
         admin_command: AdminCommands,
     },
+    /// Database patching commands
+    Patch {
+        #[command(subcommand)]
+        patch_command: PatchCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -51,6 +56,22 @@ enum AdminCommands {
     List,
 }
 
+#[derive(Subcommand)]
+enum PatchCommands {
+    /// Patch the created_by field for a specific short link
+    Link {
+        /// User identifier to set as created_by
+        user_id: String,
+        /// Short code to patch
+        short_code: String,
+    },
+    /// Fix all malformed created_by values (all-zero UUID or null)
+    FixAll {
+        /// User identifier to set for all malformed entries
+        user_id: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize tracing
@@ -61,6 +82,11 @@ async fn main() -> Result<()> {
     // Handle admin commands
     if let Some(Commands::Admin { admin_command }) = cli.command {
         return handle_admin_command(admin_command).await;
+    }
+
+    // Handle patch commands
+    if let Some(Commands::Patch { patch_command }) = cli.command {
+        return handle_patch_command(patch_command).await;
     }
 
     // Otherwise, run the server
@@ -121,6 +147,75 @@ async fn handle_admin_command(command: AdminCommands) -> Result<()> {
                 for (user_id, auth_method, email) in admins {
                     println!("{:<40} {:<15} {}", user_id, auth_method, email);
                 }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_patch_command(command: PatchCommands) -> Result<()> {
+    let config = Config::from_env()?;
+
+    let storage: Arc<dyn Storage> = match config.database.backend {
+        DatabaseBackend::Sqlite => Arc::new(
+            SqliteStorage::new(&config.database.url, config.database.max_connections).await?,
+        ),
+        DatabaseBackend::Postgres => Arc::new(
+            PostgresStorage::new(&config.database.url, config.database.max_connections).await?,
+        ),
+    };
+
+    // Ensure database is initialized
+    storage.init().await?;
+
+    match command {
+        PatchCommands::Link {
+            user_id,
+            short_code,
+        } => {
+            // First verify the short code exists
+            let url = storage.get_authoritative(&short_code).await?;
+            if url.is_none() {
+                println!("✗ Short code '{}' not found", short_code);
+                return Ok(());
+            }
+
+            let url = url.unwrap();
+            println!("Current created_by: {:?}", url.created_by);
+
+            // Perform the patch
+            let updated = storage.patch_created_by(&short_code, &user_id).await?;
+            if updated {
+                println!(
+                    "✓ Updated created_by for short code '{}' to '{}'",
+                    short_code, user_id
+                );
+            } else {
+                println!(
+                    "⚠ Short code '{}' was not updated (not found)",
+                    short_code
+                );
+            }
+        }
+        PatchCommands::FixAll { user_id } => {
+            println!(
+                "⚠ This will update all malformed created_by values (NULL, empty string, or all-zero UUID)"
+            );
+            println!("   to user_id: '{}'", user_id);
+            println!();
+            println!("Checking for malformed entries...");
+
+            // Count malformed entries before patching
+            let count = storage.patch_all_malformed_created_by(&user_id).await?;
+
+            if count > 0 {
+                println!(
+                    "✓ Successfully patched {} malformed created_by value(s) to '{}'",
+                    count, user_id
+                );
+            } else {
+                println!("✓ No malformed created_by values found. Database is clean!");
             }
         }
     }
