@@ -277,7 +277,7 @@ impl Storage for CachedStorage {
         let result = self.inner.get(short_code).await?;
         let db_duration = db_start.elapsed();
 
-        // Cache the result from database (without buffered clicks to avoid double-counting)
+        // Cache the result from database (for both Some and None)
         self.read_cache
             .insert(short_code.to_string(), result.url.clone())
             .await;
@@ -403,14 +403,16 @@ impl Storage for CachedStorage {
     }
 
     async fn patch_created_by(&self, short_code: &str, new_created_by: &str) -> Result<bool> {
-        // Also invalidate cache if the URL exists in cache
-        self.read_cache.invalidate(short_code).await;
-        self.inner.patch_created_by(short_code, new_created_by).await
+        // No cache invalidation is needed, as read_cache only needs to ensure the correctness of URL redirects.
+        self.inner
+            .patch_created_by(short_code, new_created_by)
+            .await
     }
 
     async fn patch_all_malformed_created_by(&self, new_created_by: &str) -> Result<i64> {
-        // Clear entire cache since we don't know which URLs are affected
-        self.read_cache.invalidate_all();
-        self.inner.patch_all_malformed_created_by(new_created_by).await
+        // No cache invalidation is needed, as read_cache only needs to ensure the correctness of URL redirects.
+        self.inner
+            .patch_all_malformed_created_by(new_created_by)
+            .await
     }
 }
