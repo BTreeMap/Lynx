@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ShortenedUrl, CreateUrlRequest, UserInfo, SuccessResponse, AuthModeResponse } from './types';
+import type { ShortenedUrl, CreateUrlRequest, UserInfo, SuccessResponse, AuthModeResponse, PaginatedUrlsResponse } from './types';
 import { normalizeOriginalUrl } from './utils/url';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -44,9 +44,19 @@ export const apiClient = {
   },
 
   async listUrls(limit = 50, offset = 0): Promise<ShortenedUrl[]> {
-    const { data } = await api.get<ShortenedUrl[]>('/urls', {
+    const { data } = await api.get<PaginatedUrlsResponse>('/urls', {
       params: { limit, offset },
     });
+    // For backwards compatibility, return just the URLs array
+    return data.urls || data as any;
+  },
+
+  async listUrlsWithCursor(limit = 50, cursor?: string): Promise<PaginatedUrlsResponse> {
+    const params: { limit: number; cursor?: string } = { limit };
+    if (cursor) {
+      params.cursor = cursor;
+    }
+    const { data } = await api.get<PaginatedUrlsResponse>('/urls', { params });
     return data;
   },
 

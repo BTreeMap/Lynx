@@ -81,6 +81,18 @@ pub trait Storage: Send + Sync {
         user_id: Option<&str>,
     ) -> Result<Vec<Arc<ShortenedUrl>>>;
 
+    /// List URLs with cursor-based pagination
+    /// Returns URLs ordered by created_at DESC, id DESC
+    /// If cursor is provided, returns URLs created before that cursor position
+    /// Returns up to limit+1 results (extra one to determine if there are more pages)
+    async fn list_with_cursor(
+        &self,
+        limit: i64,
+        cursor: Option<(i64, i64)>, // (created_at, id)
+        is_admin: bool,
+        user_id: Option<&str>,
+    ) -> Result<Vec<Arc<ShortenedUrl>>>;
+
     /// Register or update user metadata
     async fn upsert_user(
         &self,

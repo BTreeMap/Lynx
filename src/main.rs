@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod config;
+mod cursor;
 mod models;
 mod redirect;
 mod storage;
@@ -227,6 +228,10 @@ async fn run_server() -> Result<()> {
     // Load configuration
     let config = Arc::new(Config::from_env()?);
     info!("Loaded configuration");
+
+    // Initialize cursor HMAC key
+    cursor::init_cursor_hmac_key(config.pagination.cursor_hmac_secret.as_deref());
+    info!("Cursor pagination HMAC key initialized");
 
     // Initialize storage
     let base_storage: Arc<dyn Storage> = match config.database.backend {

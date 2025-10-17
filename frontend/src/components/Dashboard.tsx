@@ -9,14 +9,27 @@ const Dashboard: React.FC = () => {
   const { userInfo, logout } = useAuth();
   const [urls, setUrls] = useState<ShortenedUrl[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
 
-  const loadUrls = async () => {
-    setIsLoading(true);
+  const loadUrls = async (reset = true) => {
+    if (reset) {
+      setIsLoading(true);
+      setUrls([]);
+      setNextCursor(null);
+    }
     setError(null);
     try {
-      const data = await apiClient.listUrls();
-      setUrls(data);
+      const data = await apiClient.listUrlsWithCursor(50);
+      if (reset) {
+        setUrls(data.urls);
+      } else {
+        setUrls(prev => [...prev, ...data.urls]);
+      }
+      setNextCursor(data.next_cursor || null);
+      setHasMore(data.has_more);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load URLs');
     } finally {
@@ -24,8 +37,25 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const loadMoreUrls = async () => {
+    if (!nextCursor || isLoadingMore) return;
+    
+    setIsLoadingMore(true);
+    setError(null);
+    try {
+      const data = await apiClient.listUrlsWithCursor(50, nextCursor);
+      setUrls(prev => [...prev, ...data.urls]);
+      setNextCursor(data.next_cursor || null);
+      setHasMore(data.has_more);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to load more URLs');
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
   useEffect(() => {
-    loadUrls();
+    loadUrls(true);
   }, []);
 
   return (
@@ -63,7 +93,7 @@ const Dashboard: React.FC = () => {
         </button>
       </div>
 
-      <CreateUrlForm onUrlCreated={loadUrls} />
+      <CreateUrlForm onUrlCreated={() => loadUrls(true)} />
 
       {error && (
         <div style={{ padding: '10px', marginBottom: '15px', backgroundColor: '#f8d7da', color: '#721c24', borderRadius: '4px' }}>
@@ -76,11 +106,32 @@ const Dashboard: React.FC = () => {
           Loading...
         </div>
       ) : (
-        <UrlList 
-          urls={urls} 
-          isAdmin={userInfo?.is_admin || false} 
-          onUrlsChanged={loadUrls}
-        />
+        <>
+          <UrlList 
+            urls={urls} 
+            isAdmin={userInfo?.is_admin || false} 
+            onUrlsChanged={() => loadUrls(true)}
+          />
+          {hasMore && (
+            <div style={{ textAlign: 'center', marginTop: '20px' }}>
+              <button
+                onClick={loadMoreUrls}
+                disabled={isLoadingMore}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: isLoadingMore ? '#ccc' : '#007bff',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  cursor: isLoadingMore ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {isLoadingMore ? 'Loading...' : 'Load More'}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
