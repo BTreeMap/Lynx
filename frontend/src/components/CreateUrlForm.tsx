@@ -12,15 +12,16 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
   const [customCode, setCustomCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successCode, setSuccessCode] = useState<string | null>(null);
   const [successLink, setSuccessLink] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
-    setSuccessCode(null);
     setSuccessLink(null);
+    setCopied(false);
 
     try {
       const request: CreateUrlRequest = {
@@ -29,16 +30,36 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
       };
       const result = await apiClient.createUrl(request);
       const fullLink = buildShortLink(result.short_code, result.redirect_base_url);
-      setSuccessCode(result.short_code);
       setSuccessLink(fullLink);
       setUrl('');
       setCustomCode('');
+      setShowModal(true);
       onUrlCreated();
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to create URL');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleCopyToClipboard = async () => {
+    if (successLink) {
+      try {
+        await navigator.clipboard.writeText(successLink);
+        setCopied(true);
+        setTimeout(() => {
+          setCopied(false);
+          setShowModal(false);
+        }, 1500);
+      } catch (err) {
+        console.error('Failed to copy:', err);
+      }
+    }
+  };
+
+  const handleDismiss = () => {
+    setShowModal(false);
+    setCopied(false);
   };
 
   return (
@@ -135,35 +156,6 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
             {error}
           </div>
         )}
-        {successCode && (
-          <div style={{ 
-            padding: '12px 14px', 
-            marginBottom: '16px', 
-            backgroundColor: 'var(--color-success-bg)', 
-            color: 'var(--color-success)', 
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--color-success)',
-            fontSize: '14px'
-          }}>
-            Created short URL:{' '}
-            {successLink ? (
-              <a
-                href={successLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ 
-                  color: 'var(--color-success)', 
-                  fontWeight: 600,
-                  textDecoration: 'underline'
-                }}
-              >
-                {successLink}
-              </a>
-            ) : (
-              <span style={{ fontWeight: 600 }}>{successCode}</span>
-            )}
-          </div>
-        )}
         <button
           type="submit"
           disabled={isSubmitting}
@@ -182,6 +174,99 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
           {isSubmitting ? 'Creating...' : 'Create Short URL'}
         </button>
       </form>
+
+      {/* Success Modal */}
+      {showModal && successLink && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'var(--color-bg-elevated)',
+            padding: '32px',
+            borderRadius: 'var(--radius-lg)',
+            boxShadow: 'var(--shadow-lg)',
+            maxWidth: '500px',
+            width: '90%',
+            border: '1px solid var(--color-border)'
+          }}>
+            <h3 style={{
+              margin: '0 0 16px 0',
+              fontSize: '18px',
+              fontWeight: 600,
+              color: 'var(--color-text-primary)'
+            }}>
+              Short URL Created Successfully!
+            </h3>
+            <div style={{
+              padding: '12px 16px',
+              backgroundColor: 'var(--color-bg-secondary)',
+              borderRadius: 'var(--radius-md)',
+              marginBottom: '24px',
+              border: '1px solid var(--color-border)',
+              wordBreak: 'break-all'
+            }}>
+              <a
+                href={successLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  color: 'var(--color-text-primary)',
+                  fontWeight: 500,
+                  fontSize: '14px',
+                  textDecoration: 'none'
+                }}
+              >
+                {successLink}
+              </a>
+            </div>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                onClick={handleCopyToClipboard}
+                style={{
+                  flex: 1,
+                  padding: '12px 24px',
+                  backgroundColor: 'var(--color-success)',
+                  color: 'var(--color-bg-elevated)',
+                  border: 'none',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                {copied ? '✓ Copied!' : 'Copy to Clipboard'}
+              </button>
+              <button
+                onClick={handleDismiss}
+                style={{
+                  flex: 1,
+                  padding: '12px 24px',
+                  backgroundColor: 'var(--color-bg-elevated)',
+                  color: 'var(--color-text-secondary)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

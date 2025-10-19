@@ -6,7 +6,7 @@ import UrlList from './UrlList';
 import type { ShortenedUrl } from '../types';
 
 const Dashboard: React.FC = () => {
-  const { userInfo, logout } = useAuth();
+  const { userInfo } = useAuth();
   const [urls, setUrls] = useState<ShortenedUrl[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -162,22 +162,6 @@ const Dashboard: React.FC = () => {
             title="Export all URLs to JSON"
           >
             {isExporting ? 'Exporting...' : '↓ Export JSON'}
-          </button>
-          <button
-            onClick={logout}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: 'var(--color-bg-elevated)',
-              color: 'var(--color-text-secondary)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-md)',
-              fontSize: '14px',
-              fontWeight: 500,
-              cursor: 'pointer',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            Logout
           </button>
         </div>
       </div>

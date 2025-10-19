@@ -12,6 +12,7 @@ interface UrlListProps {
 const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const handleDeactivate = async (code: string) => {
     if (!confirm(`Are you sure you want to deactivate the URL: ${code}?`)) {
@@ -50,6 +51,22 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
   };
 
   const buildLinkForItem = (item: ShortenedUrl) => buildShortLink(item.short_code, item.redirect_base_url);
+
+  const handleCopyLink = async (shortCode: string) => {
+    const url = urls.find(u => u.short_code === shortCode);
+    if (url) {
+      const link = buildLinkForItem(url);
+      if (link) {
+        try {
+          await navigator.clipboard.writeText(link);
+          setCopiedCode(shortCode);
+          setTimeout(() => setCopiedCode(null), 2000);
+        } catch (err) {
+          console.error('Failed to copy:', err);
+        }
+      }
+    }
+  };
 
   return (
     <div>
@@ -110,6 +127,18 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
                   letterSpacing: '0.5px'
                 }}>
                   Short Code
+                </th>
+                <th style={{ 
+                  padding: '14px 16px', 
+                  textAlign: 'left',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--color-text-secondary)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  width: '100px'
+                }}>
+                  Copy
                 </th>
                 <th style={{ 
                   padding: '14px 16px', 
@@ -219,6 +248,25 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
                           {url.short_code}
                         </span>
                       )}
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <button
+                        onClick={() => handleCopyLink(url.short_code)}
+                        style={{
+                          padding: '6px 12px',
+                          backgroundColor: 'var(--color-bg-elevated)',
+                          color: 'var(--color-text-primary)',
+                          border: '1px solid var(--color-border)',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap'
+                        }}
+                        title="Copy link to clipboard"
+                      >
+                        {copiedCode === url.short_code ? '✓ Copied' : '📋 Copy'}
+                      </button>
                     </td>
                     <td style={{ 
                       padding: '14px 16px', 
