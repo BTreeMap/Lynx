@@ -8,7 +8,12 @@ const AppContent: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div style={{ textAlign: 'center', padding: '50px' }}>
+      <div style={{ 
+        textAlign: 'center', 
+        padding: '80px 20px',
+        color: 'var(--color-text-tertiary)',
+        fontSize: '14px'
+      }}>
         Loading...
       </div>
     );
