@@ -62,6 +62,7 @@ jobs:
           cat .dockerignore
           echo "Files in frontend directory:"
           ls -la frontend/
+        shell: bash
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -155,6 +156,7 @@ jobs:
           cat .dockerignore
           echo "Files in frontend directory:"
           ls -la frontend/
+        shell: bash
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
