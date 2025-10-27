@@ -6,7 +6,7 @@
 use dashmap::DashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use crate::analytics::models::{AnalyticsKey, AnalyticsRecord, AnalyticsValue};
 

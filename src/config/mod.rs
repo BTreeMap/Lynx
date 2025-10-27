@@ -1,6 +1,5 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
