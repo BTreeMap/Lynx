@@ -9,6 +9,7 @@ Lynx is a URL shortener backend API written in Rust with support for multiple st
 - 🔐 **Access Control**: OAuth 2.0 and Cloudflare Zero Trust authentication with configurable pass-through mode
 - 🚀 **Dual Server Architecture**: Separate ports for API management and client redirects
 - 📊 **Analytics**: Track click counts for each shortened URL
+- 🌍 **Visitor IP Analytics** (Optional): GeoIP-based visitor analytics with privacy controls (see [Analytics Guide](docs/ANALYTICS.md))
 - 🔒 **Immutable URLs**: URLs are immutable and can only be deactivated, not deleted or modified
 - 🔄 **Deactivation**: URLs can be deactivated and reactivated (e.g., for policy violations)
 - 👥 **Multi-User Support**: Each user can manage their own links; admins can manage all links

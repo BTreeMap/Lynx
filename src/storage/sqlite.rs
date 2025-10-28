@@ -110,6 +110,49 @@ impl Storage for SqliteStorage {
         .execute(self.pool.as_ref())
         .await?;
 
+        // Create analytics table for visitor IP analytics
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS analytics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                short_code TEXT NOT NULL,
+                time_bucket INTEGER NOT NULL,
+                country_code TEXT,
+                region TEXT,
+                city TEXT,
+                asn INTEGER,
+                ip_version INTEGER NOT NULL,
+                visit_count INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(short_code, time_bucket, country_code, region, city, asn, ip_version)
+            )
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Index for analytics queries by short code
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_short_code ON analytics(short_code)",
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Index for analytics queries by time bucket
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_time_bucket ON analytics(time_bucket DESC)",
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Composite index for short code and time range queries
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_short_code_time ON analytics(short_code, time_bucket DESC)",
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
         Ok(())
     }
 
@@ -541,6 +584,165 @@ impl Storage for SqliteStorage {
         .await?;
 
         Ok(result.rows_affected() as i64)
+    }
+
+    async fn upsert_analytics_batch(
+        &self,
+        records: Vec<(String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64)>,
+    ) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| anyhow!(e))?
+            .as_secs() as i64;
+
+        for (short_code, time_bucket, country_code, region, city, asn, ip_version, count) in records {
+            sqlx::query(
+                r#"
+                INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(short_code, time_bucket, country_code, region, city, asn, ip_version)
+                DO UPDATE SET visit_count = visit_count + ?, updated_at = ?
+                "#,
+            )
+            .bind(&short_code)
+            .bind(time_bucket)
+            .bind(&country_code)
+            .bind(&region)
+            .bind(&city)
+            .bind(asn)
+            .bind(ip_version)
+            .bind(count)
+            .bind(now)
+            .bind(now)
+            .bind(count)
+            .bind(now)
+            .execute(self.pool.as_ref())
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn get_analytics(
+        &self,
+        short_code: &str,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<crate::analytics::AnalyticsEntry>> {
+        // Simplified query building
+        let results = if let (Some(start), Some(end)) = (start_time, end_time) {
+            sqlx::query_as::<_, crate::analytics::AnalyticsEntry>(
+                "SELECT id, short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at FROM analytics WHERE short_code = ? AND time_bucket >= ? AND time_bucket <= ? ORDER BY time_bucket DESC LIMIT ?"
+            )
+            .bind(short_code)
+            .bind(start)
+            .bind(end)
+            .bind(limit)
+            .fetch_all(self.pool.as_ref())
+            .await?
+        } else if let Some(start) = start_time {
+            sqlx::query_as::<_, crate::analytics::AnalyticsEntry>(
+                "SELECT id, short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at FROM analytics WHERE short_code = ? AND time_bucket >= ? ORDER BY time_bucket DESC LIMIT ?"
+            )
+            .bind(short_code)
+            .bind(start)
+            .bind(limit)
+            .fetch_all(self.pool.as_ref())
+            .await?
+        } else if let Some(end) = end_time {
+            sqlx::query_as::<_, crate::analytics::AnalyticsEntry>(
+                "SELECT id, short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at FROM analytics WHERE short_code = ? AND time_bucket <= ? ORDER BY time_bucket DESC LIMIT ?"
+            )
+            .bind(short_code)
+            .bind(end)
+            .bind(limit)
+            .fetch_all(self.pool.as_ref())
+            .await?
+        } else {
+            sqlx::query_as::<_, crate::analytics::AnalyticsEntry>(
+                "SELECT id, short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at FROM analytics WHERE short_code = ? ORDER BY time_bucket DESC LIMIT ?"
+            )
+            .bind(short_code)
+            .bind(limit)
+            .fetch_all(self.pool.as_ref())
+            .await?
+        };
+
+        Ok(results)
+    }
+
+    async fn get_analytics_aggregate(
+        &self,
+        short_code: &str,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        group_by: &str,
+        limit: i64,
+    ) -> Result<Vec<crate::analytics::AnalyticsAggregate>> {
+        let group_field = match group_by {
+            "country" => "country_code",
+            "region" => "region",
+            "city" => "city",
+            "asn" => "CAST(asn AS TEXT)",
+            "hour" => "time_bucket",
+            "day" => "(time_bucket / 86400) * 86400",
+            _ => "country_code",
+        };
+
+        let query_str = if let (Some(start), Some(end)) = (start_time, end_time) {
+            format!(
+                "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = ? AND time_bucket >= ? AND time_bucket <= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
+                group_field, group_field, group_field
+            )
+        } else if let Some(start) = start_time {
+            format!(
+                "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = ? AND time_bucket >= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
+                group_field, group_field, group_field
+            )
+        } else if let Some(end) = end_time {
+            format!(
+                "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = ? AND time_bucket <= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
+                group_field, group_field, group_field
+            )
+        } else {
+            format!(
+                "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
+                group_field, group_field, group_field
+            )
+        };
+
+        let results = if let (Some(start), Some(end)) = (start_time, end_time) {
+            sqlx::query_as::<_, crate::analytics::AnalyticsAggregate>(&query_str)
+                .bind(short_code)
+                .bind(start)
+                .bind(end)
+                .bind(limit)
+                .fetch_all(self.pool.as_ref())
+                .await?
+        } else if let Some(start) = start_time {
+            sqlx::query_as::<_, crate::analytics::AnalyticsAggregate>(&query_str)
+                .bind(short_code)
+                .bind(start)
+                .bind(limit)
+                .fetch_all(self.pool.as_ref())
+                .await?
+        } else if let Some(end) = end_time {
+            sqlx::query_as::<_, crate::analytics::AnalyticsAggregate>(&query_str)
+                .bind(short_code)
+                .bind(end)
+                .bind(limit)
+                .fetch_all(self.pool.as_ref())
+                .await?
+        } else {
+            sqlx::query_as::<_, crate::analytics::AnalyticsAggregate>(&query_str)
+                .bind(short_code)
+                .bind(limit)
+                .fetch_all(self.pool.as_ref())
+                .await?
+        };
+
+        Ok(results)
     }
 }
 

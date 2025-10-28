@@ -11,6 +11,8 @@ pub struct Config {
     pub frontend: FrontendConfig,
     pub cache: CacheConfig,
     pub pagination: PaginationConfig,
+    #[serde(default)]
+    pub analytics: AnalyticsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +120,77 @@ pub struct FrontendConfig {
     /// If None, uses embedded frontend (if available)
     pub static_dir: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsConfig {
+    /// Enable visitor IP analytics
+    #[serde(default)]
+    pub enabled: bool,
+    
+    /// Path to MaxMind GeoLite2-City or GeoIP2-City database file (.mmdb)
+    pub geoip_city_db_path: Option<String>,
+    
+    /// Path to MaxMind GeoLite2-ASN database file (.mmdb)
+    pub geoip_asn_db_path: Option<String>,
+    
+    /// Enable IP address anonymization (truncate to network prefix)
+    #[serde(default)]
+    pub ip_anonymization: bool,
+    
+    /// Trusted proxy mode for client IP extraction
+    #[serde(default)]
+    pub trusted_proxy_mode: TrustedProxyMode,
+    
+    /// List of trusted proxy CIDR ranges (e.g., ["10.0.0.0/8", "172.16.0.0/12"])
+    #[serde(default)]
+    pub trusted_proxies: Vec<String>,
+    
+    /// Number of trusted proxies to skip from the right in X-Forwarded-For
+    pub num_trusted_proxies: Option<usize>,
+    
+    /// Flush interval for analytics aggregator (seconds)
+    #[serde(default = "AnalyticsConfig::default_flush_interval_secs")]
+    pub flush_interval_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum TrustedProxyMode {
+    /// No proxy trust - use socket remote address only
+    None,
+    /// Trust standard headers (Forwarded, X-Forwarded-For) with trust validation
+    Standard,
+    /// Trust Cloudflare-specific header (CF-Connecting-IP)
+    Cloudflare,
+}
+
+impl Default for TrustedProxyMode {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+impl Default for AnalyticsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            geoip_city_db_path: None,
+            geoip_asn_db_path: None,
+            ip_anonymization: false,
+            trusted_proxy_mode: TrustedProxyMode::None,
+            trusted_proxies: Vec::new(),
+            num_trusted_proxies: None,
+            flush_interval_secs: Self::default_flush_interval_secs(),
+        }
+    }
+}
+
+impl AnalyticsConfig {
+    const fn default_flush_interval_secs() -> u64 {
+        60 // 1 minute
+    }
+}
+
 
 impl OAuthConfig {
     const fn default_cache_ttl_secs() -> u64 {
@@ -282,6 +355,57 @@ impl Config {
             );
         }
 
+        // Analytics configuration
+        let analytics_enabled = std::env::var("ANALYTICS_ENABLED")
+            .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
+            .unwrap_or(false);
+
+        let analytics = if analytics_enabled {
+            let geoip_city_db_path = std::env::var("ANALYTICS_GEOIP_CITY_DB_PATH").ok();
+            let geoip_asn_db_path = std::env::var("ANALYTICS_GEOIP_ASN_DB_PATH").ok();
+            
+            let ip_anonymization = std::env::var("ANALYTICS_IP_ANONYMIZATION")
+                .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
+                .unwrap_or(false);
+
+            let trusted_proxy_mode = std::env::var("ANALYTICS_TRUSTED_PROXY_MODE")
+                .unwrap_or_else(|_| "none".to_string())
+                .to_lowercase();
+
+            let trusted_proxy_mode = match trusted_proxy_mode.as_str() {
+                "cloudflare" => TrustedProxyMode::Cloudflare,
+                "standard" => TrustedProxyMode::Standard,
+                _ => TrustedProxyMode::None,
+            };
+
+            let trusted_proxies = std::env::var("ANALYTICS_TRUSTED_PROXIES")
+                .ok()
+                .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+                .unwrap_or_default();
+
+            let num_trusted_proxies = std::env::var("ANALYTICS_NUM_TRUSTED_PROXIES")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok());
+
+            let flush_interval_secs = std::env::var("ANALYTICS_FLUSH_INTERVAL_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or_else(AnalyticsConfig::default_flush_interval_secs);
+
+            AnalyticsConfig {
+                enabled: true,
+                geoip_city_db_path,
+                geoip_asn_db_path,
+                ip_anonymization,
+                trusted_proxy_mode,
+                trusted_proxies,
+                num_trusted_proxies,
+                flush_interval_secs,
+            }
+        } else {
+            AnalyticsConfig::default()
+        };
+
         Ok(Config {
             database: DatabaseConfig {
                 backend,
@@ -314,6 +438,7 @@ impl Config {
             pagination: PaginationConfig {
                 cursor_hmac_secret,
             },
+            analytics,
         })
     }
 }

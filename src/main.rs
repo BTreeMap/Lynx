@@ -1,19 +1,11 @@
-mod api;
-mod auth;
-mod config;
-mod cursor;
-mod models;
-mod redirect;
-mod storage;
-
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use tracing::info;
 
-use auth::AuthService;
-use config::{AuthMode, Config, DatabaseBackend};
-use storage::{CachedStorage, PostgresStorage, SqliteStorage, Storage};
+use lynx::auth::AuthService;
+use lynx::config::{AuthMode, Config, DatabaseBackend};
+use lynx::storage::{CachedStorage, PostgresStorage, SqliteStorage, Storage};
 
 #[derive(Parser)]
 #[command(name = "lynx")]
@@ -409,7 +401,7 @@ async fn run_server() -> Result<()> {
     info!("Loaded configuration");
 
     // Initialize cursor HMAC key
-    cursor::init_cursor_hmac_key(config.pagination.cursor_hmac_secret.as_deref());
+    lynx::cursor::init_cursor_hmac_key(config.pagination.cursor_hmac_secret.as_deref());
     info!("Cursor pagination HMAC key initialized");
 
     // Initialize storage
@@ -486,9 +478,96 @@ async fn run_server() -> Result<()> {
         config.redirect_base_url
     );
 
+    // Initialize analytics if enabled
+    let (analytics_config, geoip_service, analytics_aggregator) = if config.analytics.enabled {
+        use lynx::analytics::{AnalyticsAggregator, GeoIpService};
+
+        info!("📊 Analytics enabled");
+        
+        let city_path = config.analytics.geoip_city_db_path.as_deref();
+        let asn_path = config.analytics.geoip_asn_db_path.as_deref();
+        
+        let geoip = match GeoIpService::new(city_path, asn_path) {
+            Ok(service) => {
+                if let Some(path) = city_path {
+                    info!("   - GeoIP City database loaded from: {}", path);
+                }
+                if let Some(path) = asn_path {
+                    info!("   - GeoIP ASN database loaded from: {}", path);
+                }
+                if city_path.is_none() && asn_path.is_none() {
+                    tracing::warn!("   - No GeoIP databases configured. Analytics will have no geolocation data.");
+                }
+                Some(Arc::new(service))
+            }
+            Err(e) => {
+                tracing::warn!("   - Failed to load GeoIP databases: {}. Analytics will have no geolocation data.", e);
+                None
+            }
+        };
+
+        let aggregator = Arc::new(AnalyticsAggregator::new());
+        
+        // Start flush task with storage
+        let storage_clone = Arc::clone(&storage);
+        let _flush_handle = aggregator.start_flush_task_with_storage(
+            config.analytics.flush_interval_secs,
+            move |entries| {
+                let storage = Arc::clone(&storage_clone);
+                Box::pin(async move {
+                    if entries.is_empty() {
+                        return;
+                    }
+                    
+                    // Convert entries to storage format
+                    let records: Vec<(String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64)> = entries
+                        .into_iter()
+                        .map(|(key, value)| {
+                            (
+                                key.short_code,
+                                key.time_bucket,
+                                key.country_code,
+                                key.region,
+                                key.city,
+                                key.asn.map(|a| a as i64),
+                                key.ip_version as i32,
+                                value.count as i64,
+                            )
+                        })
+                        .collect();
+                    
+                    // Batch insert to storage
+                    if let Err(e) = storage.upsert_analytics_batch(records).await {
+                        tracing::error!("Failed to flush analytics to storage: {}", e);
+                    } else {
+                        tracing::debug!("Successfully flushed analytics to storage");
+                    }
+                })
+            },
+        );
+        
+        info!(
+            "   - IP anonymization: {}",
+            if config.analytics.ip_anonymization { "enabled" } else { "disabled" }
+        );
+        info!("   - Trusted proxy mode: {:?}", config.analytics.trusted_proxy_mode);
+        info!("   - Flush interval: {} seconds", config.analytics.flush_interval_secs);
+
+        (Some(config.analytics.clone()), geoip, Some(aggregator))
+    } else {
+        info!("📊 Analytics disabled");
+        (None, None, None)
+    };
+
     let api_router =
-        api::create_api_router(Arc::clone(&storage), auth_service, Arc::clone(&config));
-    let redirect_router = redirect::create_redirect_router(Arc::clone(&storage));
+        lynx::api::create_api_router(Arc::clone(&storage), auth_service, Arc::clone(&config));
+    
+    let redirect_router = lynx::redirect::create_redirect_router(
+        Arc::clone(&storage),
+        analytics_config,
+        geoip_service,
+        analytics_aggregator,
+    );
 
     // Log frontend configuration
     if let Some(ref static_dir) = config.frontend.static_dir {

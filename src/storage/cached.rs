@@ -445,4 +445,35 @@ impl Storage for CachedStorage {
         // Note: This does not invalidate cache - cache purge happens on instance restart
         self.inner.bulk_reactivate_user_links(user_id).await
     }
+
+    async fn upsert_analytics_batch(
+        &self,
+        records: Vec<(String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64)>,
+    ) -> Result<()> {
+        // Analytics are not cached, pass through to storage
+        self.inner.upsert_analytics_batch(records).await
+    }
+
+    async fn get_analytics(
+        &self,
+        short_code: &str,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<crate::analytics::AnalyticsEntry>> {
+        // Analytics are not cached, pass through to storage
+        self.inner.get_analytics(short_code, start_time, end_time, limit).await
+    }
+
+    async fn get_analytics_aggregate(
+        &self,
+        short_code: &str,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        group_by: &str,
+        limit: i64,
+    ) -> Result<Vec<crate::analytics::AnalyticsAggregate>> {
+        // Analytics aggregates are not cached, pass through to storage
+        self.inner.get_analytics_aggregate(short_code, start_time, end_time, group_by, limit).await
+    }
 }
