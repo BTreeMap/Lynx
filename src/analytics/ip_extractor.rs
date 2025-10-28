@@ -163,7 +163,8 @@ mod tests {
     fn create_config(mode: TrustedProxyMode) -> AnalyticsConfig {
         AnalyticsConfig {
             enabled: true,
-            geoip_db_path: None,
+            geoip_city_db_path: None,
+            geoip_asn_db_path: None,
             ip_anonymization: false,
             trusted_proxy_mode: mode,
             trusted_proxies: vec![],

@@ -67,11 +67,7 @@ clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 
 # Analytics - GeoIP
-maxminddb = { version = "0.26", features = ["mmap", "simdutf8"], optional = true }
-
-[features]
-default = []
-analytics = ["maxminddb"]
+maxminddb = { version = "0.26", features = ["mmap", "simdutf8"] }
 
 [build-dependencies]
 statrs = "0.18"

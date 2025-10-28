@@ -479,26 +479,31 @@ async fn run_server() -> Result<()> {
     );
 
     // Initialize analytics if enabled
-    #[cfg(feature = "analytics")]
     let (analytics_config, geoip_service, analytics_aggregator) = if config.analytics.enabled {
         use lynx::analytics::{AnalyticsAggregator, GeoIpService};
 
         info!("📊 Analytics enabled");
         
-        let geoip = if let Some(ref db_path) = config.analytics.geoip_db_path {
-            match GeoIpService::new(db_path) {
-                Ok(service) => {
-                    info!("   - GeoIP database loaded from: {}", db_path);
-                    Some(Arc::new(service))
+        let city_path = config.analytics.geoip_city_db_path.as_deref();
+        let asn_path = config.analytics.geoip_asn_db_path.as_deref();
+        
+        let geoip = match GeoIpService::new(city_path, asn_path) {
+            Ok(service) => {
+                if let Some(path) = city_path {
+                    info!("   - GeoIP City database loaded from: {}", path);
                 }
-                Err(e) => {
-                    tracing::warn!("   - Failed to load GeoIP database: {}. Analytics will have no geolocation data.", e);
-                    None
+                if let Some(path) = asn_path {
+                    info!("   - GeoIP ASN database loaded from: {}", path);
                 }
+                if city_path.is_none() && asn_path.is_none() {
+                    tracing::warn!("   - No GeoIP databases configured. Analytics will have no geolocation data.");
+                }
+                Some(Arc::new(service))
             }
-        } else {
-            tracing::warn!("   - No GeoIP database path configured. Analytics will have no geolocation data.");
-            None
+            Err(e) => {
+                tracing::warn!("   - Failed to load GeoIP databases: {}. Analytics will have no geolocation data.", e);
+                None
+            }
         };
 
         let aggregator = Arc::new(AnalyticsAggregator::new());
@@ -522,16 +527,12 @@ async fn run_server() -> Result<()> {
     let api_router =
         lynx::api::create_api_router(Arc::clone(&storage), auth_service, Arc::clone(&config));
     
-    #[cfg(feature = "analytics")]
     let redirect_router = lynx::redirect::create_redirect_router(
         Arc::clone(&storage),
         analytics_config,
         geoip_service,
         analytics_aggregator,
     );
-    
-    #[cfg(not(feature = "analytics"))]
-    let redirect_router = lynx::redirect::create_redirect_router(Arc::clone(&storage));
 
     // Log frontend configuration
     if let Some(ref static_dir) = config.frontend.static_dir {

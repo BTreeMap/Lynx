@@ -127,8 +127,11 @@ pub struct AnalyticsConfig {
     #[serde(default)]
     pub enabled: bool,
     
-    /// Path to MaxMind GeoLite2 or GeoIP2 database file (.mmdb)
-    pub geoip_db_path: Option<String>,
+    /// Path to MaxMind GeoLite2-City or GeoIP2-City database file (.mmdb)
+    pub geoip_city_db_path: Option<String>,
+    
+    /// Path to MaxMind GeoLite2-ASN database file (.mmdb)
+    pub geoip_asn_db_path: Option<String>,
     
     /// Enable IP address anonymization (truncate to network prefix)
     #[serde(default)]
@@ -171,7 +174,8 @@ impl Default for AnalyticsConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            geoip_db_path: None,
+            geoip_city_db_path: None,
+            geoip_asn_db_path: None,
             ip_anonymization: false,
             trusted_proxy_mode: TrustedProxyMode::None,
             trusted_proxies: Vec::new(),
@@ -357,7 +361,8 @@ impl Config {
             .unwrap_or(false);
 
         let analytics = if analytics_enabled {
-            let geoip_db_path = std::env::var("ANALYTICS_GEOIP_DB_PATH").ok();
+            let geoip_city_db_path = std::env::var("ANALYTICS_GEOIP_CITY_DB_PATH").ok();
+            let geoip_asn_db_path = std::env::var("ANALYTICS_GEOIP_ASN_DB_PATH").ok();
             
             let ip_anonymization = std::env::var("ANALYTICS_IP_ANONYMIZATION")
                 .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
@@ -389,7 +394,8 @@ impl Config {
 
             AnalyticsConfig {
                 enabled: true,
-                geoip_db_path,
+                geoip_city_db_path,
+                geoip_asn_db_path,
                 ip_anonymization,
                 trusted_proxy_mode,
                 trusted_proxies,

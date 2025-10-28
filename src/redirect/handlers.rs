@@ -12,17 +12,12 @@ use std::time::Instant;
 use super::middleware::RequestStart;
 use crate::config::AnalyticsConfig;
 use crate::storage::Storage;
-
-#[cfg(feature = "analytics")]
 use crate::analytics::{AnalyticsAggregator, AnalyticsRecord, GeoIpService};
 
 pub struct RedirectState {
     pub storage: Arc<dyn Storage>,
-    #[cfg(feature = "analytics")]
     pub analytics_config: Option<AnalyticsConfig>,
-    #[cfg(feature = "analytics")]
     pub geoip_service: Option<Arc<GeoIpService>>,
-    #[cfg(feature = "analytics")]
     pub analytics_aggregator: Option<Arc<AnalyticsAggregator>>,
 }
 
@@ -66,7 +61,6 @@ pub async fn redirect_url(
                     }
 
                     // Record analytics if enabled
-                    #[cfg(feature = "analytics")]
                     if let (Some(config), Some(geoip), Some(aggregator)) = (
                         &state.analytics_config,
                         &state.geoip_service,
@@ -120,7 +114,6 @@ pub async fn redirect_url(
     }
 }
 
-#[cfg(feature = "analytics")]
 fn record_analytics(
     short_code: &str,
     headers: &HeaderMap,
