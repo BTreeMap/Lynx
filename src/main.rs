@@ -7,6 +7,9 @@ use lynx::auth::AuthService;
 use lynx::config::{AuthMode, Config, DatabaseBackend};
 use lynx::storage::{CachedStorage, PostgresStorage, SqliteStorage, Storage};
 
+// Type alias for analytics record tuple to reduce complexity
+type AnalyticsRecord = (String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64);
+
 #[derive(Parser)]
 #[command(name = "lynx")]
 #[command(about = "Lynx URL Shortener", long_about = None)]
@@ -181,7 +184,7 @@ async fn handle_admin_command(command: AdminCommands) -> Result<()> {
                 println!("No manually promoted admins found.");
             } else {
                 println!("Manually promoted admins:");
-                println!("{:<40} {:<15} {}", "User ID", "Auth Method", "Email");
+                println!("{:<40} {:<15} Email", "User ID", "Auth Method");
                 println!("{}", "-".repeat(80));
                 for (user_id, auth_method, email) in admins {
                     println!("{:<40} {:<15} {}", user_id, auth_method, email);
@@ -299,7 +302,7 @@ async fn handle_user_command(command: UserCommands) -> Result<()> {
                 }
             } else {
                 println!("Users (page {}, showing {} results):", page, users.len());
-                println!("{:<40} {:<15} {:<40} {}", "User ID", "Auth Method", "Email", "Created At");
+                println!("{:<40} {:<15} {:<40} Created At", "User ID", "Auth Method", "Email");
                 println!("{}", "-".repeat(120));
                 for (user_id, auth_method, email, created_at) in users {
                     let datetime = chrono::DateTime::from_timestamp(created_at, 0)
@@ -317,7 +320,7 @@ async fn handle_user_command(command: UserCommands) -> Result<()> {
                 println!("No manually promoted admins found.");
             } else {
                 println!("Manually promoted admins:");
-                println!("{:<40} {:<15} {}", "User ID", "Auth Method", "Email");
+                println!("{:<40} {:<15} Email", "User ID", "Auth Method");
                 println!("{}", "-".repeat(80));
                 for (user_id, auth_method, email) in admins {
                     println!("{:<40} {:<15} {}", user_id, auth_method, email);
@@ -345,7 +348,7 @@ async fn handle_user_command(command: UserCommands) -> Result<()> {
                 }
             } else {
                 println!("Links for user '{}' (page {}, showing {} results):", user_id, page, links.len());
-                println!("{:<15} {:<60} {:<10} {:<10} {}", "Short Code", "Original URL", "Clicks", "Active", "Created At");
+                println!("{:<15} {:<60} {:<10} {:<10} Created At", "Short Code", "Original URL", "Clicks", "Active");
                 println!("{}", "-".repeat(120));
                 for link in links {
                     let url_display = if link.original_url.len() > 57 {
@@ -520,7 +523,7 @@ async fn run_server() -> Result<()> {
                     }
                     
                     // Convert entries to storage format
-                    let records: Vec<(String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64)> = entries
+                    let records: Vec<AnalyticsRecord> = entries
                         .into_iter()
                         .map(|(key, value)| {
                             (

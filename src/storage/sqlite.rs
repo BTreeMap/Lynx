@@ -690,17 +690,17 @@ impl Storage for SqliteStorage {
             _ => "country_code",
         };
 
-        let query_str = if let (Some(start), Some(end)) = (start_time, end_time) {
+        let query_str = if let (Some(_start), Some(_end)) = (start_time, end_time) {
             format!(
                 "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = ? AND time_bucket >= ? AND time_bucket <= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
                 group_field, group_field, group_field
             )
-        } else if let Some(start) = start_time {
+        } else if let Some(_start) = start_time {
             format!(
                 "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = ? AND time_bucket >= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
                 group_field, group_field, group_field
             )
-        } else if let Some(end) = end_time {
+        } else if let Some(_end) = end_time {
             format!(
                 "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = ? AND time_bucket <= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
                 group_field, group_field, group_field

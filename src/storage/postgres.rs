@@ -673,17 +673,17 @@ impl Storage for PostgresStorage {
             _ => "country_code",
         };
 
-        let query_str = if let (Some(start), Some(end)) = (start_time, end_time) {
+        let query_str = if let (Some(_start), Some(_end)) = (start_time, end_time) {
             format!(
                 "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = $1 AND time_bucket >= $2 AND time_bucket <= $3 AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT $4",
                 group_field, group_field, group_field
             )
-        } else if let Some(start) = start_time {
+        } else if let Some(_start) = start_time {
             format!(
                 "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = $1 AND time_bucket >= $2 AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT $3",
                 group_field, group_field, group_field
             )
-        } else if let Some(end) = end_time {
+        } else if let Some(_end) = end_time {
             format!(
                 "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = $1 AND time_bucket <= $2 AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT $3",
                 group_field, group_field, group_field

@@ -50,7 +50,7 @@ pub async fn get_analytics(
     Path(short_code): Path<String>,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> impl IntoResponse {
-    let limit = params.limit.min(1000).max(1);
+    let limit = params.limit.clamp(1, 1000);
     
     match storage
         .get_analytics(&short_code, params.start_time, params.end_time, limit)
@@ -77,7 +77,7 @@ pub async fn get_analytics_aggregate(
     Path(short_code): Path<String>,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> impl IntoResponse {
-    let limit = params.limit.min(1000).max(1);
+    let limit = params.limit.clamp(1, 1000);
     let group_by = params.group_by.as_deref().unwrap_or("country");
     
     match storage
