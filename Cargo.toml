@@ -75,3 +75,8 @@ statrs = "0.18"
 [profile.profiling]
 inherits = "release"
 debug = true
+
+[dev-dependencies]
+# Use same version as main dependency to avoid conflicts
+# reqwest is already a dependency with json and rustls-tls features
+
