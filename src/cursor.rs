@@ -52,7 +52,7 @@ pub fn create_cursor(data: &CursorData) -> Result<String> {
     mac.update(payload.as_bytes());
     let signature = mac.finalize();
     let signature_bytes = signature.into_bytes();
-    let signature_b64 = BASE64_URL_SAFE_NO_PAD.encode(&signature_bytes);
+    let signature_b64 = BASE64_URL_SAFE_NO_PAD.encode(signature_bytes);
 
     // Return payload.signature
     Ok(format!("{}.{}", payload, signature_b64))

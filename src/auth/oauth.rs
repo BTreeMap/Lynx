@@ -181,6 +181,7 @@ impl OAuthValidator {
     }
 }
 
+#[cfg(test)]
 fn audience_matches(aud_claim: Option<&Value>, expected: &str) -> bool {
     match aud_claim {
         Some(Value::String(aud)) => aud == expected,
@@ -231,6 +232,7 @@ struct Jwk {
     #[serde(default)]
     kty: String,
     #[serde(default)]
+    #[allow(dead_code)] // Part of JWK spec, deserialized but not used in validation
     alg: Option<String>,
     #[serde(default)]
     n: Option<String>,

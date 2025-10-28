@@ -72,23 +72,17 @@ impl GeoIpService {
                 if let Some(city) = city_opt {
                     self.extract_from_city(&city, &mut geo_location);
                 }
-            } else {
+            } else if let Ok(Some(country)) = reader.lookup::<geoip2::Country>(ip) {
                 // Fallback: try country-only lookup
-                if let Ok(country_opt) = reader.lookup::<geoip2::Country>(ip) {
-                    if let Some(country) = country_opt {
-                        self.extract_from_country(&country, &mut geo_location);
-                    }
-                }
+                self.extract_from_country(&country, &mut geo_location);
             }
         }
 
         // Lookup ASN information
         if let Some(ref reader) = self.asn_reader {
-            if let Ok(asn_opt) = reader.lookup::<geoip2::Asn>(ip) {
-                if let Some(asn) = asn_opt {
-                    geo_location.asn = asn.autonomous_system_number;
-                    geo_location.asn_org = asn.autonomous_system_organization.map(|s| s.to_string());
-                }
+            if let Ok(Some(asn)) = reader.lookup::<geoip2::Asn>(ip) {
+                geo_location.asn = asn.autonomous_system_number;
+                geo_location.asn_org = asn.autonomous_system_organization.map(|s| s.to_string());
             }
         }
 
