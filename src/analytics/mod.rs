@@ -10,9 +10,11 @@ pub mod geoip;
 pub mod ip_extractor;
 pub mod models;
 pub mod aggregator;
+pub mod storage;
 
 // Re-export commonly used types
 pub use geoip::GeoIpService;
 pub use ip_extractor::extract_client_ip;
 pub use models::{AnalyticsRecord, GeoLocation};
 pub use aggregator::AnalyticsAggregator;
+pub use storage::{AnalyticsEntry, AnalyticsQuery, AnalyticsAggregate, AnalyticsGroupBy};

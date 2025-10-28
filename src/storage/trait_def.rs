@@ -134,4 +134,31 @@ pub trait Storage: Send + Sync {
     /// Reactivate all links created by a specific user
     /// Returns the number of links reactivated
     async fn bulk_reactivate_user_links(&self, user_id: &str) -> Result<i64>;
+
+    /// Batch insert or update analytics records
+    /// Uses UPSERT to increment visit counts for existing records
+    async fn upsert_analytics_batch(
+        &self,
+        records: Vec<(String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64)>,
+    ) -> Result<()>;
+    // (short_code, time_bucket, country_code, region, city, asn, ip_version, count)
+
+    /// Get analytics for a specific short code
+    async fn get_analytics(
+        &self,
+        short_code: &str,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<crate::analytics::AnalyticsEntry>>;
+
+    /// Get aggregated analytics grouped by a dimension
+    async fn get_analytics_aggregate(
+        &self,
+        short_code: &str,
+        start_time: Option<i64>,
+        end_time: Option<i64>,
+        group_by: &str,
+        limit: i64,
+    ) -> Result<Vec<crate::analytics::AnalyticsAggregate>>;
 }
