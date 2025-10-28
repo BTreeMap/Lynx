@@ -508,8 +508,43 @@ async fn run_server() -> Result<()> {
 
         let aggregator = Arc::new(AnalyticsAggregator::new());
         
-        // Start flush task
-        let _flush_handle = aggregator.start_flush_task(config.analytics.flush_interval_secs);
+        // Start flush task with storage
+        let storage_clone = Arc::clone(&storage);
+        let _flush_handle = aggregator.start_flush_task_with_storage(
+            config.analytics.flush_interval_secs,
+            move |entries| {
+                let storage = Arc::clone(&storage_clone);
+                Box::pin(async move {
+                    if entries.is_empty() {
+                        return;
+                    }
+                    
+                    // Convert entries to storage format
+                    let records: Vec<(String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64)> = entries
+                        .into_iter()
+                        .map(|(key, value)| {
+                            (
+                                key.short_code,
+                                key.time_bucket,
+                                key.country_code,
+                                key.region,
+                                key.city,
+                                key.asn.map(|a| a as i64),
+                                key.ip_version as i32,
+                                value.count as i64,
+                            )
+                        })
+                        .collect();
+                    
+                    // Batch insert to storage
+                    if let Err(e) = storage.upsert_analytics_batch(records).await {
+                        tracing::error!("Failed to flush analytics to storage: {}", e);
+                    } else {
+                        tracing::debug!("Successfully flushed analytics to storage");
+                    }
+                })
+            },
+        );
         
         info!(
             "   - IP anonymization: {}",

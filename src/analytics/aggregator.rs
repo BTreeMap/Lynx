@@ -63,10 +63,64 @@ impl AnalyticsAggregator {
         result
     }
 
-    /// Start the background flush task
+    /// Start the background flush task with storage callback
     ///
     /// This spawns a tokio task that periodically drains aggregates
     /// and flushes them to the database.
+    pub fn start_flush_task_with_storage<F>(
+        &self,
+        flush_interval_secs: u64,
+        flush_fn: F,
+    ) -> tokio::task::JoinHandle<()>
+    where
+        F: Fn(Vec<(AnalyticsKey, AnalyticsValue)>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + 'static,
+    {
+        let aggregates = Arc::clone(&self.aggregates);
+        let shutdown = Arc::clone(&self.shutdown);
+        
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(
+                tokio::time::Duration::from_secs(flush_interval_secs)
+            );
+            
+            loop {
+                interval.tick().await;
+                
+                // Check shutdown signal
+                if *shutdown.lock().await {
+                    info!("Analytics aggregator flush task shutting down");
+                    break;
+                }
+                
+                // Drain aggregates
+                let count = aggregates.len();
+                if count > 0 {
+                    debug!("Draining {} analytics aggregates", count);
+                    
+                    // Collect keys and values
+                    let mut entries = Vec::new();
+                    let keys: Vec<AnalyticsKey> = aggregates.iter()
+                        .map(|entry| entry.key().clone())
+                        .collect();
+                    
+                    for key in keys {
+                        if let Some((k, v)) = aggregates.remove(&key) {
+                            entries.push((k, v));
+                        }
+                    }
+                    
+                    // Call flush function
+                    if !entries.is_empty() {
+                        flush_fn(entries).await;
+                    }
+                }
+            }
+        })
+    }
+
+    /// Start the background flush task (without storage - for backward compatibility)
+    ///
+    /// This spawns a tokio task that periodically drains aggregates.
     pub fn start_flush_task(
         &self,
         flush_interval_secs: u64,
