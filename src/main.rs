@@ -634,7 +634,10 @@ async fn run_server() -> Result<()> {
         let _ = shutdown_rx.await;
     });
 
-    let redirect_server = axum::serve(redirect_listener, redirect_router);
+    let redirect_server = axum::serve(
+        redirect_listener,
+        redirect_router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    );
 
     // Run servers
     let result = tokio::select! {
