@@ -14,7 +14,13 @@ use tokio::time::{sleep, Duration};
 /// Helper to download GeoIP database
 async fn download_db(url: &str, path: &str) -> Result<(), Box<dyn std::error::Error>> {
     println!("Downloading from {} to {}", url, path);
-    let response = reqwest::get(url).await?;
+    
+    // Create a client that follows redirects
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()?;
+    
+    let response = client.get(url).send().await?;
     let bytes = response.bytes().await?;
     tokio::fs::write(path, bytes).await?;
     Ok(())
@@ -33,10 +39,17 @@ async fn get_dbs() -> Option<(PathBuf, PathBuf)> {
     
     // Try to download
     println!("Downloading GeoIP databases...");
-    let c_ok = download_db("https://s.joefang.org/GeoLite2-City", city.to_str().unwrap()).await.is_ok();
-    let a_ok = download_db("https://s.joefang.org/GeoLite2-ASN", asn.to_str().unwrap()).await.is_ok();
+    let c_result = download_db("https://s.joefang.org/GeoLite2-City", city.to_str().unwrap()).await;
+    let a_result = download_db("https://s.joefang.org/GeoLite2-ASN", asn.to_str().unwrap()).await;
     
-    if c_ok && a_ok {
+    if let Err(e) = &c_result {
+        println!("City download error: {}", e);
+    }
+    if let Err(e) = &a_result {
+        println!("ASN download error: {}", e);
+    }
+    
+    if c_result.is_ok() && a_result.is_ok() {
         Some((city, asn))
     } else {
         println!("Could not download databases - tests will be skipped");
