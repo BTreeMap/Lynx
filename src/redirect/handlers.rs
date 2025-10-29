@@ -12,7 +12,7 @@ use std::time::Instant;
 use super::middleware::RequestStart;
 use crate::config::AnalyticsConfig;
 use crate::storage::Storage;
-use crate::analytics::{AnalyticsAggregator, AnalyticsRecord, GeoIpService};
+use crate::analytics::{AnalyticsAggregator, GeoIpService};
 
 pub struct RedirectState {
     pub storage: Arc<dyn Storage>,
@@ -119,10 +119,11 @@ fn record_analytics(
     headers: &HeaderMap,
     socket_ip: std::net::IpAddr,
     config: &AnalyticsConfig,
-    geoip: &GeoIpService,
+    _geoip: &GeoIpService,
     aggregator: &AnalyticsAggregator,
 ) {
     use crate::analytics::ip_extractor::{anonymize_ip, extract_client_ip};
+    use crate::analytics::AnalyticsEvent;
 
     // Extract client IP based on trust configuration
     let mut client_ip = extract_client_ip(headers, socket_ip, config);
@@ -132,23 +133,16 @@ fn record_analytics(
         client_ip = anonymize_ip(client_ip);
     }
 
-    // Lookup geolocation
-    let geo_location = geoip.lookup(client_ip);
-
-    // Create analytics record
-    let record = AnalyticsRecord {
+    // Create lightweight event WITHOUT GeoIP lookup (deferred to flush time)
+    // This keeps the hot path fast!
+    let event = AnalyticsEvent {
         short_code: short_code.to_string(),
         timestamp: chrono::Utc::now().timestamp(),
-        geo_location,
-        client_ip: if config.ip_anonymization {
-            None // Don't store IP if anonymization is enabled
-        } else {
-            Some(client_ip)
-        },
+        client_ip,
     };
 
-    // Record in aggregator (non-blocking)
-    aggregator.record(record);
+    // Record event in aggregator (non-blocking, no GeoIP lookup!)
+    aggregator.record_event(event);
 }
 
 /// Health check endpoint

@@ -58,6 +58,20 @@ pub struct AnalyticsRecord {
     pub client_ip: Option<IpAddr>,
 }
 
+/// Lightweight analytics event for hot path recording
+/// GeoIP lookup is deferred until flush time for better performance
+#[derive(Debug, Clone)]
+pub struct AnalyticsEvent {
+    /// Short code that was accessed
+    pub short_code: String,
+    
+    /// Timestamp of the visit (Unix timestamp)
+    pub timestamp: i64,
+    
+    /// Client IP address (for deferred GeoIP lookup)
+    pub client_ip: IpAddr,
+}
+
 /// Aggregated analytics key for grouping
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct AnalyticsKey {
@@ -97,6 +111,22 @@ impl AnalyticsKey {
             city: record.geo_location.city.clone(),
             asn: record.geo_location.asn,
             ip_version: record.geo_location.ip_version,
+        }
+    }
+    
+    /// Create a new analytics key from an event and geo location
+    pub fn from_event(event: &AnalyticsEvent, geo_location: &GeoLocation) -> Self {
+        // Truncate timestamp to hour boundary
+        let time_bucket = (event.timestamp / 3600) * 3600;
+        
+        Self {
+            short_code: event.short_code.clone(),
+            time_bucket,
+            country_code: geo_location.country_code.clone(),
+            region: geo_location.region.clone(),
+            city: geo_location.city.clone(),
+            asn: geo_location.asn,
+            ip_version: geo_location.ip_version,
         }
     }
 }
