@@ -21,11 +21,18 @@ This document explains the performance optimizations implemented for the analyti
 
 ```rust
 // HOT PATH: Record lightweight event (fast!)
-fn record_analytics(...) {
+fn record_analytics(
+    short_code: &str,
+    headers: &HeaderMap,
+    socket_ip: std::net::IpAddr,
+    config: &AnalyticsConfig,
+    geoip: &GeoIpService,
+    aggregator: &AnalyticsAggregator,
+) {
     let event = AnalyticsEvent {
         short_code: code.to_string(),
         timestamp: now(),
-        client_ip: extract_ip(...), // Fast IP extraction only
+        client_ip: extract_ip(headers, socket_ip, config),
     };
     aggregator.record_event(event); // Non-blocking
 }
@@ -146,6 +153,11 @@ Look for log lines:
 ### Benchmark Analytics Impact
 
 ```bash
+# Create a test URL first
+curl -X POST http://localhost:8080/api/urls \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "custom_code": "test"}'
+
 # Test without analytics
 ANALYTICS_ENABLED=false wrk -t8 -c1000 -d15s http://localhost:3000/test
 

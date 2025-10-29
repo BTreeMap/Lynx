@@ -97,5 +97,5 @@ Confirmed analytics working correctly:
 - **CPU**: 4-core AMD EPYC 7763
 - **Memory**: 16GB RAM
 - **Database**: SQLite (in-memory via /tmp)
-- **Tool**: wrk HTTP benchmarking
+- **Tool**: `wrk` HTTP benchmarking
 - **Load**: 1000-2000 concurrent connections, 15s duration
