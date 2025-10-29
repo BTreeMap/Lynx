@@ -49,35 +49,69 @@ async fn flush_task() {
 
 **Impact**: Reduced analytics overhead from 5.6% to 2.9%
 
-### 2. Event Batching
+### 2. Actor Pattern for Zero Lock Contention
+
+**Problem**: DashMap with hot keys causes lock contention
+
+**Solution**: Use actor pattern with mpsc channel (similar to ClickCounterActor)
+
+```rust
+// 2-Layer Architecture:
+// Layer 1: Local HashMap in actor (single-threaded, zero locks)
+// Layer 2: Shared DashMap for flush task access
+
+struct AnalyticsActor {
+    receiver: mpsc::Receiver<ActorMessage>,
+    buffer: HashMap<String, Vec<AnalyticsEvent>>,  // Layer 1
+    shared_buffer: Arc<DashMap<...>>,               // Layer 2
+    fast_flush_interval: Duration,                  // 100ms default
+}
+
+// HOT PATH: Lock-free channel send
+pub fn record_event(&self, event: AnalyticsEvent) {
+    self.actor_tx.try_send(ActorMessage::RecordEvent(event));
+}
+
+// ACTOR: Single-threaded accumulation (no locks!)
+ActorMessage::RecordEvent(event) => {
+    self.buffer.entry(event.short_code)
+        .or_insert_with(Vec::new)
+        .push(event);
+}
+
+// Fast flush: Layer 1 → Layer 2 every 100ms
+_ = fast_flush_ticker.tick() => {
+    for (short_code, events) in self.buffer.drain() {
+        self.shared_buffer.entry(short_code)
+            .and_modify(|existing| existing.extend(events))
+            .or_insert(events);
+    }
+}
+```
+
+**Benefits**:
+- Zero lock contention even with hot keys (popular URLs)
+- mpsc channel is lock-free and highly optimized
+- Single-threaded actor eliminates synchronization overhead
+- Layer 1 accumulates events with zero locks
+- Layer 2 provides concurrent read access for flush task
+
+**Impact**: Eliminates DashMap contention bottleneck on hot keys
+
+### 3. Event Batching
 
 Events are batched in memory and processed in bulk during periodic flushes:
 
-- **Collection**: Events buffered in DashMap by short_code
-- **Flush interval**: Configurable (default: 10 seconds)
+- **Collection**: Events buffered via actor pattern
+- **Fast flush**: Layer 1 → Layer 2 every 100ms
+- **Slow flush**: Layer 2 → Database every 10 seconds (configurable)
 - **Processing**: GeoIP lookups done in batch, aggregated, then flushed to database
 
 This approach:
 - Reduces per-request overhead
 - Amortizes GeoIP lookup costs
 - Enables efficient database batch writes
-
-### 3. Lock-Free Data Structures
-
-Analytics uses DashMap for concurrent access without locks:
-
-```rust
-pub struct AnalyticsAggregator {
-    // Lock-free concurrent hash map
-    event_buffer: Arc<DashMap<String, Vec<AnalyticsEvent>>>,
-    aggregates: Arc<DashMap<AnalyticsKey, AnalyticsValue>>,
-}
-```
-
-**Benefits**:
-- No lock contention under high concurrency
-- Multiple threads can record events simultaneously
-- Scales linearly with CPU cores
+- Handles burst traffic without blocking requests
 
 ### 4. Minimal Allocations
 
@@ -130,10 +164,11 @@ ANALYTICS_FLUSH_INTERVAL_SECS=10  # How often to process events
 
 Monitor these to ensure analytics performance:
 
-1. **Event Buffer Size**: Should stay under 10k entries between flushes
+1. **Event Buffer Size**: Should stay under 100k entries (channel capacity)
 2. **Flush Duration**: Should complete in <1 second
 3. **GeoIP Lookup Time**: Should be <1ms per IP on average
 4. **Database Write Time**: Batch inserts should take <100ms
+5. **Actor Channel**: Watch for "Analytics event buffer full" warnings
 
 ### Debug Logging
 
@@ -144,6 +179,72 @@ RUST_LOG=debug cargo run
 ```
 
 Look for log lines:
+- `Processing X analytics event buffers` - Events being flushed from shared buffer
+- `Flushing X analytics aggregates` - Aggregates written to DB
+- `Failed to flush analytics` - Errors to investigate
+- `Analytics event buffer full` - Channel capacity reached (increase buffer size)
+
+## Performance Testing
+
+### Test Actor Pattern Performance
+
+Use the dedicated analytics performance test script:
+
+```bash
+# Test with analytics enabled (actor pattern)
+bash tests/analytics_performance_test.sh http://localhost:3000 ./results 15s 1000
+```
+
+This script specifically tests:
+1. **Single hot URL** - Validates zero contention on popular short codes
+2. **Distributed load** - Tests multiple URLs simultaneously
+3. **Extreme concurrency** - Stress test with 5000 connections
+
+### Compare With/Without Analytics
+
+```bash
+# Test without analytics
+ANALYTICS_ENABLED=false cargo run --release &
+sleep 5
+bash tests/analytics_performance_test.sh
+
+# Restart with analytics
+pkill lynx
+ANALYTICS_ENABLED=true cargo run --release &
+sleep 5
+bash tests/analytics_performance_test.sh
+```
+
+Expected overhead: <3% throughput reduction
+
+### Hot Key Contention Test
+
+To specifically test the actor pattern's ability to handle hot keys:
+
+```bash
+# This hits the same URL repeatedly - tests actor pattern
+wrk -t8 -c1000 -d30s http://localhost:3000/popular-url
+
+# Watch for these indicators of good performance:
+# - Requests/sec: >50k
+# - Latency p99: <100ms
+# - No "buffer full" warnings in logs
+```
+
+### Benchmark Analytics Impact
+
+```bash
+# Create a test URL first
+curl -X POST http://localhost:8080/api/urls \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "custom_code": "test"}'
+
+# Test without analytics
+ANALYTICS_ENABLED=false wrk -t8 -c1000 -d15s http://localhost:3000/test
+
+# Test with analytics
+ANALYTICS_ENABLED=true wrk -t8 -c1000 -d15s http://localhost:3000/test
+```
 - `Processing X analytics event buffers` - Events being flushed
 - `Flushing X analytics aggregates` - Aggregates written to DB
 - `Failed to flush analytics` - Errors to investigate

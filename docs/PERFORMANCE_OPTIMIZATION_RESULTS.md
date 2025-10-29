@@ -21,12 +21,20 @@ Successfully optimized the Lynx URL redirect service to minimize analytics overh
 - Moved GeoIP database lookups from request hot path to background flush task
 - Created lightweight `AnalyticsEvent` struct (IP + timestamp only)
 - GeoIP lookups now happen every 10 seconds during flush, not per request
+- **Actor pattern with mpsc channel** to eliminate lock contention on hot keys
 
 ### Results
 - **Throughput**: 35,585 RPS @ 100 connections
 - **Latency**: 2.87ms average
 - **Impact**: -2.9% throughput (improved from -5.6%)
 - **Improvement**: 45% reduction in analytics overhead
+
+### Actor Pattern Implementation
+- Replaced `DashMap<String, Vec<Event>>` with actor-based buffering
+- 2-layer architecture: Local HashMap → Shared DashMap
+- Layer 1 (actor): Zero lock contention, single-threaded accumulation
+- Layer 2 (shared): Fast flush every 100ms for background processing
+- **Key benefit**: Eliminates lock contention even with single hot URL
 
 ## Optimization 2: Optional Timing Headers
 
@@ -40,6 +48,20 @@ Successfully optimized the Lynx URL redirect service to minimize analytics overh
 - **Latency**: 19.29ms average, 53ms p99
 - **CPU**: 158% utilization (saturating ~1.6 of 4 cores)
 - **Improvement**: +50% throughput vs baseline
+
+## Optimization 3: Actor Pattern for Analytics (Latest)
+
+### Implementation
+- Implemented actor pattern with mpsc channel (similar to ClickCounterActor)
+- Eliminates DashMap contention on hot keys (popular short codes)
+- Fast flush (100ms) from actor → shared buffer
+- Slow flush (10s) from shared buffer → database
+
+### Expected Results
+- **Hot key performance**: No degradation even with single popular URL
+- **Burst handling**: 100k event buffer capacity
+- **Contention**: Zero lock contention in hot path
+- **Scalability**: Linear scaling with request rate
 
 ## Multi-Instance Load Testing
 
