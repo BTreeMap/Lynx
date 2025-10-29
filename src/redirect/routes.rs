@@ -13,12 +13,14 @@ pub fn create_redirect_router(
     analytics_config: Option<AnalyticsConfig>,
     geoip_service: Option<Arc<GeoIpService>>,
     analytics_aggregator: Option<Arc<AnalyticsAggregator>>,
+    enable_timing_headers: bool,
 ) -> Router {
     let state = Arc::new(RedirectState {
         storage,
         analytics_config,
         geoip_service,
         analytics_aggregator,
+        enable_timing_headers,
     });
 
     Router::new()

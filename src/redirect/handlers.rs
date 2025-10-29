@@ -19,6 +19,7 @@ pub struct RedirectState {
     pub analytics_config: Option<AnalyticsConfig>,
     pub geoip_service: Option<Arc<GeoIpService>>,
     pub analytics_aggregator: Option<Arc<AnalyticsAggregator>>,
+    pub enable_timing_headers: bool,
 }
 
 /// Redirect to original URL
@@ -81,31 +82,36 @@ pub async fn redirect_url(
                     let handler_time = handler_start.elapsed();
                     let total_time = request_start.elapsed();
 
-                    // Create headers with tracing info
-                    let mut response_headers = HeaderMap::new();
-                    response_headers.insert(
-                        "x-lynx-cache-hit",
-                        if cache_hit { "true" } else { "false" }.parse().unwrap(),
-                    );
-                    response_headers.insert(
-                        "x-lynx-timing-total-ms",
-                        total_time.as_millis().to_string().parse().unwrap(),
-                    );
-                    response_headers.insert(
-                        "x-lynx-timing-cache-ms",
-                        cache_time_ms.to_string().parse().unwrap(),
-                    );
-                    response_headers.insert(
-                        "x-lynx-timing-db-ms",
-                        db_time_ms.to_string().parse().unwrap(),
-                    );
-                    response_headers.insert(
-                        "x-lynx-timing-handler-ms",
-                        handler_time.as_millis().to_string().parse().unwrap(),
-                    );
+                    // Create headers with tracing info (optional for maximum performance)
+                    if state.enable_timing_headers {
+                        let mut response_headers = HeaderMap::new();
+                        response_headers.insert(
+                            "x-lynx-cache-hit",
+                            if cache_hit { "true" } else { "false" }.parse().unwrap(),
+                        );
+                        response_headers.insert(
+                            "x-lynx-timing-total-ms",
+                            total_time.as_millis().to_string().parse().unwrap(),
+                        );
+                        response_headers.insert(
+                            "x-lynx-timing-cache-ms",
+                            cache_time_ms.to_string().parse().unwrap(),
+                        );
+                        response_headers.insert(
+                            "x-lynx-timing-db-ms",
+                            db_time_ms.to_string().parse().unwrap(),
+                        );
+                        response_headers.insert(
+                            "x-lynx-timing-handler-ms",
+                            handler_time.as_millis().to_string().parse().unwrap(),
+                        );
 
-                    // Redirect with headers
-                    (response_headers, Redirect::permanent(&url.original_url)).into_response()
+                        // Redirect with headers
+                        (response_headers, Redirect::permanent(&url.original_url)).into_response()
+                    } else {
+                        // Fast path: redirect without timing headers
+                        Redirect::permanent(&url.original_url).into_response()
+                    }
                 }
                 None => (StatusCode::NOT_FOUND, "URL not found").into_response(),
             }

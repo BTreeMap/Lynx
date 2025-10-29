@@ -607,11 +607,17 @@ async fn run_server() -> Result<()> {
     let api_router =
         lynx::api::create_api_router(Arc::clone(&storage), auth_service, Arc::clone(&config));
     
+    // Check if timing headers should be enabled (disabled by default for max performance)
+    let enable_timing_headers = std::env::var("ENABLE_TIMING_HEADERS")
+        .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
+        .unwrap_or(false);
+    
     let redirect_router = lynx::redirect::create_redirect_router(
         Arc::clone(&storage),
         analytics_config,
         geoip_service,
         analytics_aggregator,
+        enable_timing_headers,
     );
 
     // Log frontend configuration
