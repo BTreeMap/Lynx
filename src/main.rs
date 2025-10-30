@@ -511,43 +511,85 @@ async fn run_server() -> Result<()> {
 
         let aggregator = Arc::new(AnalyticsAggregator::new());
         
-        // Start flush task with storage
+        // Start optimized flush task with GeoIP service (if available)
         let storage_clone = Arc::clone(&storage);
-        let _flush_handle = aggregator.start_flush_task_with_storage(
-            config.analytics.flush_interval_secs,
-            move |entries| {
-                let storage = Arc::clone(&storage_clone);
-                Box::pin(async move {
-                    if entries.is_empty() {
-                        return;
-                    }
-                    
-                    // Convert entries to storage format
-                    let records: Vec<AnalyticsRecord> = entries
-                        .into_iter()
-                        .map(|(key, value)| {
-                            (
-                                key.short_code,
-                                key.time_bucket,
-                                key.country_code,
-                                key.region,
-                                key.city,
-                                key.asn.map(|a| a as i64),
-                                key.ip_version as i32,
-                                value.count as i64,
-                            )
-                        })
-                        .collect();
-                    
-                    // Batch insert to storage
-                    if let Err(e) = storage.upsert_analytics_batch(records).await {
-                        tracing::error!("Failed to flush analytics to storage: {}", e);
-                    } else {
-                        tracing::debug!("Successfully flushed analytics to storage");
-                    }
-                })
-            },
-        );
+        let _flush_handle = if let Some(ref geoip_svc) = geoip {
+            // OPTIMIZED PATH: Use deferred GeoIP lookups
+            let geoip_clone = Arc::clone(geoip_svc);
+            aggregator.start_flush_task_with_geoip(
+                config.analytics.flush_interval_secs,
+                geoip_clone,
+                move |entries| {
+                    let storage = Arc::clone(&storage_clone);
+                    Box::pin(async move {
+                        if entries.is_empty() {
+                            return;
+                        }
+                        
+                        // Convert entries to storage format
+                        let records: Vec<AnalyticsRecord> = entries
+                            .into_iter()
+                            .map(|(key, value)| {
+                                (
+                                    key.short_code,
+                                    key.time_bucket,
+                                    key.country_code,
+                                    key.region,
+                                    key.city,
+                                    key.asn.map(|a| a as i64),
+                                    key.ip_version as i32,
+                                    value.count as i64,
+                                )
+                            })
+                            .collect();
+                        
+                        // Batch insert to storage
+                        if let Err(e) = storage.upsert_analytics_batch(records).await {
+                            tracing::error!("Failed to flush analytics to storage: {}", e);
+                        } else {
+                            tracing::debug!("Successfully flushed analytics to storage");
+                        }
+                    })
+                },
+            )
+        } else {
+            // FALLBACK: No GeoIP service available, use basic flush task
+            aggregator.start_flush_task_with_storage(
+                config.analytics.flush_interval_secs,
+                move |entries| {
+                    let storage = Arc::clone(&storage_clone);
+                    Box::pin(async move {
+                        if entries.is_empty() {
+                            return;
+                        }
+                        
+                        // Convert entries to storage format
+                        let records: Vec<AnalyticsRecord> = entries
+                            .into_iter()
+                            .map(|(key, value)| {
+                                (
+                                    key.short_code,
+                                    key.time_bucket,
+                                    key.country_code,
+                                    key.region,
+                                    key.city,
+                                    key.asn.map(|a| a as i64),
+                                    key.ip_version as i32,
+                                    value.count as i64,
+                                )
+                            })
+                            .collect();
+                        
+                        // Batch insert to storage
+                        if let Err(e) = storage.upsert_analytics_batch(records).await {
+                            tracing::error!("Failed to flush analytics to storage: {}", e);
+                        } else {
+                            tracing::debug!("Successfully flushed analytics to storage");
+                        }
+                    })
+                },
+            )
+        };
         
         info!(
             "   - IP anonymization: {}",
@@ -565,11 +607,17 @@ async fn run_server() -> Result<()> {
     let api_router =
         lynx::api::create_api_router(Arc::clone(&storage), auth_service, Arc::clone(&config));
     
+    // Check if timing headers should be enabled (disabled by default for max performance)
+    let enable_timing_headers = std::env::var("ENABLE_TIMING_HEADERS")
+        .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
+        .unwrap_or(false);
+    
     let redirect_router = lynx::redirect::create_redirect_router(
         Arc::clone(&storage),
         analytics_config,
         geoip_service,
         analytics_aggregator,
+        enable_timing_headers,
     );
 
     // Log frontend configuration

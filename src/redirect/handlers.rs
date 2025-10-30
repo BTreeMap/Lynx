@@ -12,13 +12,14 @@ use std::time::Instant;
 use super::middleware::RequestStart;
 use crate::config::AnalyticsConfig;
 use crate::storage::Storage;
-use crate::analytics::{AnalyticsAggregator, AnalyticsRecord, GeoIpService};
+use crate::analytics::{AnalyticsAggregator, GeoIpService};
 
 pub struct RedirectState {
     pub storage: Arc<dyn Storage>,
     pub analytics_config: Option<AnalyticsConfig>,
     pub geoip_service: Option<Arc<GeoIpService>>,
     pub analytics_aggregator: Option<Arc<AnalyticsAggregator>>,
+    pub enable_timing_headers: bool,
 }
 
 /// Redirect to original URL
@@ -81,31 +82,36 @@ pub async fn redirect_url(
                     let handler_time = handler_start.elapsed();
                     let total_time = request_start.elapsed();
 
-                    // Create headers with tracing info
-                    let mut response_headers = HeaderMap::new();
-                    response_headers.insert(
-                        "x-lynx-cache-hit",
-                        if cache_hit { "true" } else { "false" }.parse().unwrap(),
-                    );
-                    response_headers.insert(
-                        "x-lynx-timing-total-ms",
-                        total_time.as_millis().to_string().parse().unwrap(),
-                    );
-                    response_headers.insert(
-                        "x-lynx-timing-cache-ms",
-                        cache_time_ms.to_string().parse().unwrap(),
-                    );
-                    response_headers.insert(
-                        "x-lynx-timing-db-ms",
-                        db_time_ms.to_string().parse().unwrap(),
-                    );
-                    response_headers.insert(
-                        "x-lynx-timing-handler-ms",
-                        handler_time.as_millis().to_string().parse().unwrap(),
-                    );
+                    // Create headers with tracing info (optional for maximum performance)
+                    if state.enable_timing_headers {
+                        let mut response_headers = HeaderMap::new();
+                        response_headers.insert(
+                            "x-lynx-cache-hit",
+                            if cache_hit { "true" } else { "false" }.parse().unwrap(),
+                        );
+                        response_headers.insert(
+                            "x-lynx-timing-total-ms",
+                            total_time.as_millis().to_string().parse().unwrap(),
+                        );
+                        response_headers.insert(
+                            "x-lynx-timing-cache-ms",
+                            cache_time_ms.to_string().parse().unwrap(),
+                        );
+                        response_headers.insert(
+                            "x-lynx-timing-db-ms",
+                            db_time_ms.to_string().parse().unwrap(),
+                        );
+                        response_headers.insert(
+                            "x-lynx-timing-handler-ms",
+                            handler_time.as_millis().to_string().parse().unwrap(),
+                        );
 
-                    // Redirect with headers
-                    (response_headers, Redirect::permanent(&url.original_url)).into_response()
+                        // Redirect with headers
+                        (response_headers, Redirect::permanent(&url.original_url)).into_response()
+                    } else {
+                        // Fast path: redirect without timing headers
+                        Redirect::permanent(&url.original_url).into_response()
+                    }
                 }
                 None => (StatusCode::NOT_FOUND, "URL not found").into_response(),
             }
@@ -119,10 +125,11 @@ fn record_analytics(
     headers: &HeaderMap,
     socket_ip: std::net::IpAddr,
     config: &AnalyticsConfig,
-    geoip: &GeoIpService,
+    _geoip: &GeoIpService,
     aggregator: &AnalyticsAggregator,
 ) {
     use crate::analytics::ip_extractor::{anonymize_ip, extract_client_ip};
+    use crate::analytics::AnalyticsEvent;
 
     // Extract client IP based on trust configuration
     let mut client_ip = extract_client_ip(headers, socket_ip, config);
@@ -132,23 +139,16 @@ fn record_analytics(
         client_ip = anonymize_ip(client_ip);
     }
 
-    // Lookup geolocation
-    let geo_location = geoip.lookup(client_ip);
-
-    // Create analytics record
-    let record = AnalyticsRecord {
+    // Create lightweight event WITHOUT GeoIP lookup (deferred to flush time)
+    // This keeps the hot path fast!
+    let event = AnalyticsEvent {
         short_code: short_code.to_string(),
         timestamp: chrono::Utc::now().timestamp(),
-        geo_location,
-        client_ip: if config.ip_anonymization {
-            None // Don't store IP if anonymization is enabled
-        } else {
-            Some(client_ip)
-        },
+        client_ip,
     };
 
-    // Record in aggregator (non-blocking)
-    aggregator.record(record);
+    // Record event in aggregator (non-blocking, no GeoIP lookup!)
+    aggregator.record_event(event);
 }
 
 /// Health check endpoint
