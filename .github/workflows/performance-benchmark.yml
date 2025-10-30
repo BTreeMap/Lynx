@@ -1,5 +1,10 @@
 name: Performance Benchmarks
 
+permissions:
+  contents: read
+  packages: read
+  pull-requests: write
+
 on:
   workflow_run:
     workflows: ["Build and Publish Docker image to GHCR"]
