@@ -23,8 +23,9 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
     try {
       await apiClient.deactivateUrl(code);
       onUrlsChanged();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to deactivate URL');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error.response?.data?.error || 'Failed to deactivate URL');
     } finally {
       setActionInProgress(null);
     }
@@ -39,8 +40,9 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
     try {
       await apiClient.reactivateUrl(code);
       onUrlsChanged();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to reactivate URL');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error.response?.data?.error || 'Failed to reactivate URL');
     } finally {
       setActionInProgress(null);
     }

@@ -40,7 +40,7 @@ export const normalizeOriginalUrl = (value: string): string => {
     try {
         const parsed = new URL(trimmed);
         return parsed.toString();
-    } catch (_error) {
+    } catch {
         return trimmed;
     }
 };

@@ -35,8 +35,9 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
       setCustomCode('');
       setShowModal(true);
       onUrlCreated();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to create URL');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error.response?.data?.error || 'Failed to create URL');
     } finally {
       setIsSubmitting(false);
     }
