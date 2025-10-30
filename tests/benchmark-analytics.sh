@@ -115,8 +115,8 @@ end
 LUA_SCRIPT
 
 # Extract host and port from URL
-REDIRECT_HOST=$(echo "$REDIRECT_URL" | sed -E 's|http://([^:]+):([0-9]+)|\1|')
-REDIRECT_PORT=$(echo "$REDIRECT_URL" | sed -E 's|http://([^:]+):([0-9]+)|\2|')
+REDIRECT_HOST=$(echo "$REDIRECT_URL" | sed -E 's|http://([^:/]+)(:[0-9]+)?.*|\1|')
+REDIRECT_PORT=$(echo "$REDIRECT_URL" | sed -E 's|http://[^:/]+(:[0-9]+)?.*|\1|' | sed 's/://' | grep -E '^[0-9]+$' || echo '3000')
 
 wrk -t 8 -c 1000 -d "$DURATION" -s /tmp/analytics-random-redirect.lua "http://${REDIRECT_HOST}:${REDIRECT_PORT}" 2>&1 | tee -a "$RESULTS_FILE"
 
@@ -190,7 +190,7 @@ print_info "Test 4.1: Sustained load - 1000 connections for extended duration"
 print_info "Tests analytics aggregation and flush behavior over time"
 
 # Use longer duration for sustained test (2x the base duration)
-SUSTAINED_DURATION=$(echo "$DURATION" | sed 's/[0-9]*s/&/' | awk -F's' '{print $1*2"s"}')
+SUSTAINED_DURATION=$(echo "$DURATION" | sed 's/\([0-9]\+\)s/\1/' | awk '{print $1*2"s"}')
 if [[ ! "$SUSTAINED_DURATION" =~ ^[0-9]+s$ ]]; then
     SUSTAINED_DURATION="60s" # Fallback to 60s if calculation fails
 fi
