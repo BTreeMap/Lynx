@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ShortenedUrl, CreateUrlRequest, UserInfo, SuccessResponse, AuthModeResponse, PaginatedUrlsResponse } from './types';
+import type { ShortenedUrl, CreateUrlRequest, UserInfo, SuccessResponse, AuthModeResponse, PaginatedUrlsResponse, AnalyticsResponse, AnalyticsAggregateResponse } from './types';
 import { normalizeOriginalUrl } from './utils/url';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -64,6 +64,22 @@ export const apiClient = {
 
   async healthCheck(): Promise<SuccessResponse> {
     const { data } = await api.get<SuccessResponse>('/health');
+    return data;
+  },
+
+  async getAnalytics(code: string, startTime?: number, endTime?: number, limit = 100): Promise<AnalyticsResponse> {
+    const params: { start_time?: number; end_time?: number; limit: number } = { limit };
+    if (startTime !== undefined) params.start_time = startTime;
+    if (endTime !== undefined) params.end_time = endTime;
+    const { data } = await api.get<AnalyticsResponse>(`/analytics/${code}`, { params });
+    return data;
+  },
+
+  async getAnalyticsAggregate(code: string, groupBy = 'country', startTime?: number, endTime?: number, limit = 100): Promise<AnalyticsAggregateResponse> {
+    const params: { group_by: string; start_time?: number; end_time?: number; limit: number } = { group_by: groupBy, limit };
+    if (startTime !== undefined) params.start_time = startTime;
+    if (endTime !== undefined) params.end_time = endTime;
+    const { data } = await api.get<AnalyticsAggregateResponse>(`/analytics/${code}/aggregate`, { params });
     return data;
   },
 };
