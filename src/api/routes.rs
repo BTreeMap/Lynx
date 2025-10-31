@@ -15,12 +15,13 @@ use super::handlers::{
     reactivate_url, AppState,
 };
 use super::static_files::serve_static;
-use super::analytics::{get_analytics, get_analytics_aggregate};
+use super::analytics::{get_analytics, get_analytics_aggregate, AnalyticsState};
 
 pub fn create_api_router(
     storage: Arc<dyn Storage>,
     auth_service: Arc<AuthService>,
     config: Arc<Config>,
+    analytics_aggregator: Option<Arc<crate::analytics::AnalyticsAggregator>>,
 ) -> Router {
     let frontend_config = config.frontend.clone();
     let state = Arc::new(AppState { storage: Arc::clone(&storage), config });
@@ -46,6 +47,10 @@ pub fn create_api_router(
         .with_state(Arc::clone(&state));
     
     // Analytics routes (also protected)
+    let analytics_state = Arc::new(AnalyticsState {
+        storage: Arc::clone(&storage),
+        aggregator: analytics_aggregator,
+    });
     let auth_service_clone2 = Arc::clone(&auth_service);
     let analytics_routes = Router::new()
         .route("/analytics/{code}", get(get_analytics))
@@ -54,7 +59,7 @@ pub fn create_api_router(
             let auth = Arc::clone(&auth_service_clone2);
             auth_middleware(auth, headers, req, next)
         }))
-        .with_state(storage);
+        .with_state(analytics_state);
 
     let api_routes = Router::new()
         .route("/health", get(health_check))

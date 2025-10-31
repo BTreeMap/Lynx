@@ -692,22 +692,22 @@ impl Storage for SqliteStorage {
 
         let query_str = if let (Some(_start), Some(_end)) = (start_time, end_time) {
             format!(
-                "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = ? AND time_bucket >= ? AND time_bucket <= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
+                "SELECT {} as dimension, CAST(SUM(visit_count) AS INTEGER) as visit_count FROM analytics WHERE short_code = ? AND time_bucket >= ? AND time_bucket <= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
                 group_field, group_field, group_field
             )
         } else if let Some(_start) = start_time {
             format!(
-                "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = ? AND time_bucket >= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
+                "SELECT {} as dimension, CAST(SUM(visit_count) AS INTEGER) as visit_count FROM analytics WHERE short_code = ? AND time_bucket >= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
                 group_field, group_field, group_field
             )
         } else if let Some(_end) = end_time {
             format!(
-                "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = ? AND time_bucket <= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
+                "SELECT {} as dimension, CAST(SUM(visit_count) AS INTEGER) as visit_count FROM analytics WHERE short_code = ? AND time_bucket <= ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
                 group_field, group_field, group_field
             )
         } else {
             format!(
-                "SELECT {} as dimension, SUM(visit_count) as visit_count FROM analytics WHERE short_code = ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
+                "SELECT {} as dimension, CAST(SUM(visit_count) AS INTEGER) as visit_count FROM analytics WHERE short_code = ? AND {} IS NOT NULL GROUP BY {} ORDER BY visit_count DESC LIMIT ?",
                 group_field, group_field, group_field
             )
         };
@@ -1112,6 +1112,270 @@ mod tests {
         // Try to reactivate again (should return 0)
         let count = storage.bulk_reactivate_user_links("user1").await.unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_analytics_upsert_and_retrieval() {
+        let storage = setup_sqlite().await;
+
+        // Create a short code
+        storage
+            .create_with_code("test123", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        // Insert analytics records
+        let time_bucket = 1698768000; // Some timestamp
+        let records = vec![
+            (
+                "test123".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                Some("CA".to_string()),
+                Some("San Francisco".to_string()),
+                Some(15169),
+                4,
+                5,
+            ),
+            (
+                "test123".to_string(),
+                time_bucket,
+                Some("GB".to_string()),
+                Some("England".to_string()),
+                Some("London".to_string()),
+                Some(16509),
+                4,
+                3,
+            ),
+        ];
+
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Retrieve analytics
+        let analytics = storage
+            .get_analytics("test123", None, None, 100)
+            .await
+            .unwrap();
+
+        assert_eq!(analytics.len(), 2);
+        
+        // Verify visit counts
+        let total_visits: i64 = analytics.iter().map(|a| a.visit_count).sum();
+        assert_eq!(total_visits, 8);
+    }
+
+    #[tokio::test]
+    async fn test_analytics_aggregate_by_country() {
+        let storage = setup_sqlite().await;
+
+        // Create a short code
+        storage
+            .create_with_code("multi", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        // Insert analytics from multiple countries
+        let time_bucket = 1698768000;
+        let records = vec![
+            ("multi".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), Some(15169), 4, 10),
+            ("multi".to_string(), time_bucket, Some("GB".to_string()), Some("England".to_string()), Some("London".to_string()), Some(16509), 4, 5),
+            ("multi".to_string(), time_bucket, Some("US".to_string()), Some("NY".to_string()), Some("NYC".to_string()), Some(15169), 4, 3),
+        ];
+
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Aggregate by country
+        let aggregates = storage
+            .get_analytics_aggregate("multi", None, None, "country", 10)
+            .await
+            .unwrap();
+
+        assert_eq!(aggregates.len(), 2); // US and GB
+        
+        // Verify totals
+        let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
+        assert_eq!(total, 18);
+        
+        // Find US aggregate (should be 13 = 10 + 3)
+        let us_agg = aggregates.iter().find(|a| a.dimension == "US").unwrap();
+        assert_eq!(us_agg.visit_count, 13);
+        
+        // Find GB aggregate (should be 5)
+        let gb_agg = aggregates.iter().find(|a| a.dimension == "GB").unwrap();
+        assert_eq!(gb_agg.visit_count, 5);
+    }
+
+    #[tokio::test]
+    async fn test_analytics_aggregate_by_region() {
+        let storage = setup_sqlite().await;
+
+        storage
+            .create_with_code("test", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        let time_bucket = 1698768000;
+        let records = vec![
+            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("LA".to_string()), None, 4, 7),
+            ("test".to_string(), time_bucket, Some("US".to_string()), Some("NY".to_string()), Some("NYC".to_string()), None, 4, 4),
+            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), None, 4, 2),
+        ];
+
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Aggregate by region
+        let aggregates = storage
+            .get_analytics_aggregate("test", None, None, "region", 10)
+            .await
+            .unwrap();
+
+        assert_eq!(aggregates.len(), 2); // CA and NY
+        
+        let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
+        assert_eq!(total, 13);
+        
+        // CA should have 9 visits (7 + 2)
+        let ca_agg = aggregates.iter().find(|a| a.dimension == "CA").unwrap();
+        assert_eq!(ca_agg.visit_count, 9);
+    }
+
+    #[tokio::test]
+    async fn test_analytics_aggregate_by_asn() {
+        let storage = setup_sqlite().await;
+
+        storage
+            .create_with_code("test", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        let time_bucket = 1698768000;
+        let records = vec![
+            ("test".to_string(), time_bucket, Some("US".to_string()), None, None, Some(15169), 4, 8),
+            ("test".to_string(), time_bucket, Some("US".to_string()), None, None, Some(16509), 4, 3),
+            ("test".to_string(), time_bucket, Some("GB".to_string()), None, None, Some(15169), 4, 2),
+        ];
+
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Aggregate by ASN
+        let aggregates = storage
+            .get_analytics_aggregate("test", None, None, "asn", 10)
+            .await
+            .unwrap();
+
+        assert_eq!(aggregates.len(), 2);
+        
+        let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
+        assert_eq!(total, 13);
+        
+        // ASN 15169 should have 10 visits (8 + 2)
+        let asn_agg = aggregates.iter().find(|a| a.dimension == "15169").unwrap();
+        assert_eq!(asn_agg.visit_count, 10);
+    }
+
+    #[tokio::test]
+    async fn test_analytics_time_range_filtering() {
+        let storage = setup_sqlite().await;
+
+        storage
+            .create_with_code("test", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        // Insert records with different time buckets
+        let records = vec![
+            ("test".to_string(), 1000, Some("US".to_string()), None, None, None, 4, 5),
+            ("test".to_string(), 2000, Some("US".to_string()), None, None, None, 4, 3),
+            ("test".to_string(), 3000, Some("US".to_string()), None, None, None, 4, 7),
+        ];
+
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Query with start time
+        let analytics = storage
+            .get_analytics("test", Some(1500), None, 100)
+            .await
+            .unwrap();
+        let total: i64 = analytics.iter().map(|a| a.visit_count).sum();
+        assert_eq!(total, 10); // Only records from 2000 and 3000
+
+        // Query with end time
+        let analytics = storage
+            .get_analytics("test", None, Some(2500), 100)
+            .await
+            .unwrap();
+        let total: i64 = analytics.iter().map(|a| a.visit_count).sum();
+        assert_eq!(total, 8); // Only records from 1000 and 2000
+
+        // Query with both start and end time
+        let analytics = storage
+            .get_analytics("test", Some(1500), Some(2500), 100)
+            .await
+            .unwrap();
+        let total: i64 = analytics.iter().map(|a| a.visit_count).sum();
+        assert_eq!(total, 3); // Only record from 2000
+    }
+
+    #[tokio::test]
+    async fn test_analytics_upsert_increments_existing() {
+        let storage = setup_sqlite().await;
+
+        storage
+            .create_with_code("test", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        let time_bucket = 1698768000;
+        
+        // Insert initial record - all fields need to match for the UNIQUE constraint to trigger
+        let records = vec![
+            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), Some(15169), 4, 5),
+        ];
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Upsert same key with more visits - all fields must match
+        let records = vec![
+            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), Some(15169), 4, 3),
+        ];
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Should have incremented, not replaced
+        let analytics = storage
+            .get_analytics("test", None, None, 100)
+            .await
+            .unwrap();
+        
+        assert_eq!(analytics.len(), 1);
+        assert_eq!(analytics[0].visit_count, 8); // 5 + 3
+    }
+
+    #[tokio::test]
+    async fn test_analytics_aggregate_with_time_range() {
+        let storage = setup_sqlite().await;
+
+        storage
+            .create_with_code("test", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        // Insert records with different time buckets
+        let records = vec![
+            ("test".to_string(), 1000, Some("US".to_string()), None, None, None, 4, 5),
+            ("test".to_string(), 2000, Some("GB".to_string()), None, None, None, 4, 3),
+            ("test".to_string(), 3000, Some("US".to_string()), None, None, None, 4, 7),
+        ];
+
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Aggregate with time range that includes only middle record
+        let aggregates = storage
+            .get_analytics_aggregate("test", Some(1500), Some(2500), "country", 10)
+            .await
+            .unwrap();
+
+        assert_eq!(aggregates.len(), 1);
+        assert_eq!(aggregates[0].dimension, "GB");
+        assert_eq!(aggregates[0].visit_count, 3);
     }
 }
 
