@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { apiClient } from '../api';
 import type { ShortenedUrl } from '../types';
 import { buildShortLink } from '../utils/url';
@@ -23,8 +24,9 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
     try {
       await apiClient.deactivateUrl(code);
       onUrlsChanged();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to deactivate URL');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error.response?.data?.error || 'Failed to deactivate URL');
     } finally {
       setActionInProgress(null);
     }
@@ -39,8 +41,9 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
     try {
       await apiClient.reactivateUrl(code);
       onUrlsChanged();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to reactivate URL');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error.response?.data?.error || 'Failed to reactivate URL');
     } finally {
       setActionInProgress(null);
     }
@@ -213,9 +216,7 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
               </tr>
             </thead>
             <tbody>
-              {urls.map((url) => {
-                const shortLink = buildLinkForItem(url);
-                return (
+              {urls.map((url) => (
                   <tr 
                     key={url.id} 
                     style={{ 
@@ -226,28 +227,16 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
                     onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                   >
                     <td style={{ padding: '14px 16px' }}>
-                      {shortLink ? (
-                        <a
-                          href={shortLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{ 
-                            color: 'var(--color-text-primary)',
-                            fontWeight: 500,
-                            fontSize: '14px'
-                          }}
-                        >
-                          {url.short_code}
-                        </a>
-                      ) : (
-                        <span style={{ 
+                      <Link
+                        to={`/url/${url.short_code}`}
+                        style={{ 
                           color: 'var(--color-text-primary)',
                           fontWeight: 500,
                           fontSize: '14px'
-                        }}>
-                          {url.short_code}
-                        </span>
-                      )}
+                        }}
+                      >
+                        {url.short_code}
+                      </Link>
                     </td>
                     <td style={{ padding: '14px 16px' }}>
                       <button
@@ -365,9 +354,8 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
                       </td>
                     )}
                   </tr>
-                );
-              })}
-            </tbody>
+                ))}
+              </tbody>
           </table>
         </div>
       )}

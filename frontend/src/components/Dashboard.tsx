@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../AuthContext';
+import { useAuth } from '../hooks/useAuth';
 import { apiClient } from '../api';
 import CreateUrlForm from './CreateUrlForm';
 import UrlList from './UrlList';
@@ -31,8 +31,9 @@ const Dashboard: React.FC = () => {
       }
       setNextCursor(data.next_cursor || null);
       setHasMore(data.has_more);
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to load URLs');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error.response?.data?.error || 'Failed to load URLs');
     } finally {
       setIsLoading(false);
     }
@@ -48,8 +49,9 @@ const Dashboard: React.FC = () => {
       setUrls(prev => [...prev, ...data.urls]);
       setNextCursor(data.next_cursor || null);
       setHasMore(data.has_more);
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to load more URLs');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error.response?.data?.error || 'Failed to load more URLs');
     } finally {
       setIsLoadingMore(false);
     }
@@ -82,8 +84,9 @@ const Dashboard: React.FC = () => {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to export URLs');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error.response?.data?.error || 'Failed to export URLs');
     } finally {
       setIsExporting(false);
     }

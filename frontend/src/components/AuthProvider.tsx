@@ -1,19 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { apiClient } from './api';
-import type { UserInfo } from './types';
-
-interface AuthContextType {
-  authMode: string | null;
-  token: string | null;
-  userInfo: UserInfo | null;
-  isLoading: boolean;
-  login: (token: string) => void;
-  logout: () => void;
-  refreshUserInfo: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+import { apiClient } from '../api';
+import type { UserInfo } from '../types';
+import { AuthContext } from '../contexts/AuthContext';
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [authMode, setAuthMode] = useState<string | null>(null);
@@ -21,7 +10,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const refreshUserInfo = async () => {
+  const refreshUserInfo = useCallback(async () => {
     if (token || authMode === 'none' || authMode === 'cloudflare') {
       try {
         const info = await apiClient.getUserInfo();
@@ -31,7 +20,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setUserInfo(null);
       }
     }
-  };
+  }, [token, authMode]);
 
   // Fetch auth mode on mount
   useEffect(() => {
@@ -67,7 +56,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setIsLoading(false);
     };
     loadUserInfo();
-  }, [token, authMode]);
+  }, [token, authMode, refreshUserInfo]);
 
   const login = (newToken: string) => {
     localStorage.setItem('auth_token', newToken);
@@ -85,12 +74,4 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {children}
     </AuthContext.Provider>
   );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
 };
