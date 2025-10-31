@@ -334,8 +334,24 @@ async fn test_analytics_aggregate_with_unknown_pending_events() {
         aggregator.record_event(event);
     }
     
-    // Give the actor time to process events into shared buffer
-    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    // Poll until events are processed into shared buffer (up to 1 second)
+    // The actor flushes every 100ms, so this should complete quickly
+    let mut attempts = 0;
+    let max_attempts = 10; // 10 attempts * 100ms = 1 second max
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
+        // Check if events have been flushed to shared buffer
+        let in_memory = aggregator.get_in_memory_aggregate("pending", "country");
+        if !in_memory.is_empty() {
+            break;
+        }
+        
+        attempts += 1;
+        if attempts >= max_attempts {
+            panic!("Events not flushed to shared buffer after 1 second");
+        }
+    }
     
     // Create API router WITH analytics aggregator
     let app = lynx::api::create_api_router(
