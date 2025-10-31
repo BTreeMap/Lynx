@@ -54,6 +54,7 @@ export interface AnalyticsEntry {
 export interface AnalyticsResponse {
   entries: AnalyticsEntry[];
   total: number;
+  clicks: number;
 }
 
 export interface AnalyticsAggregate {
@@ -64,4 +65,5 @@ export interface AnalyticsAggregate {
 export interface AnalyticsAggregateResponse {
   aggregates: AnalyticsAggregate[];
   total: number;
+  clicks: number;
 }

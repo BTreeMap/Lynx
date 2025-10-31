@@ -1,6 +1,6 @@
 use crate::models::ShortenedUrl;
 use crate::storage::{LookupMetadata, LookupResult, Storage, StorageError, StorageResult};
-use crate::analytics::{DROPPED_DIMENSION_MARKER, DEFAULT_IP_VERSION, ALIGNMENT_TIME_BUCKET};
+use crate::analytics::{DROPPED_DIMENSION_MARKER, DEFAULT_IP_VERSION};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::postgres::PgPoolOptions;
@@ -742,11 +742,10 @@ impl Storage for PostgresStorage {
     ) -> Result<(i64, i64)> {
         let cutoff_time = chrono::Utc::now().timestamp() - (retention_days * 86400);
         
-        // Count old entries before pruning (exclude alignment entries with time_bucket = 0)
-        let count_query = "SELECT COUNT(*)::BIGINT FROM analytics WHERE time_bucket < $1 AND time_bucket != $2";
+        // Count old entries before pruning
+        let count_query = "SELECT COUNT(*)::BIGINT FROM analytics WHERE time_bucket < $1";
         let old_count: (i64,) = sqlx::query_as(count_query)
             .bind(cutoff_time)
-            .bind(ALIGNMENT_TIME_BUCKET)
             .fetch_one(self.pool.as_ref())
             .await?;
         let deleted_count = old_count.0;
@@ -827,103 +826,21 @@ impl Storage for PostgresStorage {
         
         let insert_result = sqlx::query(&aggregate_query)
             .bind(cutoff_time)
-            .bind(ALIGNMENT_TIME_BUCKET)
             .execute(&mut *tx)
             .await?;
         
         let inserted_count = insert_result.rows_affected() as i64;
         
-        // Delete old entries (excluding alignment entries with time_bucket = 0)
-        let delete_query = "DELETE FROM analytics WHERE time_bucket < $1 AND time_bucket != $2";
+        // Delete old entries
+        let delete_query = "DELETE FROM analytics WHERE time_bucket < $1";
         sqlx::query(delete_query)
             .bind(cutoff_time)
-            .bind(ALIGNMENT_TIME_BUCKET)
             .execute(&mut *tx)
             .await?;
         
         tx.commit().await?;
         
         Ok((deleted_count, inserted_count))
-    }
-
-    async fn get_analytics_click_difference(
-        &self,
-        short_code: &str,
-    ) -> Result<(i64, i64, i64)> {
-        // Get click count from urls table
-        let url = sqlx::query_as::<_, (i64,)>("SELECT clicks FROM urls WHERE short_code = $1")
-            .bind(short_code)
-            .fetch_optional(self.pool.as_ref())
-            .await?;
-        
-        let clicks = url.map(|(c,)| c).unwrap_or(0);
-        
-        // Get total analytics count
-        let analytics_count = sqlx::query_as::<_, (i64,)>(
-            "SELECT COALESCE(SUM(visit_count), 0) FROM analytics WHERE short_code = $1"
-        )
-        .bind(short_code)
-        .fetch_one(self.pool.as_ref())
-        .await?
-        .0;
-        
-        let difference = clicks - analytics_count;
-        
-        Ok((clicks, analytics_count, difference))
-    }
-
-    async fn align_analytics_with_clicks(
-        &self,
-        short_code: &str,
-    ) -> Result<i64> {
-        let (_clicks, _analytics_count, difference) = self.get_analytics_click_difference(short_code).await?;
-        
-        if difference <= 0 {
-            return Ok(0); // No alignment needed
-        }
-        
-        // Create a placeholder entry with dropped markers
-        let now = chrono::Utc::now().timestamp();
-        
-        let query = "INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
-                     VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, $8, $9)";
-        
-        let result = sqlx::query(query)
-            .bind(short_code)
-            .bind(ALIGNMENT_TIME_BUCKET)
-            .bind(DROPPED_DIMENSION_MARKER)
-            .bind(DROPPED_DIMENSION_MARKER)
-            .bind(DROPPED_DIMENSION_MARKER)
-            .bind(DEFAULT_IP_VERSION)
-            .bind(difference)
-            .bind(now)
-            .bind(now)
-            .execute(self.pool.as_ref())
-            .await?;
-        
-        Ok(result.rows_affected() as i64)
-    }
-
-    async fn get_all_misaligned_analytics(&self) -> Result<Vec<(String, i64, i64, i64)>> {
-        // Get all short codes with their click counts and analytics counts
-        let query = "
-            SELECT 
-                u.short_code,
-                u.clicks,
-                COALESCE(SUM(a.visit_count), 0) as analytics_count,
-                u.clicks - COALESCE(SUM(a.visit_count), 0) as difference
-            FROM urls u
-            LEFT JOIN analytics a ON u.short_code = a.short_code
-            GROUP BY u.short_code, u.clicks
-            HAVING u.clicks > COALESCE(SUM(a.visit_count), 0)
-            ORDER BY difference DESC
-        ";
-        
-        let results = sqlx::query_as::<_, (String, i64, i64, i64)>(query)
-            .fetch_all(self.pool.as_ref())
-            .await?;
-        
-        Ok(results)
     }
 }
 

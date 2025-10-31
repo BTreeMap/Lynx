@@ -169,22 +169,4 @@ pub trait Storage: Send + Sync {
         retention_days: i64,
         drop_dimensions: &[String],
     ) -> Result<(i64, i64)>; // (deleted_count, inserted_count)
-
-    /// Get the difference between total clicks and analytics visit count for a short code
-    /// Returns (clicks, analytics_count, difference)
-    async fn get_analytics_click_difference(
-        &self,
-        short_code: &str,
-    ) -> Result<(i64, i64, i64)>;
-
-    /// Insert alignment entry to reconcile analytics with click count
-    /// Returns the number of rows inserted
-    async fn align_analytics_with_clicks(
-        &self,
-        short_code: &str,
-    ) -> Result<i64>;
-
-    /// Get all short codes with misaligned analytics (where click count > analytics count)
-    /// Returns list of (short_code, clicks, analytics_count, difference)
-    async fn get_all_misaligned_analytics(&self) -> Result<Vec<(String, i64, i64, i64)>>;
 }

@@ -125,12 +125,6 @@ enum AnalyticsCommands {
         #[arg(long, default_value_t = 30)]
         retention_days: i64,
     },
-    /// Align analytics data with click count by creating placeholder entries
-    Align {
-        /// Short code to align (optional, aligns all if not specified)
-        #[arg(short, long)]
-        short_code: Option<String>,
-    },
 }
 
 #[tokio::main]
@@ -460,52 +454,6 @@ async fn handle_analytics_command(command: AnalyticsCommands) -> Result<()> {
                 "✓ Pruned analytics: {} old entries deleted, {} aggregated entries created",
                 deleted, inserted
             );
-        }
-        AnalyticsCommands::Align { short_code } => {
-            if let Some(code) = short_code {
-                // Align specific short code
-                let (clicks, analytics, diff) = storage.get_analytics_click_difference(&code).await?;
-                
-                println!("Short code: {}", code);
-                println!("  Total clicks: {}", clicks);
-                println!("  Analytics count: {}", analytics);
-                println!("  Difference: {}", diff);
-                
-                if diff > 0 {
-                    let inserted = storage.align_analytics_with_clicks(&code).await?;
-                    println!("✓ Created {} placeholder entry to align analytics", inserted);
-                } else if diff == 0 {
-                    println!("✓ Analytics already aligned with click count");
-                } else {
-                    println!("⚠ Analytics count exceeds click count (no action taken)");
-                }
-            } else {
-                // Align all short codes
-                println!("⚠ Aligning all short codes with click counts...");
-                
-                let misaligned = storage.get_all_misaligned_analytics().await?;
-                
-                if misaligned.is_empty() {
-                    println!("✓ All analytics data is already aligned with click counts");
-                    return Ok(());
-                }
-                
-                println!("Found {} short code(s) with misaligned analytics", misaligned.len());
-                
-                let mut total_aligned = 0;
-                let mut total_difference = 0;
-                
-                for (code, clicks, analytics_count, diff) in misaligned {
-                    println!("  - {} (clicks: {}, analytics: {}, diff: {})", code, clicks, analytics_count, diff);
-                    let inserted = storage.align_analytics_with_clicks(&code).await?;
-                    total_aligned += inserted;
-                    total_difference += diff;
-                }
-                
-                println!();
-                println!("✓ Aligned {} short code(s)", total_aligned);
-                println!("✓ Created {} placeholder entries for {} missing visits", total_aligned, total_difference);
-            }
         }
     }
 
