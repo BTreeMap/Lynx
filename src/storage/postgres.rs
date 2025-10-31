@@ -727,6 +727,158 @@ impl Storage for PostgresStorage {
 
         Ok(results)
     }
+
+    async fn prune_analytics(
+        &self,
+        retention_days: i64,
+        drop_dimensions: &[String],
+    ) -> Result<(i64, i64)> {
+        let cutoff_time = chrono::Utc::now().timestamp() - (retention_days * 86400);
+        
+        // Define the special marker for dropped dimensions
+        let dropped_marker = "<dropped>";
+        
+        // Build the SELECT clause with dropped dimensions replaced
+        let mut select_fields = vec![
+            "short_code".to_string(),
+            "time_bucket".to_string(),
+        ];
+        
+        // Add dimension fields with conditional dropping
+        for field in &["country_code", "region", "city", "asn", "ip_version"] {
+            if drop_dimensions.contains(&field.to_string()) || 
+               (field == &"country_code" && drop_dimensions.contains(&"country".to_string())) ||
+               (field == &"ip_version" && (drop_dimensions.contains(&"hour".to_string()) || drop_dimensions.contains(&"day".to_string()))) {
+                if field == &"asn" {
+                    select_fields.push(format!("NULL::BIGINT as {}", field));
+                } else if field == &"ip_version" {
+                    select_fields.push(format!("4 as {}", field)); // default to IPv4
+                } else {
+                    select_fields.push(format!("'{}'::TEXT as {}", dropped_marker, field));
+                }
+            } else {
+                select_fields.push(field.to_string());
+            }
+        }
+        
+        // Handle time bucket dropping
+        let time_bucket_expr = if drop_dimensions.contains(&"hour".to_string()) && drop_dimensions.contains(&"day".to_string()) {
+            "0".to_string() // Drop all time granularity
+        } else if drop_dimensions.contains(&"hour".to_string()) {
+            "(time_bucket / 86400) * 86400".to_string() // Keep only day
+        } else {
+            "time_bucket".to_string() // Keep hour granularity
+        };
+        
+        // Replace time_bucket in select_fields
+        if let Some(idx) = select_fields.iter().position(|s| s == "time_bucket") {
+            select_fields[idx] = format!("{} as time_bucket", time_bucket_expr);
+        }
+        
+        // Build GROUP BY clause (all non-aggregated fields)
+        let group_by_fields: Vec<String> = select_fields.iter()
+            .map(|f| {
+                // Extract field name from "expr as field" or just "field"
+                if f.contains(" as ") {
+                    f.split(" as ").last().unwrap().to_string()
+                } else {
+                    f.clone()
+                }
+            })
+            .collect();
+        
+        let select_clause = select_fields.join(", ");
+        let group_by_clause = group_by_fields.join(", ");
+        
+        // Aggregate old entries
+        let aggregate_query = format!(
+            "INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
+             SELECT {}, SUM(visit_count)::BIGINT as visit_count, $1 as created_at, $2 as updated_at
+             FROM analytics
+             WHERE time_bucket < $3
+             GROUP BY {}",
+            select_clause, group_by_clause
+        );
+        
+        let now = chrono::Utc::now().timestamp();
+        
+        let insert_result = sqlx::query(&aggregate_query)
+            .bind(now)
+            .bind(now)
+            .bind(cutoff_time)
+            .execute(self.pool.as_ref())
+            .await?;
+        
+        let inserted_count = insert_result.rows_affected() as i64;
+        
+        // Delete old entries
+        let delete_query = "DELETE FROM analytics WHERE time_bucket < $1";
+        let delete_result = sqlx::query(delete_query)
+            .bind(cutoff_time)
+            .execute(self.pool.as_ref())
+            .await?;
+        
+        let deleted_count = delete_result.rows_affected() as i64;
+        
+        Ok((deleted_count, inserted_count))
+    }
+
+    async fn get_analytics_click_difference(
+        &self,
+        short_code: &str,
+    ) -> Result<(i64, i64, i64)> {
+        // Get click count from urls table
+        let url = sqlx::query_as::<_, (i64,)>("SELECT clicks FROM urls WHERE short_code = $1")
+            .bind(short_code)
+            .fetch_optional(self.pool.as_ref())
+            .await?;
+        
+        let clicks = url.map(|(c,)| c).unwrap_or(0);
+        
+        // Get total analytics count
+        let analytics_count = sqlx::query_as::<_, (i64,)>(
+            "SELECT COALESCE(SUM(visit_count), 0) FROM analytics WHERE short_code = $1"
+        )
+        .bind(short_code)
+        .fetch_one(self.pool.as_ref())
+        .await?
+        .0;
+        
+        let difference = clicks - analytics_count;
+        
+        Ok((clicks, analytics_count, difference))
+    }
+
+    async fn align_analytics_with_clicks(
+        &self,
+        short_code: &str,
+    ) -> Result<i64> {
+        let (_clicks, _analytics_count, difference) = self.get_analytics_click_difference(short_code).await?;
+        
+        if difference <= 0 {
+            return Ok(0); // No alignment needed
+        }
+        
+        // Create a placeholder entry with dropped markers
+        let dropped_marker = "<dropped>";
+        let now = chrono::Utc::now().timestamp();
+        
+        let query = "INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
+                     VALUES ($1, 0, $2, $3, $4, NULL, 4, $5, $6, $7)";
+        
+        let result = sqlx::query(query)
+            .bind(short_code)
+            .bind(dropped_marker)
+            .bind(dropped_marker)
+            .bind(dropped_marker)
+            .bind(difference)
+            .bind(now)
+            .bind(now)
+            .execute(self.pool.as_ref())
+            .await?;
+        
+        Ok(result.rows_affected() as i64)
+    }
 }
 
 #[cfg(test)]

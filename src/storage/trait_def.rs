@@ -161,4 +161,26 @@ pub trait Storage: Send + Sync {
         group_by: &str,
         limit: i64,
     ) -> Result<Vec<crate::analytics::AnalyticsAggregate>>;
+
+    /// Prune old analytics data by aggregating entries and dropping specified dimensions
+    /// Returns the number of rows affected (deleted old rows + inserted aggregated rows)
+    async fn prune_analytics(
+        &self,
+        retention_days: i64,
+        drop_dimensions: &[String],
+    ) -> Result<(i64, i64)>; // (deleted_count, inserted_count)
+
+    /// Get the difference between total clicks and analytics visit count for a short code
+    /// Returns (clicks, analytics_count, difference)
+    async fn get_analytics_click_difference(
+        &self,
+        short_code: &str,
+    ) -> Result<(i64, i64, i64)>;
+
+    /// Insert alignment entry to reconcile analytics with click count
+    /// Returns the number of rows inserted
+    async fn align_analytics_with_clicks(
+        &self,
+        short_code: &str,
+    ) -> Result<i64>;
 }

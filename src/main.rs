@@ -35,6 +35,11 @@ enum Commands {
         #[command(subcommand)]
         user_command: UserCommands,
     },
+    /// Analytics data management commands
+    Analytics {
+        #[command(subcommand)]
+        analytics_command: AnalyticsCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -109,6 +114,25 @@ enum UserCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum AnalyticsCommands {
+    /// Prune old analytics data by aggregating and dropping dimensions
+    Prune {
+        /// Dimensions to drop (comma-separated: hour,day,region,city,asn,country)
+        #[arg(long, value_delimiter = ',', default_value = "hour,day")]
+        drop: Vec<String>,
+        /// Keep data newer than this many days (default: 30)
+        #[arg(long, default_value_t = 30)]
+        retention_days: i64,
+    },
+    /// Align analytics data with click count by creating placeholder entries
+    Align {
+        /// Short code to align (optional, aligns all if not specified)
+        #[arg(short, long)]
+        short_code: Option<String>,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize tracing
@@ -129,6 +153,11 @@ async fn main() -> Result<()> {
     // Handle user commands
     if let Some(Commands::User { user_command }) = cli.command {
         return handle_user_command(user_command).await;
+    }
+
+    // Handle analytics commands
+    if let Some(Commands::Analytics { analytics_command }) = cli.command {
+        return handle_analytics_command(analytics_command).await;
     }
 
     // Otherwise, run the server
@@ -391,6 +420,73 @@ async fn handle_user_command(command: UserCommands) -> Result<()> {
                 println!("✓ Reactivated {} link(s) for user '{}'", count, user_id);
             } else {
                 println!("⚠ No inactive links found for user '{}'", user_id);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_analytics_command(command: AnalyticsCommands) -> Result<()> {
+    let config = Config::from_env()?;
+
+    let storage: Arc<dyn Storage> = match config.database.backend {
+        DatabaseBackend::Sqlite => Arc::new(
+            SqliteStorage::new(&config.database.url, config.database.max_connections).await?,
+        ),
+        DatabaseBackend::Postgres => Arc::new(
+            PostgresStorage::new(&config.database.url, config.database.max_connections).await?,
+        ),
+    };
+
+    // Ensure database is initialized
+    storage.init().await?;
+
+    match command {
+        AnalyticsCommands::Prune {
+            drop,
+            retention_days,
+        } => {
+            println!(
+                "⚠ This will prune analytics data older than {} days",
+                retention_days
+            );
+            println!("   Dimensions to drop: {:?}", drop);
+            println!();
+
+            let (deleted, inserted) = storage.prune_analytics(retention_days, &drop).await?;
+
+            println!(
+                "✓ Pruned analytics: {} old entries deleted, {} aggregated entries created",
+                deleted, inserted
+            );
+        }
+        AnalyticsCommands::Align { short_code } => {
+            if let Some(code) = short_code {
+                // Align specific short code
+                let (clicks, analytics, diff) = storage.get_analytics_click_difference(&code).await?;
+                
+                println!("Short code: {}", code);
+                println!("  Total clicks: {}", clicks);
+                println!("  Analytics count: {}", analytics);
+                println!("  Difference: {}", diff);
+                
+                if diff > 0 {
+                    let inserted = storage.align_analytics_with_clicks(&code).await?;
+                    println!("✓ Created {} placeholder entry to align analytics", inserted);
+                } else if diff == 0 {
+                    println!("✓ Analytics already aligned with click count");
+                } else {
+                    println!("⚠ Analytics count exceeds click count (no action taken)");
+                }
+            } else {
+                // Align all short codes
+                println!("⚠ Aligning all short codes with click counts...");
+                
+                // Get all short codes (we'll need to add this method)
+                // For now, let's do a simple implementation
+                println!("✗ Aligning all codes is not yet implemented. Please specify a short code with -s");
+                return Ok(());
             }
         }
     }
