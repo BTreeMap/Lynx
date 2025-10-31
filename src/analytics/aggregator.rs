@@ -431,8 +431,28 @@ impl AnalyticsAggregator {
             
             let dimension = match group_by {
                 "country" => key.country_code.clone().unwrap_or_else(|| "Unknown".to_string()),
-                "region" => key.region.clone().unwrap_or_else(|| "Unknown".to_string()),
-                "city" => key.city.clone().unwrap_or_else(|| "Unknown".to_string()),
+                "region" => {
+                    // Format: "Region, Country" (e.g., "Ontario, CA")
+                    match (&key.region, &key.country_code) {
+                        (Some(region), Some(country)) => format!("{}, {}", region, country),
+                        (Some(region), None) => region.clone(),
+                        (None, Some(country)) => format!("Unknown, {}", country),
+                        (None, None) => "Unknown".to_string(),
+                    }
+                },
+                "city" => {
+                    // Format: "City, Region, Country" (e.g., "Toronto, Ontario, CA")
+                    match (&key.city, &key.region, &key.country_code) {
+                        (Some(city), Some(region), Some(country)) => format!("{}, {}, {}", city, region, country),
+                        (Some(city), Some(region), None) => format!("{}, {}", city, region),
+                        (Some(city), None, Some(country)) => format!("{}, Unknown, {}", city, country),
+                        (Some(city), None, None) => city.clone(),
+                        (None, Some(region), Some(country)) => format!("Unknown, {}, {}", region, country),
+                        (None, Some(region), None) => format!("Unknown, {}", region),
+                        (None, None, Some(country)) => format!("Unknown, Unknown, {}", country),
+                        (None, None, None) => "Unknown".to_string(),
+                    }
+                },
                 "asn" => key.asn.map(|a| a.to_string()).unwrap_or_else(|| "Unknown".to_string()),
                 "hour" => key.time_bucket.to_string(),
                 "day" => ((key.time_bucket / 86400) * 86400).to_string(),

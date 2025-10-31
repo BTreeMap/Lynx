@@ -665,8 +665,8 @@ impl Storage for PostgresStorage {
     ) -> Result<Vec<crate::analytics::AnalyticsAggregate>> {
         let group_field = match group_by {
             "country" => "country_code",
-            "region" => "region",
-            "city" => "city",
+            "region" => "CONCAT(COALESCE(region, 'Unknown'), ', ', COALESCE(country_code, 'Unknown'))",
+            "city" => "CONCAT(COALESCE(city, 'Unknown'), ', ', COALESCE(region, 'Unknown'), ', ', COALESCE(country_code, 'Unknown'))",
             "asn" => "CAST(asn AS TEXT)",
             "hour" => "CAST(time_bucket AS TEXT)",
             "day" => "CAST((time_bucket / 86400) * 86400 AS TEXT)",

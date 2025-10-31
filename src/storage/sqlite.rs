@@ -682,8 +682,8 @@ impl Storage for SqliteStorage {
     ) -> Result<Vec<crate::analytics::AnalyticsAggregate>> {
         let group_field = match group_by {
             "country" => "country_code",
-            "region" => "region",
-            "city" => "city",
+            "region" => "COALESCE(region, 'Unknown') || ', ' || COALESCE(country_code, 'Unknown')",
+            "city" => "COALESCE(city, 'Unknown') || ', ' || COALESCE(region, 'Unknown') || ', ' || COALESCE(country_code, 'Unknown')",
             "asn" => "CAST(asn AS TEXT)",
             "hour" => "time_bucket",
             "day" => "(time_bucket / 86400) * 86400",
@@ -1234,8 +1234,8 @@ mod tests {
         let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
         assert_eq!(total, 13);
         
-        // CA should have 9 visits (7 + 2)
-        let ca_agg = aggregates.iter().find(|a| a.dimension == "CA").unwrap();
+        // CA should have 9 visits (7 + 2), formatted as "CA, US"
+        let ca_agg = aggregates.iter().find(|a| a.dimension == "CA, US").unwrap();
         assert_eq!(ca_agg.visit_count, 9);
     }
 
