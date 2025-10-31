@@ -605,7 +605,7 @@ async fn run_server() -> Result<()> {
     };
 
     let api_router =
-        lynx::api::create_api_router(Arc::clone(&storage), auth_service, Arc::clone(&config));
+        lynx::api::create_api_router(Arc::clone(&storage), auth_service, Arc::clone(&config), analytics_aggregator.clone());
     
     // Check if timing headers should be enabled (disabled by default for max performance)
     let enable_timing_headers = std::env::var("ENABLE_TIMING_HEADERS")

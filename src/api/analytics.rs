@@ -9,8 +9,14 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::analytics::{AnalyticsAggregate, AnalyticsEntry};
+use crate::analytics::{AnalyticsAggregate, AnalyticsEntry, AnalyticsAggregator};
 use crate::storage::Storage;
+
+/// State for analytics handlers
+pub struct AnalyticsState {
+    pub storage: Arc<dyn Storage>,
+    pub aggregator: Option<Arc<AnalyticsAggregator>>,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct AnalyticsQueryParams {
@@ -46,13 +52,13 @@ pub struct AnalyticsAggregateResponse {
 
 /// Get analytics for a specific short code
 pub async fn get_analytics(
-    State(storage): State<Arc<dyn Storage>>,
+    State(state): State<Arc<AnalyticsState>>,
     Path(short_code): Path<String>,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.clamp(1, 1000);
     
-    match storage
+    match state.storage
         .get_analytics(&short_code, params.start_time, params.end_time, limit)
         .await
     {
@@ -73,28 +79,72 @@ pub async fn get_analytics(
 
 /// Get aggregated analytics for a specific short code
 pub async fn get_analytics_aggregate(
-    State(storage): State<Arc<dyn Storage>>,
+    State(state): State<Arc<AnalyticsState>>,
     Path(short_code): Path<String>,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.clamp(1, 1000);
     let group_by = params.group_by.as_deref().unwrap_or("country");
     
-    match storage
+    // Get aggregates from database
+    let db_aggregates = match state.storage
         .get_analytics_aggregate(&short_code, params.start_time, params.end_time, group_by, limit)
         .await
     {
-        Ok(aggregates) => {
-            let total = aggregates.len();
-            Json(AnalyticsAggregateResponse { aggregates, total }).into_response()
-        }
+        Ok(agg) => agg,
         Err(e) => {
             tracing::error!("Failed to get analytics aggregate: {}", e);
-            (
+            return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to retrieve analytics aggregate",
             )
-                .into_response()
+                .into_response();
         }
-    }
+    };
+    
+    // If we have an analytics aggregator, get in-memory data for near real-time display
+    let combined_aggregates = if let Some(aggregator) = &state.aggregator {
+        // Get in-memory aggregates (pending data not yet in DB)
+        let in_memory = aggregator.get_in_memory_aggregate(&short_code, group_by);
+        
+        // Combine database and in-memory data
+        use std::collections::HashMap;
+        let mut combined: HashMap<String, i64> = HashMap::new();
+        
+        // Add database aggregates
+        for agg in db_aggregates {
+            *combined.entry(agg.dimension).or_insert(0) += agg.visit_count;
+        }
+        
+        // Add in-memory aggregates
+        for (dimension, count) in in_memory {
+            *combined.entry(dimension).or_insert(0) += count;
+        }
+        
+        // Convert back to Vec
+        let mut result: Vec<AnalyticsAggregate> = combined
+            .into_iter()
+            .map(|(dimension, visit_count)| AnalyticsAggregate {
+                dimension,
+                visit_count,
+            })
+            .collect();
+        
+        // Sort by visit_count descending
+        result.sort_by(|a, b| b.visit_count.cmp(&a.visit_count));
+        
+        // Apply limit
+        result.truncate(limit as usize);
+        result
+    } else {
+        // No aggregator, just return database results
+        db_aggregates
+    };
+    
+    let total = combined_aggregates.len();
+    Json(AnalyticsAggregateResponse {
+        aggregates: combined_aggregates,
+        total,
+    })
+    .into_response()
 }

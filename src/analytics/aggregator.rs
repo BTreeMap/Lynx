@@ -408,6 +408,58 @@ impl AnalyticsAggregator {
         })
     }
 
+    /// Get aggregated analytics from in-memory data for a specific short code
+    /// This is used for near real-time analytics display
+    /// Returns aggregates grouped by the specified dimension
+    pub fn get_in_memory_aggregate(
+        &self,
+        short_code: &str,
+        group_by: &str,
+    ) -> Vec<(String, i64)> {
+        use std::collections::HashMap;
+        
+        let mut grouped: HashMap<String, i64> = HashMap::new();
+        
+        // Aggregate from both processed aggregates (Layer 3) and pending events (Layer 2)
+        
+        // Process from aggregates (already GeoIP resolved)
+        for entry in self.aggregates.iter() {
+            let key = entry.key();
+            if key.short_code != short_code {
+                continue;
+            }
+            
+            let dimension = match group_by {
+                "country" => key.country_code.clone().unwrap_or_else(|| "Unknown".to_string()),
+                "region" => key.region.clone().unwrap_or_else(|| "Unknown".to_string()),
+                "city" => key.city.clone().unwrap_or_else(|| "Unknown".to_string()),
+                "asn" => key.asn.map(|a| a.to_string()).unwrap_or_else(|| "Unknown".to_string()),
+                "hour" => key.time_bucket.to_string(),
+                "day" => ((key.time_bucket / 86400) * 86400).to_string(),
+                _ => key.country_code.clone().unwrap_or_else(|| "Unknown".to_string()),
+            };
+            
+            *grouped.entry(dimension).or_insert(0) += entry.value().count as i64;
+        }
+        
+        // Process from shared buffer (Layer 2) - events pending GeoIP lookup
+        // These will be displayed as "Unknown" since GeoIP hasn't been resolved yet
+        let unknown_count: i64 = self.shared_buffer
+            .iter()
+            .filter(|entry| entry.key() == short_code)
+            .map(|entry| entry.value().len() as i64)
+            .sum();
+        
+        if unknown_count > 0 {
+            *grouped.entry("Unknown".to_string()).or_insert(0) += unknown_count;
+        }
+        
+        // Convert to Vec and sort by count descending
+        let mut result: Vec<(String, i64)> = grouped.into_iter().collect();
+        result.sort_by(|a, b| b.1.cmp(&a.1));
+        result
+    }
+
     /// Signal shutdown to the flush task and actor
     pub async fn shutdown(&self) {
         // Send shutdown message to actor
@@ -440,8 +492,8 @@ mod tests {
     use super::*;
     use crate::analytics::models::GeoLocation;
 
-    #[test]
-    fn test_aggregator_record() {
+    #[tokio::test]
+    async fn test_aggregator_record() {
         let aggregator = AnalyticsAggregator::new();
         
         let record = AnalyticsRecord {
@@ -467,8 +519,8 @@ mod tests {
         assert_eq!(aggregator.len(), 1);
     }
 
-    #[test]
-    fn test_aggregator_drain() {
+    #[tokio::test]
+    async fn test_aggregator_drain() {
         let aggregator = AnalyticsAggregator::new();
         
         let record = AnalyticsRecord {
