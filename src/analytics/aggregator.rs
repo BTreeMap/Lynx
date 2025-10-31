@@ -432,25 +432,47 @@ impl AnalyticsAggregator {
             let dimension = match group_by {
                 "country" => key.country_code.clone().unwrap_or_else(|| "Unknown".to_string()),
                 "region" => {
-                    // Format: "Region, Country" (e.g., "Ontario, CA")
-                    match (&key.region, &key.country_code) {
-                        (Some(region), Some(country)) => format!("{}, {}", region, country),
-                        (Some(region), None) => region.clone(),
-                        (None, Some(country)) => format!("Unknown, {}", country),
-                        (None, None) => "Unknown".to_string(),
+                    // Check if region is dropped marker
+                    if let Some(region) = &key.region {
+                        if region == "<dropped>" {
+                            "<dropped>".to_string()
+                        } else {
+                            // Format: "Region, Country" (e.g., "Ontario, CA")
+                            match &key.country_code {
+                                Some(country) => format!("{}, {}", region, country),
+                                None => region.clone(),
+                            }
+                        }
+                    } else {
+                        // Format: "Region, Country" when region is None
+                        match &key.country_code {
+                            Some(country) => format!("Unknown, {}", country),
+                            None => "Unknown".to_string(),
+                        }
                     }
                 },
                 "city" => {
-                    // Format: "City, Region, Country" (e.g., "Toronto, Ontario, CA")
-                    match (&key.city, &key.region, &key.country_code) {
-                        (Some(city), Some(region), Some(country)) => format!("{}, {}, {}", city, region, country),
-                        (Some(city), Some(region), None) => format!("{}, {}", city, region),
-                        (Some(city), None, Some(country)) => format!("{}, Unknown, {}", city, country),
-                        (Some(city), None, None) => city.clone(),
-                        (None, Some(region), Some(country)) => format!("Unknown, {}, {}", region, country),
-                        (None, Some(region), None) => format!("Unknown, {}", region),
-                        (None, None, Some(country)) => format!("Unknown, Unknown, {}", country),
-                        (None, None, None) => "Unknown".to_string(),
+                    // Check if city is dropped marker
+                    if let Some(city) = &key.city {
+                        if city == "<dropped>" {
+                            "<dropped>".to_string()
+                        } else {
+                            // Format: "City, Region, Country" (e.g., "Toronto, Ontario, CA")
+                            match (&key.region, &key.country_code) {
+                                (Some(region), Some(country)) => format!("{}, {}, {}", city, region, country),
+                                (Some(region), None) => format!("{}, {}", city, region),
+                                (None, Some(country)) => format!("{}, Unknown, {}", city, country),
+                                (None, None) => city.clone(),
+                            }
+                        }
+                    } else {
+                        // Format when city is None
+                        match (&key.region, &key.country_code) {
+                            (Some(region), Some(country)) => format!("Unknown, {}, {}", region, country),
+                            (Some(region), None) => format!("Unknown, {}", region),
+                            (None, Some(country)) => format!("Unknown, Unknown, {}", country),
+                            (None, None) => "Unknown".to_string(),
+                        }
                     }
                 },
                 "asn" => key.asn.map(|a| a.to_string()).unwrap_or_else(|| "Unknown".to_string()),

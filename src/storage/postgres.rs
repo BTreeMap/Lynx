@@ -665,8 +665,14 @@ impl Storage for PostgresStorage {
     ) -> Result<Vec<crate::analytics::AnalyticsAggregate>> {
         let group_field = match group_by {
             "country" => "country_code",
-            "region" => "CONCAT(COALESCE(region, 'Unknown'), ', ', COALESCE(country_code, 'Unknown'))",
-            "city" => "CONCAT(COALESCE(city, 'Unknown'), ', ', COALESCE(region, 'Unknown'), ', ', COALESCE(country_code, 'Unknown'))",
+            "region" => {
+                // Don't format if region is <dropped>
+                "CASE WHEN region = '<dropped>' THEN region ELSE CONCAT(COALESCE(region, 'Unknown'), ', ', COALESCE(country_code, 'Unknown')) END"
+            },
+            "city" => {
+                // Don't format if city is <dropped>
+                "CASE WHEN city = '<dropped>' THEN city ELSE CONCAT(COALESCE(city, 'Unknown'), ', ', COALESCE(region, 'Unknown'), ', ', COALESCE(country_code, 'Unknown')) END"
+            },
             "asn" => "CAST(asn AS TEXT)",
             "hour" => "CAST(time_bucket AS TEXT)",
             "day" => "CAST((time_bucket / 86400) * 86400 AS TEXT)",
@@ -734,21 +740,43 @@ impl Storage for PostgresStorage {
         drop_dimensions: &[String],
     ) -> Result<(i64, i64)> {
         let cutoff_time = chrono::Utc::now().timestamp() - (retention_days * 86400);
+        let now = chrono::Utc::now().timestamp();
         
         // Define the special marker for dropped dimensions
         let dropped_marker = "<dropped>";
         
+        // Count old entries before pruning
+        let count_query = "SELECT COUNT(*)::BIGINT FROM analytics WHERE time_bucket < $1";
+        let old_count: (i64,) = sqlx::query_as(count_query)
+            .bind(cutoff_time)
+            .fetch_one(self.pool.as_ref())
+            .await?;
+        let deleted_count = old_count.0;
+        
+        // If no old entries, return early
+        if deleted_count == 0 {
+            return Ok((0, 0));
+        }
+        
         // Build the SELECT clause with dropped dimensions replaced
         let mut select_fields = vec![
             "short_code".to_string(),
-            "time_bucket".to_string(),
         ];
+        
+        // Handle time bucket dropping - use current time for aggregated entries
+        let time_bucket_expr = if drop_dimensions.contains(&"hour".to_string()) && drop_dimensions.contains(&"day".to_string()) {
+            format!("CAST({} AS BIGINT)", now) // Use current time when all time granularity is dropped
+        } else if drop_dimensions.contains(&"hour".to_string()) {
+            format!("CAST({} AS BIGINT)", (now / 86400) * 86400) // Use current day when hour is dropped
+        } else {
+            "time_bucket".to_string() // Keep original time_bucket
+        };
+        select_fields.push(format!("{} as time_bucket", time_bucket_expr));
         
         // Add dimension fields with conditional dropping
         for field in &["country_code", "region", "city", "asn", "ip_version"] {
             if drop_dimensions.contains(&field.to_string()) || 
-               (field == &"country_code" && drop_dimensions.contains(&"country".to_string())) ||
-               (field == &"ip_version" && (drop_dimensions.contains(&"hour".to_string()) || drop_dimensions.contains(&"day".to_string()))) {
+               (field == &"country_code" && drop_dimensions.contains(&"country".to_string())) {
                 if field == &"asn" {
                     select_fields.push(format!("NULL::BIGINT as {}", field));
                 } else if field == &"ip_version" {
@@ -761,64 +789,50 @@ impl Storage for PostgresStorage {
             }
         }
         
-        // Handle time bucket dropping
-        let time_bucket_expr = if drop_dimensions.contains(&"hour".to_string()) && drop_dimensions.contains(&"day".to_string()) {
-            "0".to_string() // Drop all time granularity
-        } else if drop_dimensions.contains(&"hour".to_string()) {
-            "(time_bucket / 86400) * 86400".to_string() // Keep only day
-        } else {
-            "time_bucket".to_string() // Keep hour granularity
-        };
+        // Build SELECT clause
+        let select_clause = select_fields.join(", ");
         
-        // Replace time_bucket in select_fields
-        if let Some(idx) = select_fields.iter().position(|s| s == "time_bucket") {
-            select_fields[idx] = format!("{} as time_bucket", time_bucket_expr);
-        }
-        
-        // Build GROUP BY clause (all non-aggregated fields)
-        let group_by_fields: Vec<String> = select_fields.iter()
+        // Build GROUP BY clause - use expressions without "as alias" parts
+        let group_by_expressions: Vec<String> = select_fields.iter()
             .map(|f| {
-                // Extract field name from "expr as field" or just "field"
+                // Extract expression before "as" if present, otherwise use the whole field
                 if f.contains(" as ") {
-                    f.split(" as ").last().unwrap().to_string()
+                    f.split(" as ").next().unwrap().to_string()
                 } else {
                     f.clone()
                 }
             })
             .collect();
+        let group_by_clause = group_by_expressions.join(", ");
         
-        let select_clause = select_fields.join(", ");
-        let group_by_clause = group_by_fields.join(", ");
+        // Create a view of aggregated old entries (without inserting yet)
+        let mut tx = self.pool.begin().await?;
         
-        // Aggregate old entries
+        // Create aggregated entries
         let aggregate_query = format!(
             "INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
-             SELECT {}, SUM(visit_count)::BIGINT as visit_count, $1 as created_at, $2 as updated_at
+             SELECT {}, SUM(visit_count)::BIGINT as visit_count, {} as created_at, {} as updated_at
              FROM analytics
-             WHERE time_bucket < $3
+             WHERE time_bucket < $1
              GROUP BY {}",
-            select_clause, group_by_clause
+            select_clause, now, now, group_by_clause
         );
         
-        let now = chrono::Utc::now().timestamp();
-        
         let insert_result = sqlx::query(&aggregate_query)
-            .bind(now)
-            .bind(now)
             .bind(cutoff_time)
-            .execute(self.pool.as_ref())
+            .execute(&mut *tx)
             .await?;
         
         let inserted_count = insert_result.rows_affected() as i64;
         
         // Delete old entries
         let delete_query = "DELETE FROM analytics WHERE time_bucket < $1";
-        let delete_result = sqlx::query(delete_query)
+        sqlx::query(delete_query)
             .bind(cutoff_time)
-            .execute(self.pool.as_ref())
+            .execute(&mut *tx)
             .await?;
         
-        let deleted_count = delete_result.rows_affected() as i64;
+        tx.commit().await?;
         
         Ok((deleted_count, inserted_count))
     }
