@@ -10,6 +10,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
+// Constants for analytics pruning and alignment
+const DROPPED_DIMENSION_MARKER: &str = "<dropped>";
+const DEFAULT_IP_VERSION: i32 = 4; // IPv4
+const DROPPED_TIME_BUCKET: i64 = 0;
+
 pub struct SqliteStorage {
     pool: Arc<SqlitePool>,
 }
@@ -759,9 +764,6 @@ impl Storage for SqliteStorage {
         let cutoff_time = chrono::Utc::now().timestamp() - (retention_days * 86400);
         let now = chrono::Utc::now().timestamp();
         
-        // Define the special marker for dropped dimensions
-        let dropped_marker = "<dropped>";
-        
         // Count old entries before pruning
         let count_query = "SELECT COUNT(*) FROM analytics WHERE time_bucket < ?";
         let old_count: (i64,) = sqlx::query_as(count_query)
@@ -780,10 +782,15 @@ impl Storage for SqliteStorage {
             "short_code".to_string(),
         ];
         
+        // Pre-compute dimension checks for efficiency
+        let drop_hour = drop_dimensions.contains(&"hour".to_string());
+        let drop_day = drop_dimensions.contains(&"day".to_string());
+        let drop_country = drop_dimensions.contains(&"country".to_string());
+        
         // Handle time bucket dropping - use current time for aggregated entries
-        let time_bucket_expr = if drop_dimensions.contains(&"hour".to_string()) && drop_dimensions.contains(&"day".to_string()) {
+        let time_bucket_expr = if drop_hour && drop_day {
             format!("CAST({} AS INTEGER)", now) // Use current time when all time granularity is dropped
-        } else if drop_dimensions.contains(&"hour".to_string()) {
+        } else if drop_hour {
             format!("CAST({} AS INTEGER)", (now / 86400) * 86400) // Use current day when hour is dropped
         } else {
             "time_bucket".to_string() // Keep original time_bucket
@@ -793,13 +800,13 @@ impl Storage for SqliteStorage {
         // Add dimension fields with conditional dropping
         for field in &["country_code", "region", "city", "asn", "ip_version"] {
             if drop_dimensions.contains(&field.to_string()) || 
-               (field == &"country_code" && drop_dimensions.contains(&"country".to_string())) {
+               (field == &"country_code" && drop_country) {
                 if field == &"asn" {
                     select_fields.push(format!("NULL as {}", field));
                 } else if field == &"ip_version" {
-                    select_fields.push(format!("4 as {}", field)); // default to IPv4
+                    select_fields.push(format!("{} as {}", DEFAULT_IP_VERSION, field));
                 } else {
-                    select_fields.push(format!("'{}' as {}", dropped_marker, field));
+                    select_fields.push(format!("'{}' as {}", DROPPED_DIMENSION_MARKER, field));
                 }
             } else {
                 select_fields.push(field.to_string());
@@ -891,17 +898,18 @@ impl Storage for SqliteStorage {
         }
         
         // Create a placeholder entry with dropped markers
-        let dropped_marker = "<dropped>";
         let now = chrono::Utc::now().timestamp();
         
         let query = "INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
-                     VALUES (?, 0, ?, ?, ?, NULL, 4, ?, ?, ?)";
+                     VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)";
         
         let result = sqlx::query(query)
             .bind(short_code)
-            .bind(dropped_marker)
-            .bind(dropped_marker)
-            .bind(dropped_marker)
+            .bind(DROPPED_TIME_BUCKET)
+            .bind(DROPPED_DIMENSION_MARKER)
+            .bind(DROPPED_DIMENSION_MARKER)
+            .bind(DROPPED_DIMENSION_MARKER)
+            .bind(DEFAULT_IP_VERSION)
             .bind(difference)
             .bind(now)
             .bind(now)
