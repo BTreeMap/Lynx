@@ -1,5 +1,6 @@
 use crate::models::ShortenedUrl;
 use crate::storage::{LookupMetadata, LookupResult, Storage, StorageError, StorageResult};
+use crate::analytics::{DROPPED_DIMENSION_MARKER, DEFAULT_IP_VERSION, DROPPED_TIME_BUCKET};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -9,11 +10,6 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
-
-// Constants for analytics pruning and alignment
-const DROPPED_DIMENSION_MARKER: &str = "<dropped>";
-const DEFAULT_IP_VERSION: i32 = 4; // IPv4
-const DROPPED_TIME_BUCKET: i64 = 0;
 
 pub struct SqliteStorage {
     pool: Arc<SqlitePool>,

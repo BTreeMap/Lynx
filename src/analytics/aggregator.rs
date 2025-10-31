@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info, warn};
 
 use crate::analytics::models::{AnalyticsKey, AnalyticsEvent, AnalyticsRecord, AnalyticsValue};
+use crate::analytics::DROPPED_DIMENSION_MARKER;
 
 /// Message types for the AnalyticsActor
 enum ActorMessage {
@@ -434,8 +435,8 @@ impl AnalyticsAggregator {
                 "region" => {
                     // Check if region is dropped marker
                     if let Some(region) = &key.region {
-                        if region == "<dropped>" {
-                            "<dropped>".to_string()
+                        if region == DROPPED_DIMENSION_MARKER {
+                            DROPPED_DIMENSION_MARKER.to_string()
                         } else {
                             // Format: "Region, Country" (e.g., "Ontario, CA")
                             match &key.country_code {
@@ -454,8 +455,8 @@ impl AnalyticsAggregator {
                 "city" => {
                     // Check if city is dropped marker
                     if let Some(city) = &key.city {
-                        if city == "<dropped>" {
-                            "<dropped>".to_string()
+                        if city == DROPPED_DIMENSION_MARKER {
+                            DROPPED_DIMENSION_MARKER.to_string()
                         } else {
                             // Format: "City, Region, Country" (e.g., "Toronto, Ontario, CA")
                             match (&key.region, &key.country_code) {
