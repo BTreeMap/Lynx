@@ -1,61 +1,97 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { apiClient } from '../api';
 import type { ShortenedUrl, AnalyticsEntry, AnalyticsAggregate } from '../types';
 import { buildShortLink } from '../utils/url';
+
+type AggregateDimension = 'country' | 'region' | 'city' | 'asn' | 'hour' | 'day';
+
+const DIMENSION_LABELS: Record<AggregateDimension, string> = {
+  country: 'Country',
+  region: 'Region',
+  city: 'City',
+  asn: 'ASN',
+  hour: 'Hour',
+  day: 'Day',
+};
 
 const UrlDetails: React.FC = () => {
   const { shortCode } = useParams<{ shortCode: string }>();
   const navigate = useNavigate();
   const [url, setUrl] = useState<ShortenedUrl | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsEntry[]>([]);
-  const [countryStats, setCountryStats] = useState<AnalyticsAggregate[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [aggregateStats, setAggregateStats] = useState<AnalyticsAggregate[]>([]);
+  const [selectedDimension, setSelectedDimension] = useState<AggregateDimension>('country');
+  const [isLoadingUrl, setIsLoadingUrl] = useState(true);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
+  const [isLoadingAggregate, setIsLoadingAggregate] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Load URL details
   useEffect(() => {
-    const loadData = async () => {
+    const loadUrlData = async () => {
       if (!shortCode) {
         navigate('/');
         return;
       }
 
-      setIsLoading(true);
+      setIsLoadingUrl(true);
       setError(null);
 
       try {
-        // Fetch URL details
         const urlData = await apiClient.getUrl(shortCode);
         setUrl(urlData);
-
-        // Fetch analytics data
-        try {
-          const analyticsData = await apiClient.getAnalytics(shortCode, undefined, undefined, 50);
-          setAnalytics(analyticsData.entries);
-        } catch (analyticsError) {
-          console.warn('Analytics data not available:', analyticsError);
-          // Analytics might not be available, continue without it
-        }
-
-        // Fetch country aggregates
-        try {
-          const countryData = await apiClient.getAnalyticsAggregate(shortCode, 'country', undefined, undefined, 20);
-          setCountryStats(countryData.aggregates);
-        } catch (aggregateError) {
-          console.warn('Analytics aggregates not available:', aggregateError);
-          // Aggregates might not be available, continue without them
-        }
       } catch (err: unknown) {
         const error = err as { response?: { data?: { error?: string } } };
         setError(error.response?.data?.error || 'Failed to load URL details');
       } finally {
-        setIsLoading(false);
+        setIsLoadingUrl(false);
       }
     };
 
-    loadData();
+    loadUrlData();
   }, [shortCode, navigate]);
+
+  // Load analytics data
+  useEffect(() => {
+    const loadAnalytics = async () => {
+      if (!shortCode) return;
+
+      setIsLoadingAnalytics(true);
+      try {
+        const analyticsData = await apiClient.getAnalytics(shortCode, undefined, undefined, 50);
+        setAnalytics(analyticsData.entries);
+      } catch (analyticsError) {
+        console.warn('Analytics data not available:', analyticsError);
+        setAnalytics([]);
+      } finally {
+        setIsLoadingAnalytics(false);
+      }
+    };
+
+    loadAnalytics();
+  }, [shortCode]);
+
+  // Load aggregate data based on selected dimension
+  useEffect(() => {
+    const loadAggregate = async () => {
+      if (!shortCode) return;
+
+      setIsLoadingAggregate(true);
+      try {
+        const aggregateData = await apiClient.getAnalyticsAggregate(shortCode, selectedDimension, undefined, undefined, 20);
+        setAggregateStats(aggregateData.aggregates);
+      } catch (aggregateError) {
+        console.warn('Analytics aggregates not available:', aggregateError);
+        setAggregateStats([]);
+      } finally {
+        setIsLoadingAggregate(false);
+      }
+    };
+
+    loadAggregate();
+  }, [shortCode, selectedDimension]);
 
   const handleCopyLink = async () => {
     if (url) {
@@ -73,30 +109,49 @@ const UrlDetails: React.FC = () => {
   };
 
   const formatDate = (timestamp: number) => {
+    // Backend returns Unix timestamps in seconds
     return new Date(timestamp * 1000).toLocaleString();
   };
 
   const formatTimeBucket = (timestamp: number) => {
+    // Backend returns Unix timestamps in seconds
     const date = new Date(timestamp * 1000);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  if (isLoading) {
-    return (
-      <div style={{ 
-        maxWidth: '1200px', 
-        margin: '0 auto', 
-        padding: '40px 24px',
-        textAlign: 'center',
-        color: 'var(--color-text-tertiary)',
-        fontSize: '14px'
-      }}>
-        Loading...
-      </div>
-    );
-  }
+  const formatDimensionValue = (value: string, dimension: AggregateDimension): string => {
+    if (dimension === 'hour' || dimension === 'day') {
+      const timestamp = parseInt(value, 10);
+      if (!isNaN(timestamp)) {
+        // Backend returns Unix timestamps in seconds
+        const date = new Date(timestamp * 1000);
+        if (dimension === 'hour') {
+          return date.toLocaleString([], { 
+            month: 'short', 
+            day: 'numeric', 
+            hour: '2-digit', 
+            minute: '2-digit' 
+          });
+        } else {
+          return date.toLocaleDateString([], { 
+            year: 'numeric', 
+            month: 'short', 
+            day: 'numeric' 
+          });
+        }
+      }
+    }
+    return value || 'Unknown';
+  };
 
-  if (error || !url) {
+  // Memoize short link calculation
+  const shortLink = useMemo(
+    () => url ? buildShortLink(url.short_code, url.redirect_base_url) : null,
+    [url]
+  );
+
+  // Show error state only if error occurred and we have no URL data
+  if (error && !url) {
     return (
       <div style={{ 
         maxWidth: '1200px', 
@@ -133,8 +188,6 @@ const UrlDetails: React.FC = () => {
       </div>
     );
   }
-
-  const shortLink = buildShortLink(url.short_code, url.redirect_base_url);
 
   return (
     <div style={{ 
@@ -198,6 +251,34 @@ const UrlDetails: React.FC = () => {
           Link Information
         </h2>
         
+        {isLoadingUrl ? (
+          <div style={{ display: 'grid', gap: '16px' }}>
+            <div style={{ 
+              height: '60px', 
+              backgroundColor: 'var(--color-bg-secondary)', 
+              borderRadius: 'var(--radius-md)',
+              animation: 'pulse 1.5s ease-in-out infinite'
+            }} />
+            <div style={{ 
+              height: '60px', 
+              backgroundColor: 'var(--color-bg-secondary)', 
+              borderRadius: 'var(--radius-md)',
+              animation: 'pulse 1.5s ease-in-out infinite',
+              animationDelay: '0.1s'
+            }} />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+              {[1, 2, 3, 4].map(i => (
+                <div key={i} style={{ 
+                  height: '80px', 
+                  backgroundColor: 'var(--color-bg-secondary)', 
+                  borderRadius: 'var(--radius-md)',
+                  animation: 'pulse 1.5s ease-in-out infinite',
+                  animationDelay: `${0.1 * i}s`
+                }} />
+              ))}
+            </div>
+          </div>
+        ) : url ? (
         <div style={{ display: 'grid', gap: '16px' }}>
           {/* Short Link */}
           <div>
@@ -412,26 +493,74 @@ const UrlDetails: React.FC = () => {
             )}
           </div>
         </div>
+        ) : null}
       </div>
 
-      {/* Geographic Analytics */}
-      {countryStats.length > 0 && (
-        <div style={{
-          backgroundColor: 'var(--color-bg-elevated)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-lg)',
-          boxShadow: 'var(--shadow-sm)',
-          padding: '24px',
-          marginBottom: '24px'
+      {/* Aggregate Analytics with Dimension Selector */}
+      <div style={{
+        backgroundColor: 'var(--color-bg-elevated)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-lg)',
+        boxShadow: 'var(--shadow-sm)',
+        padding: '24px',
+        marginBottom: '24px'
+      }}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          marginBottom: '20px',
+          flexWrap: 'wrap',
+          gap: '16px'
         }}>
           <h2 style={{
-            margin: '0 0 20px 0',
+            margin: 0,
             fontSize: '18px',
             fontWeight: 600,
             color: 'var(--color-text-primary)'
           }}>
-            Visits by Country
+            Analytics by Dimension
           </h2>
+          
+          {/* Dimension Selector */}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {(Object.keys(DIMENSION_LABELS) as AggregateDimension[]).map((dimension) => (
+              <button
+                key={dimension}
+                onClick={() => setSelectedDimension(dimension)}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: selectedDimension === dimension 
+                    ? 'var(--color-primary)' 
+                    : 'var(--color-bg-elevated)',
+                  color: selectedDimension === dimension 
+                    ? 'var(--color-bg-elevated)' 
+                    : 'var(--color-text-secondary)',
+                  border: `1px solid ${selectedDimension === dimension 
+                    ? 'var(--color-primary)' 
+                    : 'var(--color-border)'}`,
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  boxShadow: selectedDimension === dimension ? 'var(--shadow-sm)' : 'none',
+                }}
+              >
+                {DIMENSION_LABELS[dimension]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {isLoadingAggregate ? (
+          <div style={{ 
+            height: '200px', 
+            backgroundColor: 'var(--color-bg-secondary)', 
+            borderRadius: 'var(--radius-md)',
+            animation: 'pulse 1.5s ease-in-out infinite'
+          }} />
+        ) : aggregateStats.length > 0 ? (
           <div style={{
             overflowX: 'auto',
             border: '1px solid var(--color-border)',
@@ -452,7 +581,7 @@ const UrlDetails: React.FC = () => {
                     textTransform: 'uppercase',
                     letterSpacing: '0.5px'
                   }}>
-                    Country
+                    {DIMENSION_LABELS[selectedDimension]}
                   </th>
                   <th style={{ 
                     padding: '12px 16px', 
@@ -480,14 +609,14 @@ const UrlDetails: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {countryStats.map((stat, index) => {
-                  const totalVisits = countryStats.reduce((sum, s) => sum + s.visit_count, 0);
+                {aggregateStats.map((stat, index) => {
+                  const totalVisits = aggregateStats.reduce((sum, s) => sum + s.visit_count, 0);
                   const percentage = totalVisits > 0 ? (stat.visit_count / totalVisits) * 100 : 0;
                   return (
                     <tr 
                       key={index}
                       style={{ 
-                        borderBottom: index < countryStats.length - 1 ? '1px solid var(--color-border-light)' : 'none'
+                        borderBottom: index < aggregateStats.length - 1 ? '1px solid var(--color-border-light)' : 'none'
                       }}
                     >
                       <td style={{ 
@@ -496,7 +625,7 @@ const UrlDetails: React.FC = () => {
                         color: 'var(--color-text-primary)',
                         fontWeight: 500
                       }}>
-                        {stat.dimension || 'Unknown'}
+                        {formatDimensionValue(stat.dimension, selectedDimension)}
                       </td>
                       <td style={{ 
                         padding: '12px 16px',
@@ -539,98 +668,122 @@ const UrlDetails: React.FC = () => {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        ) : (
+          <div style={{
+            padding: '40px 24px',
+            textAlign: 'center',
+            backgroundColor: 'var(--color-bg-secondary)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--color-border)'
+          }}>
+            <p style={{ 
+              color: 'var(--color-text-tertiary)',
+              fontSize: '14px',
+              margin: 0
+            }}>
+              No {DIMENSION_LABELS[selectedDimension].toLowerCase()} data available yet.
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* Recent Analytics Activity */}
-      {analytics.length > 0 && (
-        <div style={{
-          backgroundColor: 'var(--color-bg-elevated)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-lg)',
-          boxShadow: 'var(--shadow-sm)',
-          padding: '24px'
+      <div style={{
+        backgroundColor: 'var(--color-bg-elevated)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-lg)',
+        boxShadow: 'var(--shadow-sm)',
+        padding: '24px'
+      }}>
+        <h2 style={{
+          margin: '0 0 20px 0',
+          fontSize: '18px',
+          fontWeight: 600,
+          color: 'var(--color-text-primary)'
         }}>
-          <h2 style={{
-            margin: '0 0 20px 0',
-            fontSize: '18px',
-            fontWeight: 600,
-            color: 'var(--color-text-primary)'
-          }}>
-            Recent Activity
-          </h2>
-          <div style={{
-            overflowX: 'auto',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)'
-          }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ 
-                  backgroundColor: 'var(--color-bg-secondary)',
-                  borderBottom: '1px solid var(--color-border)'
+          Recent Activity
+        </h2>
+        
+        {isLoadingAnalytics ? (
+          <div style={{ 
+            height: '300px', 
+            backgroundColor: 'var(--color-bg-secondary)', 
+            borderRadius: 'var(--radius-md)',
+            animation: 'pulse 1.5s ease-in-out infinite'
+          }} />
+        ) : analytics.length > 0 ? (
+        <div style={{
+          overflowX: 'auto',
+          border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius-md)'
+        }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ 
+                backgroundColor: 'var(--color-bg-secondary)',
+                borderBottom: '1px solid var(--color-border)'
+              }}>
+                <th style={{ 
+                  padding: '12px 16px', 
+                  textAlign: 'left',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--color-text-secondary)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
                 }}>
-                  <th style={{ 
-                    padding: '12px 16px', 
-                    textAlign: 'left',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    Time Period
-                  </th>
-                  <th style={{ 
-                    padding: '12px 16px', 
-                    textAlign: 'left',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    Country
-                  </th>
-                  <th style={{ 
-                    padding: '12px 16px', 
-                    textAlign: 'left',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    Region
-                  </th>
-                  <th style={{ 
-                    padding: '12px 16px', 
-                    textAlign: 'left',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    City
-                  </th>
-                  <th style={{ 
-                    padding: '12px 16px', 
-                    textAlign: 'right',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    Visits
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {analytics.slice(0, 20).map((entry, index) => (
-                  <tr 
-                    key={entry.id}
+                  Time Period
+                </th>
+                <th style={{ 
+                  padding: '12px 16px', 
+                  textAlign: 'left',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--color-text-secondary)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  Country
+                </th>
+                <th style={{ 
+                  padding: '12px 16px', 
+                  textAlign: 'left',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--color-text-secondary)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  Region
+                </th>
+                <th style={{ 
+                  padding: '12px 16px', 
+                  textAlign: 'left',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--color-text-secondary)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  City
+                </th>
+                <th style={{ 
+                  padding: '12px 16px', 
+                  textAlign: 'right',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: 'var(--color-text-secondary)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  Visits
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {analytics.slice(0, 20).map((entry, index) => (
+                <tr 
+                  key={entry.id}
                     style={{ 
                       borderBottom: index < Math.min(analytics.length, 20) - 1 ? '1px solid var(--color-border-light)' : 'none'
                     }}
@@ -677,28 +830,24 @@ const UrlDetails: React.FC = () => {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
-
-      {/* No Analytics Available Message */}
-      {analytics.length === 0 && countryStats.length === 0 && (
-        <div style={{
-          backgroundColor: 'var(--color-bg-elevated)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-lg)',
-          boxShadow: 'var(--shadow-sm)',
-          padding: '40px 24px',
-          textAlign: 'center'
-        }}>
-          <p style={{ 
-            color: 'var(--color-text-tertiary)',
-            fontSize: '14px',
-            margin: 0
+        ) : (
+          <div style={{
+            padding: '40px 24px',
+            textAlign: 'center',
+            backgroundColor: 'var(--color-bg-secondary)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--color-border)'
           }}>
-            No analytics data available yet. Analytics will appear once your link receives visits.
-          </p>
-        </div>
-      )}
+            <p style={{ 
+              color: 'var(--color-text-tertiary)',
+              fontSize: '14px',
+              margin: 0
+            }}>
+              No recent activity data available yet. Analytics will appear once your link receives visits.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
