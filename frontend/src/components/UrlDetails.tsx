@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { apiClient } from '../api';
 import type { ShortenedUrl, AnalyticsEntry, AnalyticsAggregate } from '../types';
@@ -109,10 +109,12 @@ const UrlDetails: React.FC = () => {
   };
 
   const formatDate = (timestamp: number) => {
+    // Backend returns Unix timestamps in seconds
     return new Date(timestamp * 1000).toLocaleString();
   };
 
   const formatTimeBucket = (timestamp: number) => {
+    // Backend returns Unix timestamps in seconds
     const date = new Date(timestamp * 1000);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
@@ -121,6 +123,7 @@ const UrlDetails: React.FC = () => {
     if (dimension === 'hour' || dimension === 'day') {
       const timestamp = parseInt(value, 10);
       if (!isNaN(timestamp)) {
+        // Backend returns Unix timestamps in seconds
         const date = new Date(timestamp * 1000);
         if (dimension === 'hour') {
           return date.toLocaleString([], { 
@@ -140,6 +143,12 @@ const UrlDetails: React.FC = () => {
     }
     return value || 'Unknown';
   };
+
+  // Memoize short link calculation
+  const shortLink = useMemo(
+    () => url ? buildShortLink(url.short_code, url.redirect_base_url) : null,
+    [url]
+  );
 
   // Show error state only if error occurred and we have no URL data
   if (error && !url) {
@@ -179,8 +188,6 @@ const UrlDetails: React.FC = () => {
       </div>
     );
   }
-
-  const shortLink = url ? buildShortLink(url.short_code, url.redirect_base_url) : null;
 
   return (
     <div style={{ 
