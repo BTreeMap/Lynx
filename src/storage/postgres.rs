@@ -1,6 +1,6 @@
 use crate::models::ShortenedUrl;
 use crate::storage::{LookupMetadata, LookupResult, Storage, StorageError, StorageResult};
-use crate::analytics::{DROPPED_DIMENSION_MARKER, DEFAULT_IP_VERSION, DROPPED_TIME_BUCKET};
+use crate::analytics::{DROPPED_DIMENSION_MARKER, DEFAULT_IP_VERSION, ALIGNMENT_TIME_BUCKET};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::postgres::PgPoolOptions;
@@ -741,12 +741,12 @@ impl Storage for PostgresStorage {
         drop_dimensions: &[String],
     ) -> Result<(i64, i64)> {
         let cutoff_time = chrono::Utc::now().timestamp() - (retention_days * 86400);
-        let now = chrono::Utc::now().timestamp();
         
-        // Count old entries before pruning
-        let count_query = "SELECT COUNT(*)::BIGINT FROM analytics WHERE time_bucket < $1";
+        // Count old entries before pruning (exclude alignment entries with time_bucket = 0)
+        let count_query = "SELECT COUNT(*)::BIGINT FROM analytics WHERE time_bucket < $1 AND time_bucket != $2";
         let old_count: (i64,) = sqlx::query_as(count_query)
             .bind(cutoff_time)
+            .bind(ALIGNMENT_TIME_BUCKET)
             .fetch_one(self.pool.as_ref())
             .await?;
         let deleted_count = old_count.0;
@@ -762,17 +762,21 @@ impl Storage for PostgresStorage {
         ];
         
         // Pre-compute dimension checks for efficiency
-        let drop_hour = drop_dimensions.contains(&"hour".to_string());
-        let drop_day = drop_dimensions.contains(&"day".to_string());
-        let drop_country = drop_dimensions.contains(&"country".to_string());
+        let drop_time_bucket = drop_dimensions.contains(&"time_bucket".to_string());
+        let drop_country = drop_dimensions.contains(&"country_code".to_string()) || 
+                          drop_dimensions.contains(&"country".to_string());
         
-        // Handle time bucket dropping - use current time for aggregated entries
-        let time_bucket_expr = if drop_hour && drop_day {
-            format!("CAST({} AS BIGINT)", now) // Use current time when all time granularity is dropped
-        } else if drop_hour {
-            format!("CAST({} AS BIGINT)", (now / 86400) * 86400) // Use current day when hour is dropped
+        // Handle time bucket dropping
+        // When aggregating old entries, we always need to set time_bucket to a value >= cutoff_time
+        // to avoid the aggregated entries being immediately deleted
+        let now = chrono::Utc::now().timestamp();
+        let time_bucket_expr = if drop_time_bucket {
+            // When dropping time_bucket, set all entries to cutoff_time (day boundary)
+            format!("CAST({} AS BIGINT)", cutoff_time)
         } else {
-            "time_bucket".to_string() // Keep original time_bucket
+            // When keeping time_bucket, use current time to avoid deletion
+            // The time dimension info is preserved in the created_at/updated_at timestamps
+            format!("CAST({} AS BIGINT)", now)
         };
         select_fields.push(format!("{} as time_bucket", time_bucket_expr));
         
@@ -816,22 +820,24 @@ impl Storage for PostgresStorage {
             "INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
              SELECT {}, SUM(visit_count)::BIGINT as visit_count, {} as created_at, {} as updated_at
              FROM analytics
-             WHERE time_bucket < $1
+             WHERE time_bucket < $1 AND time_bucket != $2
              GROUP BY {}",
             select_clause, now, now, group_by_clause
         );
         
         let insert_result = sqlx::query(&aggregate_query)
             .bind(cutoff_time)
+            .bind(ALIGNMENT_TIME_BUCKET)
             .execute(&mut *tx)
             .await?;
         
         let inserted_count = insert_result.rows_affected() as i64;
         
-        // Delete old entries
-        let delete_query = "DELETE FROM analytics WHERE time_bucket < $1";
+        // Delete old entries (excluding alignment entries with time_bucket = 0)
+        let delete_query = "DELETE FROM analytics WHERE time_bucket < $1 AND time_bucket != $2";
         sqlx::query(delete_query)
             .bind(cutoff_time)
+            .bind(ALIGNMENT_TIME_BUCKET)
             .execute(&mut *tx)
             .await?;
         
@@ -884,7 +890,7 @@ impl Storage for PostgresStorage {
         
         let result = sqlx::query(query)
             .bind(short_code)
-            .bind(DROPPED_TIME_BUCKET)
+            .bind(ALIGNMENT_TIME_BUCKET)
             .bind(DROPPED_DIMENSION_MARKER)
             .bind(DROPPED_DIMENSION_MARKER)
             .bind(DROPPED_DIMENSION_MARKER)
@@ -896,6 +902,28 @@ impl Storage for PostgresStorage {
             .await?;
         
         Ok(result.rows_affected() as i64)
+    }
+
+    async fn get_all_misaligned_analytics(&self) -> Result<Vec<(String, i64, i64, i64)>> {
+        // Get all short codes with their click counts and analytics counts
+        let query = "
+            SELECT 
+                u.short_code,
+                u.clicks,
+                COALESCE(SUM(a.visit_count), 0) as analytics_count,
+                u.clicks - COALESCE(SUM(a.visit_count), 0) as difference
+            FROM urls u
+            LEFT JOIN analytics a ON u.short_code = a.short_code
+            GROUP BY u.short_code, u.clicks
+            HAVING u.clicks > COALESCE(SUM(a.visit_count), 0)
+            ORDER BY difference DESC
+        ";
+        
+        let results = sqlx::query_as::<_, (String, i64, i64, i64)>(query)
+            .fetch_all(self.pool.as_ref())
+            .await?;
+        
+        Ok(results)
     }
 }
 

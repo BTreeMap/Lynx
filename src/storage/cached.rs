@@ -501,4 +501,9 @@ impl Storage for CachedStorage {
         // Pass through to inner storage
         self.inner.align_analytics_with_clicks(short_code).await
     }
+
+    async fn get_all_misaligned_analytics(&self) -> Result<Vec<(String, i64, i64, i64)>> {
+        // Pass through to inner storage
+        self.inner.get_all_misaligned_analytics().await
+    }
 }

@@ -183,4 +183,8 @@ pub trait Storage: Send + Sync {
         &self,
         short_code: &str,
     ) -> Result<i64>;
+
+    /// Get all short codes with misaligned analytics (where click count > analytics count)
+    /// Returns list of (short_code, clicks, analytics_count, difference)
+    async fn get_all_misaligned_analytics(&self) -> Result<Vec<(String, i64, i64, i64)>>;
 }

@@ -118,8 +118,8 @@ enum UserCommands {
 enum AnalyticsCommands {
     /// Prune old analytics data by aggregating and dropping dimensions
     Prune {
-        /// Dimensions to drop (comma-separated: hour,day,region,city,asn,country)
-        #[arg(long, value_delimiter = ',', default_value = "hour,day")]
+        /// Dimensions to drop (comma-separated: time_bucket,region,city,asn,country_code)
+        #[arg(long, value_delimiter = ',', default_value = "time_bucket")]
         drop: Vec<String>,
         /// Keep data newer than this many days (default: 30)
         #[arg(long, default_value_t = 30)]
@@ -483,10 +483,28 @@ async fn handle_analytics_command(command: AnalyticsCommands) -> Result<()> {
                 // Align all short codes
                 println!("⚠ Aligning all short codes with click counts...");
                 
-                // Get all short codes (we'll need to add this method)
-                // For now, let's do a simple implementation
-                println!("✗ Aligning all codes is not yet implemented. Please specify a short code with -s");
-                return Ok(());
+                let misaligned = storage.get_all_misaligned_analytics().await?;
+                
+                if misaligned.is_empty() {
+                    println!("✓ All analytics data is already aligned with click counts");
+                    return Ok(());
+                }
+                
+                println!("Found {} short code(s) with misaligned analytics", misaligned.len());
+                
+                let mut total_aligned = 0;
+                let mut total_difference = 0;
+                
+                for (code, clicks, analytics_count, diff) in misaligned {
+                    println!("  - {} (clicks: {}, analytics: {}, diff: {})", code, clicks, analytics_count, diff);
+                    let inserted = storage.align_analytics_with_clicks(&code).await?;
+                    total_aligned += inserted;
+                    total_difference += diff;
+                }
+                
+                println!();
+                println!("✓ Aligned {} short code(s)", total_aligned);
+                println!("✓ Created {} placeholder entries for {} missing visits", total_aligned, total_difference);
             }
         }
     }

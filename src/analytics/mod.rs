@@ -15,7 +15,10 @@ pub mod storage;
 // Constants for analytics pruning and alignment
 pub const DROPPED_DIMENSION_MARKER: &str = "<dropped>";
 pub const DEFAULT_IP_VERSION: i32 = 4; // IPv4
-pub const DROPPED_TIME_BUCKET: i64 = 0;
+/// Special time bucket value reserved for alignment placeholder entries
+/// This is used when reconciling analytics with click counts for data that was
+/// recorded before analytics was enabled
+pub const ALIGNMENT_TIME_BUCKET: i64 = 0;
 
 // Re-export commonly used types
 pub use geoip::GeoIpService;
