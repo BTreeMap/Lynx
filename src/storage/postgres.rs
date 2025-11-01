@@ -138,7 +138,11 @@ impl Storage for PostgresStorage {
         .execute(self.pool.as_ref())
         .await?;
 
-        // Security: Create function to prevent DELETE operations on urls table
+        // Security: Set up delete protection in a transaction to ensure consistency
+        // This prevents race conditions when multiple init() calls happen concurrently
+        let mut tx = self.pool.begin().await?;
+
+        // Create function to prevent DELETE operations on urls table
         sqlx::query(
             r#"
             CREATE OR REPLACE FUNCTION prevent_urls_delete()
@@ -150,10 +154,10 @@ impl Storage for PostgresStorage {
             $$ LANGUAGE plpgsql
             "#,
         )
-        .execute(self.pool.as_ref())
+        .execute(&mut *tx)
         .await?;
 
-        // Security: Create trigger to prevent DELETE operations
+        // Create trigger to prevent DELETE operations
         sqlx::query(
             r#"
             DO $$
@@ -170,10 +174,10 @@ impl Storage for PostgresStorage {
             $$
             "#,
         )
-        .execute(self.pool.as_ref())
+        .execute(&mut *tx)
         .await?;
 
-        // Security: Create function to prevent TRUNCATE operations on urls table
+        // Create function to prevent TRUNCATE operations on urls table
         sqlx::query(
             r#"
             CREATE OR REPLACE FUNCTION prevent_urls_truncate()
@@ -185,10 +189,10 @@ impl Storage for PostgresStorage {
             $$ LANGUAGE plpgsql
             "#,
         )
-        .execute(self.pool.as_ref())
+        .execute(&mut *tx)
         .await?;
 
-        // Security: Create trigger to prevent TRUNCATE operations
+        // Create trigger to prevent TRUNCATE operations
         sqlx::query(
             r#"
             DO $$
@@ -205,21 +209,23 @@ impl Storage for PostgresStorage {
             $$
             "#,
         )
-        .execute(self.pool.as_ref())
+        .execute(&mut *tx)
         .await?;
 
-        // Security: Attempt to revoke DELETE permission on urls table
-        // Note: This will fail silently if we don't have permission to REVOKE,
+        // Attempt to revoke DELETE permission on urls table
+        // Note: This may fail if we don't have permission to REVOKE,
         // which is acceptable as the triggers provide the primary protection
         let _ = sqlx::query("REVOKE DELETE ON urls FROM PUBLIC")
-            .execute(self.pool.as_ref())
+            .execute(&mut *tx)
             .await;
 
-        // Also try to revoke from the current user (if we can determine it)
-        // This will fail silently if the current user doesn't exist or we lack permission
+        // Also try to revoke from the current user
         let _ = sqlx::query("REVOKE DELETE ON urls FROM CURRENT_USER")
-            .execute(self.pool.as_ref())
+            .execute(&mut *tx)
             .await;
+
+        // Commit the transaction
+        tx.commit().await?;
 
         Ok(())
     }

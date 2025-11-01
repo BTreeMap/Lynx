@@ -2,21 +2,46 @@
 //!
 //! These tests ensure comprehensive coverage of storage functionality including
 //! user management, link operations, and admin features.
+//!
+//! Tests can be filtered by database backend using the DATABASE_BACKEND environment variable:
+//! - `DATABASE_BACKEND=sqlite cargo test` - Run only SQLite tests
+//! - `DATABASE_BACKEND=postgres cargo test` - Run only PostgreSQL tests
+//! - By default, both backends are tested
 
-use lynx::storage::{SqliteStorage, Storage};
+use lynx::storage::{PostgresStorage, SqliteStorage, Storage};
 use std::sync::Arc;
 
-/// Helper to create test storage
-async fn create_test_storage() -> Arc<dyn Storage> {
+/// Get the database backend to test from environment variable
+fn should_test_backend(backend: &str) -> bool {
+    match std::env::var("DATABASE_BACKEND") {
+        Ok(val) => val.to_lowercase() == backend.to_lowercase(),
+        Err(_) => true, // Test all backends if not specified
+    }
+}
+
+/// Helper to create SQLite test storage
+async fn create_sqlite_storage() -> Arc<dyn Storage> {
     let storage = SqliteStorage::new("sqlite::memory:", 5).await.unwrap();
     storage.init().await.unwrap();
     Arc::new(storage)
 }
 
+/// Helper to create PostgreSQL test storage
+async fn create_postgres_storage() -> Option<Arc<dyn Storage>> {
+    let db_url = std::env::var("DATABASE_URL").ok()?;
+    let storage = PostgresStorage::new(&db_url, 5).await.ok()?;
+    storage.init().await.ok()?;
+    Some(Arc::new(storage))
+}
+
 #[tokio::test]
-async fn test_concurrent_url_creation() {
+async fn test_concurrent_url_creation_sqlite() {
+    if !should_test_backend("sqlite") {
+        return;
+    }
+
     // Test that concurrent URL creation handles conflicts correctly
-    let storage = create_test_storage().await;
+    let storage = create_sqlite_storage().await;
     
     let mut handles = vec![];
     
@@ -53,9 +78,13 @@ async fn test_concurrent_url_creation() {
 }
 
 #[tokio::test]
-async fn test_user_management_lifecycle() {
+async fn test_user_management_lifecycle_sqlite() {
+    if !should_test_backend("sqlite") {
+        return;
+    }
+
     // Test complete user lifecycle: create, update, promote, demote
-    let storage = create_test_storage().await;
+    let storage = create_sqlite_storage().await;
     
     // Create user
     storage
@@ -101,7 +130,7 @@ async fn test_user_management_lifecycle() {
 #[tokio::test]
 async fn test_bulk_link_operations() {
     // Test bulk deactivate and reactivate
-    let storage = create_test_storage().await;
+    let storage = create_sqlite_storage().await;
     
     // Create multiple links for a user
     for i in 1..=5 {
@@ -155,7 +184,7 @@ async fn test_bulk_link_operations() {
 #[tokio::test]
 async fn test_cursor_pagination() {
     // Test cursor-based pagination for listing URLs
-    let storage = create_test_storage().await;
+    let storage = create_sqlite_storage().await;
     
     // Create 10 links with known timestamps
     for i in 0..10 {
@@ -208,7 +237,7 @@ async fn test_cursor_pagination() {
 #[tokio::test]
 async fn test_user_link_isolation() {
     // Test that users can only see their own links
-    let storage = create_test_storage().await;
+    let storage = create_sqlite_storage().await;
     
     // Create links for different users
     storage.create_with_code("user1_link1", "https://example.com", Some("user1")).await.unwrap();
@@ -235,7 +264,7 @@ async fn test_user_link_isolation() {
 #[tokio::test]
 async fn test_click_increment_consistency() {
     // Test that concurrent click increments are consistent
-    let storage = create_test_storage().await;
+    let storage = create_sqlite_storage().await;
     
     storage.create_with_code("popular", "https://example.com", Some("user1")).await.unwrap();
     
@@ -263,7 +292,7 @@ async fn test_click_increment_consistency() {
 #[tokio::test]
 async fn test_patch_operations_isolation() {
     // Test that patch operations don't affect unrelated URLs
-    let storage = create_test_storage().await;
+    let storage = create_sqlite_storage().await;
     
     // Create URLs with various created_by values
     storage.create_with_code("normal1", "https://example.com", Some("user1")).await.unwrap();
@@ -319,7 +348,7 @@ async fn test_patch_operations_isolation() {
 #[tokio::test]
 async fn test_list_user_links_pagination() {
     // Test pagination for user-specific link listing
-    let storage = create_test_storage().await;
+    let storage = create_sqlite_storage().await;
     
     // Create 15 links for user1
     for i in 0..15 {
@@ -361,8 +390,12 @@ async fn test_list_user_links_pagination() {
 
 #[tokio::test]
 async fn test_sqlite_delete_protection() {
+    if !should_test_backend("sqlite") {
+        return;
+    }
+
     // Test that DELETE operations on urls table are blocked by trigger
-    let storage = create_test_storage().await;
+    let storage = create_sqlite_storage().await;
     
     // Create a test URL
     storage
@@ -407,6 +440,10 @@ async fn test_sqlite_delete_protection() {
 
 #[tokio::test]
 async fn test_postgres_delete_protection() {
+    if !should_test_backend("postgres") {
+        return;
+    }
+
     // Test that DELETE operations on urls table are blocked by trigger
     use lynx::storage::PostgresStorage;
     
@@ -460,6 +497,10 @@ async fn test_postgres_delete_protection() {
 
 #[tokio::test]
 async fn test_postgres_truncate_protection() {
+    if !should_test_backend("postgres") {
+        return;
+    }
+
     // Test that TRUNCATE operations on urls table are blocked by trigger
     use lynx::storage::PostgresStorage;
     
@@ -519,5 +560,75 @@ async fn test_postgres_truncate_protection() {
         .bind("pg_test_truncate")
         .execute(storage.pool.as_ref())
         .await;
+}
+
+#[tokio::test]
+async fn test_postgres_concurrent_init() {
+    if !should_test_backend("postgres") {
+        return;
+    }
+
+    // Test that concurrent init() calls don't cause conflicts
+    use lynx::storage::PostgresStorage;
+    
+    // Skip test if DATABASE_URL is not set
+    let db_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            println!("SKIPPED: DATABASE_URL not set");
+            return;
+        }
+    };
+    
+    // Create multiple storage instances
+    let mut handles = vec![];
+    
+    for i in 0..5 {
+        let url = db_url.clone();
+        let handle = tokio::spawn(async move {
+            let storage = PostgresStorage::new(&url, 5).await.unwrap();
+            storage.init().await.map(|_| i)
+        });
+        handles.push(handle);
+    }
+    
+    // All should succeed or at least not cause corruption
+    let mut success_count = 0;
+    for handle in handles {
+        match handle.await.unwrap() {
+            Ok(_) => success_count += 1,
+            Err(e) => {
+                // Some may fail due to concurrent trigger creation, but
+                // the database should not be in an inconsistent state
+                println!("Init failed (acceptable in concurrent scenario): {}", e);
+            }
+        }
+    }
+    
+    // At least one should succeed
+    assert!(success_count > 0, "At least one init should succeed");
+    
+    // Verify the database is in a consistent state by checking triggers exist
+    let storage = PostgresStorage::new(&db_url, 5).await.unwrap();
+    
+    // Check DELETE trigger exists
+    let delete_trigger: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pg_trigger WHERE tgname = 'prevent_urls_delete_trigger'"
+    )
+    .fetch_one(storage.pool.as_ref())
+    .await
+    .unwrap();
+    
+    assert_eq!(delete_trigger.0, 1, "DELETE trigger should exist exactly once");
+    
+    // Check TRUNCATE trigger exists
+    let truncate_trigger: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM pg_trigger WHERE tgname = 'prevent_urls_truncate_trigger'"
+    )
+    .fetch_one(storage.pool.as_ref())
+    .await
+    .unwrap();
+    
+    assert_eq!(truncate_trigger.0, 1, "TRUNCATE trigger should exist exactly once");
 }
 
