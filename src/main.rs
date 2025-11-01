@@ -126,9 +126,13 @@ enum UserCommands {
 #[derive(Subcommand)]
 enum AnalyticsCommands {
     /// Prune old analytics data by aggregating and dropping dimensions
+    /// 
+    /// Note: time_bucket is always set to the cutoff_time (start of the hour) for pruned entries.
+    /// This ensures aggregated data is not immediately deleted and simplifies retention logic.
     Prune {
-        /// Dimensions to drop (comma-separated: time_bucket,region,city,asn,country_code)
-        #[arg(long, value_delimiter = ',', default_value = "time_bucket")]
+        /// Dimensions to drop (comma-separated: region,city,asn,country_code)
+        /// Do not include time_bucket as it will always be set to cutoff_time
+        #[arg(long, value_delimiter = ',', default_value = "")]
         drop: Vec<String>,
         /// Keep data newer than this many days (default: 30)
         #[arg(long, default_value_t = 30)]

@@ -59,7 +59,7 @@ impl AnalyticsActor {
                             // Fast local append in Layer 1 buffer (no locks!)
                             self.buffer
                                 .entry(event.short_code.clone())
-                                .or_insert_with(Vec::new)
+                                .or_default()
                                 .push(event);
                         }
                         ActorMessage::Shutdown => {
@@ -158,7 +158,7 @@ impl AnalyticsAggregator {
     pub fn record_event(&self, event: AnalyticsEvent) {
         // Send to actor channel (lock-free, non-blocking)
         // If channel is full, log warning and drop event
-        if let Err(_) = self.actor_tx.try_send(ActorMessage::RecordEvent(event)) {
+        if self.actor_tx.try_send(ActorMessage::RecordEvent(event)).is_err() {
             warn!("Analytics event buffer full, dropping event");
         }
     }
@@ -276,47 +276,6 @@ impl AnalyticsAggregator {
                     if !entries.is_empty() {
                         flush_fn(entries).await;
                     }
-                }
-            }
-        })
-    }
-
-    /// Start the background flush task (without storage - for backward compatibility)
-    ///
-    /// This spawns a tokio task that periodically drains aggregates.
-    pub fn start_flush_task(&self, flush_interval_secs: u64) -> tokio::task::JoinHandle<()> {
-        let aggregates = Arc::clone(&self.aggregates);
-        let shutdown = Arc::clone(&self.shutdown);
-
-        tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(tokio::time::Duration::from_secs(flush_interval_secs));
-
-            loop {
-                interval.tick().await;
-
-                // Check shutdown signal
-                if *shutdown.lock().await {
-                    info!("Analytics aggregator flush task shutting down");
-                    break;
-                }
-
-                // Drain and log aggregates
-                let count = aggregates.len();
-                if count > 0 {
-                    debug!("Draining {} analytics aggregates", count);
-
-                    // Collect keys
-                    let keys: Vec<AnalyticsKey> =
-                        aggregates.iter().map(|entry| entry.key().clone()).collect();
-
-                    // Remove entries
-                    for key in keys {
-                        aggregates.remove(&key);
-                    }
-
-                    // TODO: Batch insert into database
-                    // For now, we just drain to prevent unbounded memory growth
                 }
             }
         })
