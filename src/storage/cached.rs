@@ -476,4 +476,13 @@ impl Storage for CachedStorage {
         // Analytics aggregates are not cached, pass through to storage
         self.inner.get_analytics_aggregate(short_code, start_time, end_time, group_by, limit).await
     }
+
+    async fn prune_analytics(
+        &self,
+        retention_days: i64,
+        drop_dimensions: &[String],
+    ) -> Result<(i64, i64)> {
+        // Pass through to inner storage
+        self.inner.prune_analytics(retention_days, drop_dimensions).await
+    }
 }

@@ -42,12 +42,14 @@ fn default_limit() -> i64 {
 pub struct AnalyticsResponse {
     pub entries: Vec<AnalyticsEntry>,
     pub total: usize,
+    pub clicks: i64,
 }
 
 #[derive(Debug, Serialize)]
 pub struct AnalyticsAggregateResponse {
     pub aggregates: Vec<AnalyticsAggregate>,
     pub total: usize,
+    pub clicks: i64,
 }
 
 /// Get analytics for a specific short code
@@ -58,13 +60,19 @@ pub async fn get_analytics(
 ) -> impl IntoResponse {
     let limit = params.limit.clamp(1, 1000);
     
+    // Get click count first
+    let clicks = match state.storage.get_authoritative(&short_code).await {
+        Ok(Some(url)) => url.clicks,
+        _ => 0,
+    };
+    
     match state.storage
         .get_analytics(&short_code, params.start_time, params.end_time, limit)
         .await
     {
         Ok(entries) => {
             let total = entries.len();
-            Json(AnalyticsResponse { entries, total }).into_response()
+            Json(AnalyticsResponse { entries, total, clicks }).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to get analytics: {}", e);
@@ -141,10 +149,17 @@ pub async fn get_analytics_aggregate(
         db_aggregates
     };
     
+    // Get click count
+    let clicks = match state.storage.get_authoritative(&short_code).await {
+        Ok(Some(url)) => url.clicks,
+        _ => 0,
+    };
+    
     let total = combined_aggregates.len();
     Json(AnalyticsAggregateResponse {
         aggregates: combined_aggregates,
         total,
+        clicks,
     })
     .into_response()
 }

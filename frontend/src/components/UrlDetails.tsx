@@ -21,6 +21,7 @@ const UrlDetails: React.FC = () => {
   const [url, setUrl] = useState<ShortenedUrl | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsEntry[]>([]);
   const [aggregateStats, setAggregateStats] = useState<AnalyticsAggregate[]>([]);
+  const [totalClicks, setTotalClicks] = useState<number>(0);
   const [selectedDimension, setSelectedDimension] = useState<AggregateDimension>('country');
   const [isLoadingUrl, setIsLoadingUrl] = useState(true);
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
@@ -62,9 +63,11 @@ const UrlDetails: React.FC = () => {
       try {
         const analyticsData = await apiClient.getAnalytics(shortCode, undefined, undefined, 50);
         setAnalytics(analyticsData.entries);
+        setTotalClicks(analyticsData.clicks);
       } catch (analyticsError) {
         console.warn('Analytics data not available:', analyticsError);
         setAnalytics([]);
+        setTotalClicks(0);
       } finally {
         setIsLoadingAnalytics(false);
       }
@@ -82,6 +85,7 @@ const UrlDetails: React.FC = () => {
       try {
         const aggregateData = await apiClient.getAnalyticsAggregate(shortCode, selectedDimension, undefined, undefined, 20);
         setAggregateStats(aggregateData.aggregates);
+        setTotalClicks(aggregateData.clicks);
       } catch (aggregateError) {
         console.warn('Analytics aggregates not available:', aggregateError);
         setAggregateStats([]);
@@ -92,6 +96,29 @@ const UrlDetails: React.FC = () => {
 
     loadAggregate();
   }, [shortCode, selectedDimension]);
+
+  // Calculate aggregates with "Other" category for unaccounted clicks
+  const aggregatesWithOther = useMemo(() => {
+    if (aggregateStats.length === 0 || totalClicks === 0) {
+      return aggregateStats;
+    }
+
+    const accountedVisits = aggregateStats.reduce((sum, s) => sum + s.visit_count, 0);
+    const unaccountedVisits = totalClicks - accountedVisits;
+
+    // Only add "Other" if there are unaccounted visits
+    if (unaccountedVisits > 0) {
+      return [
+        ...aggregateStats,
+        {
+          dimension: 'Other',
+          visit_count: unaccountedVisits
+        }
+      ];
+    }
+
+    return aggregateStats;
+  }, [aggregateStats, totalClicks]);
 
   const handleCopyLink = async () => {
     if (url) {
@@ -560,7 +587,7 @@ const UrlDetails: React.FC = () => {
             borderRadius: 'var(--radius-md)',
             animation: 'pulse 1.5s ease-in-out infinite'
           }} />
-        ) : aggregateStats.length > 0 ? (
+        ) : aggregatesWithOther.length > 0 ? (
           <div style={{
             overflowX: 'auto',
             border: '1px solid var(--color-border)',
@@ -609,28 +636,32 @@ const UrlDetails: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {aggregateStats.map((stat, index) => {
-                  const totalVisits = aggregateStats.reduce((sum, s) => sum + s.visit_count, 0);
+                {aggregatesWithOther.map((stat, index) => {
+                  const totalVisits = totalClicks; // Use total clicks for percentage calculation
                   const percentage = totalVisits > 0 ? (stat.visit_count / totalVisits) * 100 : 0;
+                  const isOther = stat.dimension === 'Other';
+                  
                   return (
                     <tr 
                       key={index}
                       style={{ 
-                        borderBottom: index < aggregateStats.length - 1 ? '1px solid var(--color-border-light)' : 'none'
+                        borderBottom: index < aggregatesWithOther.length - 1 ? '1px solid var(--color-border-light)' : 'none',
+                        backgroundColor: isOther ? 'var(--color-bg-tertiary)' : 'transparent'
                       }}
                     >
                       <td style={{ 
                         padding: '12px 16px',
                         fontSize: '14px',
-                        color: 'var(--color-text-primary)',
-                        fontWeight: 500
+                        color: isOther ? 'var(--color-text-secondary)' : 'var(--color-text-primary)',
+                        fontWeight: 500,
+                        fontStyle: isOther ? 'italic' : 'normal'
                       }}>
-                        {formatDimensionValue(stat.dimension, selectedDimension)}
+                        {isOther ? stat.dimension : formatDimensionValue(stat.dimension, selectedDimension)}
                       </td>
                       <td style={{ 
                         padding: '12px 16px',
                         fontSize: '14px',
-                        color: 'var(--color-text-primary)',
+                        color: isOther ? 'var(--color-text-secondary)' : 'var(--color-text-primary)',
                         textAlign: 'right',
                         fontWeight: 500
                       }}>
@@ -648,7 +679,7 @@ const UrlDetails: React.FC = () => {
                             <div style={{
                               height: '100%',
                               width: `${percentage}%`,
-                              backgroundColor: 'var(--color-primary)',
+                              backgroundColor: isOther ? 'var(--color-text-tertiary)' : 'var(--color-primary)',
                               transition: 'width 0.3s ease'
                             }} />
                           </div>

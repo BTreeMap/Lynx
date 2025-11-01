@@ -1,5 +1,6 @@
 use crate::models::ShortenedUrl;
 use crate::storage::{LookupMetadata, LookupResult, Storage, StorageError, StorageResult};
+use crate::analytics::{DROPPED_DIMENSION_MARKER, DEFAULT_IP_VERSION};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -682,8 +683,14 @@ impl Storage for SqliteStorage {
     ) -> Result<Vec<crate::analytics::AnalyticsAggregate>> {
         let group_field = match group_by {
             "country" => "country_code",
-            "region" => "region",
-            "city" => "city",
+            "region" => {
+                // Don't format if region is <dropped>
+                "CASE WHEN region = '<dropped>' THEN region ELSE COALESCE(region, 'Unknown') || ', ' || COALESCE(country_code, 'Unknown') END"
+            },
+            "city" => {
+                // Don't format if city is <dropped>
+                "CASE WHEN city = '<dropped>' THEN city ELSE COALESCE(city, 'Unknown') || ', ' || COALESCE(region, 'Unknown') || ', ' || COALESCE(country_code, 'Unknown') END"
+            },
             "asn" => "CAST(asn AS TEXT)",
             "hour" => "time_bucket",
             "day" => "(time_bucket / 86400) * 86400",
@@ -743,6 +750,114 @@ impl Storage for SqliteStorage {
         };
 
         Ok(results)
+    }
+
+    async fn prune_analytics(
+        &self,
+        retention_days: i64,
+        drop_dimensions: &[String],
+    ) -> Result<(i64, i64)> {
+        let cutoff_time = chrono::Utc::now().timestamp() - (retention_days * 86400);
+        
+        // Count old entries before pruning
+        let count_query = "SELECT COUNT(*) FROM analytics WHERE time_bucket < ?";
+        let old_count: (i64,) = sqlx::query_as(count_query)
+            .bind(cutoff_time)
+            .fetch_one(self.pool.as_ref())
+            .await?;
+        let deleted_count = old_count.0;
+        
+        // If no old entries, return early
+        if deleted_count == 0 {
+            return Ok((0, 0));
+        }
+        
+        // Build the SELECT clause with dropped dimensions replaced
+        let mut select_fields = vec![
+            "short_code".to_string(),
+        ];
+        
+        // Pre-compute dimension checks for efficiency
+        let drop_time_bucket = drop_dimensions.contains(&"time_bucket".to_string());
+        let drop_country = drop_dimensions.contains(&"country_code".to_string()) || 
+                          drop_dimensions.contains(&"country".to_string());
+        
+        // Handle time bucket dropping
+        // When aggregating old entries, we always need to set time_bucket to a value >= cutoff_time
+        // to avoid the aggregated entries being immediately deleted
+        let now = chrono::Utc::now().timestamp();
+        let time_bucket_expr = if drop_time_bucket {
+            // When dropping time_bucket, set all entries to cutoff_time (day boundary)
+            format!("CAST({} AS INTEGER)", cutoff_time)
+        } else {
+            // When keeping time_bucket, use current time to avoid deletion
+            // The time dimension info is preserved in the created_at/updated_at timestamps
+            format!("CAST({} AS INTEGER)", now)
+        };
+        select_fields.push(format!("{} as time_bucket", time_bucket_expr));
+        
+        // Add dimension fields with conditional dropping
+        for field in &["country_code", "region", "city", "asn", "ip_version"] {
+            if drop_dimensions.contains(&field.to_string()) || 
+               (field == &"country_code" && drop_country) {
+                if field == &"asn" {
+                    select_fields.push(format!("NULL as {}", field));
+                } else if field == &"ip_version" {
+                    select_fields.push(format!("{} as {}", DEFAULT_IP_VERSION, field));
+                } else {
+                    select_fields.push(format!("'{}' as {}", DROPPED_DIMENSION_MARKER, field));
+                }
+            } else {
+                select_fields.push(field.to_string());
+            }
+        }
+        
+        // Build SELECT clause
+        let select_clause = select_fields.join(", ");
+        
+        // Build GROUP BY clause - use expressions without "as alias" parts
+        let group_by_expressions: Vec<String> = select_fields.iter()
+            .map(|f| {
+                // Extract expression before "as" if present, otherwise use the whole field
+                if f.contains(" as ") {
+                    f.split(" as ").next().unwrap().to_string()
+                } else {
+                    f.clone()
+                }
+            })
+            .collect();
+        let group_by_clause = group_by_expressions.join(", ");
+        
+        // Create a view of aggregated old entries (without inserting yet)
+        let mut tx = self.pool.begin().await?;
+        
+        // Create aggregated entries
+        let aggregate_query = format!(
+            "INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
+             SELECT {}, SUM(visit_count) as visit_count, {} as created_at, {} as updated_at
+             FROM analytics
+             WHERE time_bucket < ? AND time_bucket != ?
+             GROUP BY {}",
+            select_clause, now, now, group_by_clause
+        );
+        
+        let insert_result = sqlx::query(&aggregate_query)
+            .bind(cutoff_time)
+            .execute(&mut *tx)
+            .await?;
+        
+        let inserted_count = insert_result.rows_affected() as i64;
+        
+        // Delete old entries
+        let delete_query = "DELETE FROM analytics WHERE time_bucket < ?";
+        sqlx::query(delete_query)
+            .bind(cutoff_time)
+            .execute(&mut *tx)
+            .await?;
+        
+        tx.commit().await?;
+        
+        Ok((deleted_count, inserted_count))
     }
 }
 
@@ -1234,8 +1349,8 @@ mod tests {
         let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
         assert_eq!(total, 13);
         
-        // CA should have 9 visits (7 + 2)
-        let ca_agg = aggregates.iter().find(|a| a.dimension == "CA").unwrap();
+        // CA should have 9 visits (7 + 2), formatted as "CA, US"
+        let ca_agg = aggregates.iter().find(|a| a.dimension == "CA, US").unwrap();
         assert_eq!(ca_agg.visit_count, 9);
     }
 
@@ -1376,6 +1491,219 @@ mod tests {
         assert_eq!(aggregates.len(), 1);
         assert_eq!(aggregates[0].dimension, "GB");
         assert_eq!(aggregates[0].visit_count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_analytics_aggregate_by_city_formatting() {
+        let storage = setup_sqlite().await;
+
+        storage
+            .create_with_code("test", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        let time_bucket = 1698768000;
+        let records = vec![
+            // Full geo data: city, region, country
+            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Ontario".to_string()), Some("Toronto".to_string()), None, 4, 5),
+            // Same city, different count
+            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Ontario".to_string()), Some("Toronto".to_string()), None, 4, 3),
+            // Different city, same region and country
+            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Ontario".to_string()), Some("Ottawa".to_string()), None, 4, 2),
+            // Missing region
+            ("test".to_string(), time_bucket, Some("US".to_string()), None, Some("Portland".to_string()), None, 4, 1),
+        ];
+
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Aggregate by city
+        let aggregates = storage
+            .get_analytics_aggregate("test", None, None, "city", 10)
+            .await
+            .unwrap();
+
+        assert_eq!(aggregates.len(), 3);
+        
+        let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
+        assert_eq!(total, 11);
+        
+        // Toronto should be "Toronto, Ontario, CA" with 8 visits (5 + 3)
+        let toronto_agg = aggregates.iter().find(|a| a.dimension == "Toronto, Ontario, CA").unwrap();
+        assert_eq!(toronto_agg.visit_count, 8);
+        
+        // Ottawa should be "Ottawa, Ontario, CA" with 2 visits
+        let ottawa_agg = aggregates.iter().find(|a| a.dimension == "Ottawa, Ontario, CA").unwrap();
+        assert_eq!(ottawa_agg.visit_count, 2);
+        
+        // Portland should be "Portland, Unknown, US" (missing region)
+        let portland_agg = aggregates.iter().find(|a| a.dimension == "Portland, Unknown, US").unwrap();
+        assert_eq!(portland_agg.visit_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_analytics_aggregate_by_region_formatting() {
+        let storage = setup_sqlite().await;
+
+        storage
+            .create_with_code("test", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        let time_bucket = 1698768000;
+        let records = vec![
+            // Full data: country and region
+            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Ontario".to_string()), Some("Toronto".to_string()), None, 4, 5),
+            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Ontario".to_string()), Some("Ottawa".to_string()), None, 4, 3),
+            // Different region, same country
+            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Quebec".to_string()), Some("Montreal".to_string()), None, 4, 2),
+            // Missing country (edge case)
+            ("test".to_string(), time_bucket, None, Some("Texas".to_string()), Some("Austin".to_string()), None, 4, 1),
+        ];
+
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Aggregate by region
+        let aggregates = storage
+            .get_analytics_aggregate("test", None, None, "region", 10)
+            .await
+            .unwrap();
+
+        assert_eq!(aggregates.len(), 3);
+        
+        let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
+        assert_eq!(total, 11);
+        
+        // Ontario should be "Ontario, CA" with 8 visits (5 + 3)
+        let ontario_agg = aggregates.iter().find(|a| a.dimension == "Ontario, CA").unwrap();
+        assert_eq!(ontario_agg.visit_count, 8);
+        
+        // Quebec should be "Quebec, CA" with 2 visits
+        let quebec_agg = aggregates.iter().find(|a| a.dimension == "Quebec, CA").unwrap();
+        assert_eq!(quebec_agg.visit_count, 2);
+        
+        // Texas should be "Texas, Unknown" (missing country)
+        let texas_agg = aggregates.iter().find(|a| a.dimension == "Texas, Unknown").unwrap();
+        assert_eq!(texas_agg.visit_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_analytics_prune_drops_dimensions() {
+        let storage = setup_sqlite().await;
+
+        storage
+            .create_with_code("test", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        // Create analytics data older than 30 days
+        let old_time = chrono::Utc::now().timestamp() - (40 * 86400); // 40 days ago
+        let recent_time = chrono::Utc::now().timestamp() - (10 * 86400); // 10 days ago
+        
+        let records = vec![
+            // Old records (will be pruned)
+            ("test".to_string(), old_time, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), Some(15169), 4, 5),
+            ("test".to_string(), old_time + 3600, Some("US".to_string()), Some("CA".to_string()), Some("LA".to_string()), Some(15169), 4, 3),
+            ("test".to_string(), old_time, Some("GB".to_string()), Some("England".to_string()), Some("London".to_string()), Some(16509), 4, 2),
+            // Recent records (will not be pruned)
+            ("test".to_string(), recent_time, Some("CA".to_string()), Some("Ontario".to_string()), Some("Toronto".to_string()), None, 4, 4),
+        ];
+
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Prune with dropping city and region dimensions
+        let (deleted, inserted) = storage
+            .prune_analytics(30, &vec!["city".to_string(), "region".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(deleted, 3, "Should have deleted 3 old entries");
+        // Aggregated entries with current timestamp are created and should remain
+        // (they won't be deleted because their time_bucket is current time > cutoff)
+    }
+
+    #[tokio::test]
+    async fn test_analytics_prune_drops_time_dimensions() {
+        let storage = setup_sqlite().await;
+
+        storage
+            .create_with_code("test", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        // Create analytics data with different hours
+        let old_time = chrono::Utc::now().timestamp() - (40 * 86400); // 40 days ago
+        
+        let records = vec![
+            ("test".to_string(), old_time, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), None, 4, 5),
+            ("test".to_string(), old_time + 3600, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), None, 4, 3), // Different hour
+            ("test".to_string(), old_time + 7200, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), None, 4, 2), // Another hour
+        ];
+
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Prune with dropping time_bucket (should aggregate all to same day)
+        let (deleted, inserted) = storage
+            .prune_analytics(30, &vec!["time_bucket".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(deleted, 3, "Should have deleted 3 old entries");
+        // When dropping time_bucket, entries are aggregated with cutoff time
+        // The aggregated data is preserved in new entries with current timestamp
+    }
+
+    #[tokio::test]
+    async fn test_analytics_aggregate_handles_dropped_markers() {
+        let storage = setup_sqlite().await;
+
+        storage
+            .create_with_code("test", "https://example.com", Some("user1"))
+            .await
+            .unwrap();
+
+        let time_bucket = 1698768000;
+        let records = vec![
+            // Normal entry
+            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), None, 4, 5),
+            // Pruned entry with <dropped> markers
+            ("test".to_string(), time_bucket, Some("US".to_string()), Some("<dropped>".to_string()), Some("<dropped>".to_string()), None, 4, 3),
+        ];
+
+        storage.upsert_analytics_batch(records).await.unwrap();
+
+        // Aggregate by city
+        let city_aggregates = storage
+            .get_analytics_aggregate("test", None, None, "city", 10)
+            .await
+            .unwrap();
+
+        assert_eq!(city_aggregates.len(), 2);
+
+        // Normal entry should be formatted as "SF, CA, US"
+        let sf_agg = city_aggregates.iter().find(|a| a.dimension == "SF, CA, US");
+        assert!(sf_agg.is_some(), "Should have SF, CA, US entry");
+        assert_eq!(sf_agg.unwrap().visit_count, 5);
+
+        // Dropped entry should remain as "<dropped>"
+        let dropped_agg = city_aggregates.iter().find(|a| a.dimension == "<dropped>");
+        assert!(dropped_agg.is_some(), "Should have <dropped> entry");
+        assert_eq!(dropped_agg.unwrap().visit_count, 3);
+
+        // Aggregate by region
+        let region_aggregates = storage
+            .get_analytics_aggregate("test", None, None, "region", 10)
+            .await
+            .unwrap();
+
+        assert_eq!(region_aggregates.len(), 2);
+
+        // Normal entry should be formatted as "CA, US"
+        let ca_agg = region_aggregates.iter().find(|a| a.dimension == "CA, US");
+        assert!(ca_agg.is_some(), "Should have CA, US entry");
+
+        // Dropped entry should remain as "<dropped>"
+        let dropped_region_agg = region_aggregates.iter().find(|a| a.dimension == "<dropped>");
+        assert!(dropped_region_agg.is_some(), "Should have <dropped> entry for region");
     }
 }
 

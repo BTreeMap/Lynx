@@ -494,19 +494,19 @@ async fn test_analytics_aggregate_group_by_region() {
         .unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
     
-    assert_eq!(json["total"], 2); // CA and NY
+    assert_eq!(json["total"], 2); // CA, US and NY, US
     
     let aggregates = json["aggregates"].as_array().unwrap();
     
-    // CA should have 9 visits (7 + 2)
+    // CA should have 9 visits (7 + 2) and be formatted as "CA, US"
     let ca_agg = aggregates.iter()
-        .find(|a| a["dimension"] == "CA")
+        .find(|a| a["dimension"] == "CA, US")
         .unwrap();
     assert_eq!(ca_agg["visit_count"], 9);
     
-    // NY should have 4 visits
+    // NY should have 4 visits and be formatted as "NY, US"
     let ny_agg = aggregates.iter()
-        .find(|a| a["dimension"] == "NY")
+        .find(|a| a["dimension"] == "NY, US")
         .unwrap();
     assert_eq!(ny_agg["visit_count"], 4);
 }

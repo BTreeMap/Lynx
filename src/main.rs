@@ -35,6 +35,11 @@ enum Commands {
         #[command(subcommand)]
         user_command: UserCommands,
     },
+    /// Analytics data management commands
+    Analytics {
+        #[command(subcommand)]
+        analytics_command: AnalyticsCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -109,6 +114,19 @@ enum UserCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum AnalyticsCommands {
+    /// Prune old analytics data by aggregating and dropping dimensions
+    Prune {
+        /// Dimensions to drop (comma-separated: time_bucket,region,city,asn,country_code)
+        #[arg(long, value_delimiter = ',', default_value = "time_bucket")]
+        drop: Vec<String>,
+        /// Keep data newer than this many days (default: 30)
+        #[arg(long, default_value_t = 30)]
+        retention_days: i64,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize tracing
@@ -129,6 +147,11 @@ async fn main() -> Result<()> {
     // Handle user commands
     if let Some(Commands::User { user_command }) = cli.command {
         return handle_user_command(user_command).await;
+    }
+
+    // Handle analytics commands
+    if let Some(Commands::Analytics { analytics_command }) = cli.command {
+        return handle_analytics_command(analytics_command).await;
     }
 
     // Otherwise, run the server
@@ -392,6 +415,45 @@ async fn handle_user_command(command: UserCommands) -> Result<()> {
             } else {
                 println!("⚠ No inactive links found for user '{}'", user_id);
             }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_analytics_command(command: AnalyticsCommands) -> Result<()> {
+    let config = Config::from_env()?;
+
+    let storage: Arc<dyn Storage> = match config.database.backend {
+        DatabaseBackend::Sqlite => Arc::new(
+            SqliteStorage::new(&config.database.url, config.database.max_connections).await?,
+        ),
+        DatabaseBackend::Postgres => Arc::new(
+            PostgresStorage::new(&config.database.url, config.database.max_connections).await?,
+        ),
+    };
+
+    // Ensure database is initialized
+    storage.init().await?;
+
+    match command {
+        AnalyticsCommands::Prune {
+            drop,
+            retention_days,
+        } => {
+            println!(
+                "⚠ This will prune analytics data older than {} days",
+                retention_days
+            );
+            println!("   Dimensions to drop: {:?}", drop);
+            println!();
+
+            let (deleted, inserted) = storage.prune_analytics(retention_days, &drop).await?;
+
+            println!(
+                "✓ Pruned analytics: {} old entries deleted, {} aggregated entries created",
+                deleted, inserted
+            );
         }
     }
 

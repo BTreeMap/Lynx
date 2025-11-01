@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info, warn};
 
 use crate::analytics::models::{AnalyticsKey, AnalyticsEvent, AnalyticsRecord, AnalyticsValue};
+use crate::analytics::DROPPED_DIMENSION_MARKER;
 
 /// Message types for the AnalyticsActor
 enum ActorMessage {
@@ -431,8 +432,50 @@ impl AnalyticsAggregator {
             
             let dimension = match group_by {
                 "country" => key.country_code.clone().unwrap_or_else(|| "Unknown".to_string()),
-                "region" => key.region.clone().unwrap_or_else(|| "Unknown".to_string()),
-                "city" => key.city.clone().unwrap_or_else(|| "Unknown".to_string()),
+                "region" => {
+                    // Check if region is dropped marker
+                    if let Some(region) = &key.region {
+                        if region == DROPPED_DIMENSION_MARKER {
+                            DROPPED_DIMENSION_MARKER.to_string()
+                        } else {
+                            // Format: "Region, Country" (e.g., "Ontario, CA")
+                            match &key.country_code {
+                                Some(country) => format!("{}, {}", region, country),
+                                None => region.clone(),
+                            }
+                        }
+                    } else {
+                        // Format: "Region, Country" when region is None
+                        match &key.country_code {
+                            Some(country) => format!("Unknown, {}", country),
+                            None => "Unknown".to_string(),
+                        }
+                    }
+                },
+                "city" => {
+                    // Check if city is dropped marker
+                    if let Some(city) = &key.city {
+                        if city == DROPPED_DIMENSION_MARKER {
+                            DROPPED_DIMENSION_MARKER.to_string()
+                        } else {
+                            // Format: "City, Region, Country" (e.g., "Toronto, Ontario, CA")
+                            match (&key.region, &key.country_code) {
+                                (Some(region), Some(country)) => format!("{}, {}, {}", city, region, country),
+                                (Some(region), None) => format!("{}, {}", city, region),
+                                (None, Some(country)) => format!("{}, Unknown, {}", city, country),
+                                (None, None) => city.clone(),
+                            }
+                        }
+                    } else {
+                        // Format when city is None
+                        match (&key.region, &key.country_code) {
+                            (Some(region), Some(country)) => format!("Unknown, {}, {}", region, country),
+                            (Some(region), None) => format!("Unknown, {}", region),
+                            (None, Some(country)) => format!("Unknown, Unknown, {}", country),
+                            (None, None) => "Unknown".to_string(),
+                        }
+                    }
+                },
                 "asn" => key.asn.map(|a| a.to_string()).unwrap_or_else(|| "Unknown".to_string()),
                 "hour" => key.time_bucket.to_string(),
                 "day" => ((key.time_bucket / 86400) * 86400).to_string(),
