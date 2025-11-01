@@ -158,7 +158,11 @@ impl AnalyticsAggregator {
     pub fn record_event(&self, event: AnalyticsEvent) {
         // Send to actor channel (lock-free, non-blocking)
         // If channel is full, log warning and drop event
-        if self.actor_tx.try_send(ActorMessage::RecordEvent(event)).is_err() {
+        if self
+            .actor_tx
+            .try_send(ActorMessage::RecordEvent(event))
+            .is_err()
+        {
             warn!("Analytics event buffer full, dropping event");
         }
     }

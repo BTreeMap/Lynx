@@ -137,13 +137,14 @@ fn apply_trust_chain_validation(ips: &[IpAddr], config: &AnalyticsConfig) -> Opt
         let trusted_ranges: Vec<IpNet> = config
             .trusted_proxies
             .iter()
-            .filter_map(|cidr_str| {
-                match IpNet::from_str(cidr_str) {
-                    Ok(net) => Some(net),
-                    Err(e) => {
-                        warn!("Invalid CIDR range '{}' in trusted_proxies: {}", cidr_str, e);
-                        None
-                    }
+            .filter_map(|cidr_str| match IpNet::from_str(cidr_str) {
+                Ok(net) => Some(net),
+                Err(e) => {
+                    warn!(
+                        "Invalid CIDR range '{}' in trusted_proxies: {}",
+                        cidr_str, e
+                    );
+                    None
                 }
             })
             .collect();

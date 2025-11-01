@@ -126,7 +126,7 @@ enum UserCommands {
 #[derive(Subcommand)]
 enum AnalyticsCommands {
     /// Prune old analytics data by aggregating and dropping dimensions
-    /// 
+    ///
     /// Note: time_bucket is always set to the cutoff_time (start of the hour) for pruned entries.
     /// This ensures aggregated data is not immediately deleted and simplifies retention logic.
     Prune {

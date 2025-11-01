@@ -23,7 +23,7 @@ async fn create_test_storage() -> Arc<dyn Storage> {
 async fn test_redirect_active_url() {
     // Test basic redirect functionality for an active URL
     let storage = create_test_storage().await;
-    
+
     // Create a test URL
     storage
         .create_with_code("redirect_test", "https://example.com/destination", None)
@@ -41,15 +41,19 @@ async fn test_redirect_active_url() {
 
     // Should redirect (307 or 302)
     assert!(
-        response.status() == StatusCode::TEMPORARY_REDIRECT 
-        || response.status() == StatusCode::FOUND,
+        response.status() == StatusCode::TEMPORARY_REDIRECT
+            || response.status() == StatusCode::FOUND,
         "Should return redirect status, got: {}",
         response.status()
     );
 
     // Verify click was incremented
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    let url = storage.get_authoritative("redirect_test").await.unwrap().unwrap();
+    let url = storage
+        .get_authoritative("redirect_test")
+        .await
+        .unwrap()
+        .unwrap();
     assert!(url.clicks >= 1, "Click count should be at least 1");
 }
 
@@ -57,13 +61,13 @@ async fn test_redirect_active_url() {
 async fn test_redirect_inactive_url() {
     // Test that inactive URLs return 404
     let storage = create_test_storage().await;
-    
+
     // Create and deactivate a URL
     storage
         .create_with_code("inactive_test", "https://example.com", None)
         .await
         .unwrap();
-    
+
     storage.deactivate("inactive_test").await.unwrap();
 
     let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false);
@@ -107,7 +111,7 @@ async fn test_redirect_nonexistent_url() {
 async fn test_concurrent_redirects() {
     // Test that concurrent redirects to the same URL work correctly
     let storage = create_test_storage().await;
-    
+
     // Create a test URL
     storage
         .create_with_code("popular", "https://example.com", None)
@@ -118,7 +122,7 @@ async fn test_concurrent_redirects() {
 
     // Spawn many concurrent redirect requests
     let mut handles = vec![];
-    
+
     for _ in 0..50 {
         let app_clone = app.clone();
         let handle = tokio::spawn(async move {
@@ -134,7 +138,7 @@ async fn test_concurrent_redirects() {
 
     // All should succeed with redirect status
     let mut success_count = 0;
-    
+
     for handle in handles {
         match handle.await {
             Ok(Ok(response)) => {
@@ -164,7 +168,7 @@ async fn test_concurrent_redirects() {
 async fn test_redirect_during_deactivation() {
     // Test race condition between redirects and deactivation
     let storage = create_test_storage().await;
-    
+
     // Create a test URL
     storage
         .create_with_code("race_redirect", "https://example.com", None)
@@ -195,7 +199,7 @@ async fn test_redirect_during_deactivation() {
     // Some redirects may succeed (before deactivation), some may fail (after)
     let mut redirect_success = 0;
     let mut not_found = 0;
-    
+
     for handle in redirect_handles {
         if let Ok(Ok(response)) = handle.await {
             match response.status() {
@@ -213,7 +217,11 @@ async fn test_redirect_during_deactivation() {
     );
 
     // Final state should be inactive
-    let url = storage.get_authoritative("race_redirect").await.unwrap().unwrap();
+    let url = storage
+        .get_authoritative("race_redirect")
+        .await
+        .unwrap()
+        .unwrap();
     assert!(!url.is_active, "URL should be inactive");
 }
 
@@ -221,7 +229,7 @@ async fn test_redirect_during_deactivation() {
 async fn test_redirect_multiple_different_urls() {
     // Test concurrent redirects to different URLs
     let storage = create_test_storage().await;
-    
+
     // Create multiple test URLs
     for i in 0..10 {
         storage
@@ -238,7 +246,7 @@ async fn test_redirect_multiple_different_urls() {
 
     // Spawn concurrent redirects to different URLs
     let mut handles = vec![];
-    
+
     for i in 0..10 {
         for _ in 0..5 {
             let app_clone = app.clone();
@@ -257,7 +265,7 @@ async fn test_redirect_multiple_different_urls() {
 
     // All 50 redirects should succeed
     let mut success_count = 0;
-    
+
     for handle in handles {
         if let Ok(Ok(response)) = handle.await {
             if response.status() == StatusCode::TEMPORARY_REDIRECT

@@ -1991,19 +1991,22 @@ mod tests {
         storage.upsert_analytics_batch(records).await.unwrap();
 
         // Prune (time_bucket is always set to cutoff_time now)
-        let (deleted, inserted) = storage
-            .prune_analytics(30, &[])
-            .await
-            .unwrap();
+        let (deleted, inserted) = storage.prune_analytics(30, &[]).await.unwrap();
 
         assert_eq!(deleted, 3, "Should have deleted 3 old entries");
-        assert_eq!(inserted, 1, "Should have created 1 aggregated entry with all data");
-        
+        assert_eq!(
+            inserted, 1,
+            "Should have created 1 aggregated entry with all data"
+        );
+
         // Verify the aggregated entry has time_bucket set to cutoff_time
-        let analytics = storage.get_analytics("test", None, None, 100).await.unwrap();
+        let analytics = storage
+            .get_analytics("test", None, None, 100)
+            .await
+            .unwrap();
         assert_eq!(analytics.len(), 1);
         assert_eq!(analytics[0].visit_count, 10); // 5 + 3 + 2
-        
+
         // The time_bucket should be at the cutoff_time (rounded to hour start)
         let raw_cutoff = chrono::Utc::now().timestamp() - (30 * 86400);
         let expected_cutoff = (raw_cutoff / 3600) * 3600;
