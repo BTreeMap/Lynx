@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 pub struct SqliteStorage {
-    pool: Arc<SqlitePool>,
+    pub pool: Arc<SqlitePool>,
 }
 
 impl SqliteStorage {
@@ -148,6 +148,21 @@ impl Storage for SqliteStorage {
         // Composite index for short code and time range queries
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_analytics_short_code_time ON analytics(short_code, time_bucket DESC)",
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Security: Create trigger to prevent DELETE operations on urls table
+        // This ensures URLs can only be deactivated, never deleted
+        sqlx::query(
+            r#"
+            CREATE TRIGGER IF NOT EXISTS prevent_urls_delete
+            BEFORE DELETE ON urls
+            FOR EACH ROW
+            BEGIN
+                SELECT RAISE(ABORT, 'DELETE operations are not allowed on the urls table. Use deactivation instead.');
+            END
+            "#,
         )
         .execute(self.pool.as_ref())
         .await?;

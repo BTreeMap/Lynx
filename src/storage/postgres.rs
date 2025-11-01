@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 pub struct PostgresStorage {
-    pool: Arc<PgPool>,
+    pub pool: Arc<PgPool>,
 }
 
 impl PostgresStorage {
@@ -137,6 +137,89 @@ impl Storage for PostgresStorage {
         )
         .execute(self.pool.as_ref())
         .await?;
+
+        // Security: Create function to prevent DELETE operations on urls table
+        sqlx::query(
+            r#"
+            CREATE OR REPLACE FUNCTION prevent_urls_delete()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                RAISE EXCEPTION 'DELETE operations are not allowed on the urls table. Use deactivation instead.';
+                RETURN NULL;
+            END;
+            $$ LANGUAGE plpgsql
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Security: Create trigger to prevent DELETE operations
+        sqlx::query(
+            r#"
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_trigger WHERE tgname = 'prevent_urls_delete_trigger'
+                ) THEN
+                    CREATE TRIGGER prevent_urls_delete_trigger
+                    BEFORE DELETE ON urls
+                    FOR EACH ROW
+                    EXECUTE FUNCTION prevent_urls_delete();
+                END IF;
+            END
+            $$
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Security: Create function to prevent TRUNCATE operations on urls table
+        sqlx::query(
+            r#"
+            CREATE OR REPLACE FUNCTION prevent_urls_truncate()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                RAISE EXCEPTION 'TRUNCATE operations are not allowed on the urls table. Use deactivation instead.';
+                RETURN NULL;
+            END;
+            $$ LANGUAGE plpgsql
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Security: Create trigger to prevent TRUNCATE operations
+        sqlx::query(
+            r#"
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_trigger WHERE tgname = 'prevent_urls_truncate_trigger'
+                ) THEN
+                    CREATE TRIGGER prevent_urls_truncate_trigger
+                    BEFORE TRUNCATE ON urls
+                    FOR EACH STATEMENT
+                    EXECUTE FUNCTION prevent_urls_truncate();
+                END IF;
+            END
+            $$
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Security: Attempt to revoke DELETE permission on urls table
+        // Note: This will fail silently if we don't have permission to REVOKE,
+        // which is acceptable as the triggers provide the primary protection
+        let _ = sqlx::query("REVOKE DELETE ON urls FROM PUBLIC")
+            .execute(self.pool.as_ref())
+            .await;
+
+        // Also try to revoke from the current user (if we can determine it)
+        // This will fail silently if the current user doesn't exist or we lack permission
+        let _ = sqlx::query("REVOKE DELETE ON urls FROM CURRENT_USER")
+            .execute(self.pool.as_ref())
+            .await;
 
         Ok(())
     }

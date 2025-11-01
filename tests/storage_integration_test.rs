@@ -358,3 +358,166 @@ async fn test_list_user_links_pagination() {
         assert!(!codes2.contains(code));
     }
 }
+
+#[tokio::test]
+async fn test_sqlite_delete_protection() {
+    // Test that DELETE operations on urls table are blocked by trigger
+    let storage = create_test_storage().await;
+    
+    // Create a test URL
+    storage
+        .create_with_code("test_delete", "https://example.com", Some("user1"))
+        .await
+        .unwrap();
+    
+    // Verify the URL exists
+    let url = storage.get_authoritative("test_delete").await.unwrap();
+    assert!(url.is_some());
+    
+    // Get direct pool access to attempt DELETE
+    let sqlite_storage = SqliteStorage::new("sqlite::memory:", 5).await.unwrap();
+    sqlite_storage.init().await.unwrap();
+    
+    // Create the same URL in the new storage instance
+    sqlite_storage
+        .create_with_code("test_delete2", "https://example.com", Some("user1"))
+        .await
+        .unwrap();
+    
+    // Attempt to DELETE directly - this should fail due to trigger
+    let result = sqlx::query("DELETE FROM urls WHERE short_code = ?")
+        .bind("test_delete2")
+        .execute(sqlite_storage.pool.as_ref())
+        .await;
+    
+    assert!(result.is_err(), "DELETE should be blocked by trigger");
+    
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("DELETE operations are not allowed") || 
+        err_msg.contains("ABORT"),
+        "Error should mention DELETE not allowed, got: {}",
+        err_msg
+    );
+    
+    // Verify the URL still exists
+    let url = sqlite_storage.get_authoritative("test_delete2").await.unwrap();
+    assert!(url.is_some(), "URL should still exist after failed DELETE");
+}
+
+#[tokio::test]
+async fn test_postgres_delete_protection() {
+    // Test that DELETE operations on urls table are blocked by trigger
+    use lynx::storage::PostgresStorage;
+    
+    // Skip test if DATABASE_URL is not set
+    let db_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            println!("SKIPPED: DATABASE_URL not set");
+            return;
+        }
+    };
+    
+    let storage = PostgresStorage::new(&db_url, 5).await.unwrap();
+    storage.init().await.unwrap();
+    
+    // Create a test URL
+    storage
+        .create_with_code("pg_test_delete", "https://example.com", Some("user1"))
+        .await
+        .unwrap();
+    
+    // Verify the URL exists
+    let fetched = storage.get_authoritative("pg_test_delete").await.unwrap();
+    assert!(fetched.is_some());
+    
+    // Attempt to DELETE directly - this should fail due to trigger
+    let result = sqlx::query("DELETE FROM urls WHERE short_code = $1")
+        .bind("pg_test_delete")
+        .execute(storage.pool.as_ref())
+        .await;
+    
+    assert!(result.is_err(), "DELETE should be blocked by trigger");
+    
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("DELETE operations are not allowed"),
+        "Error should mention DELETE not allowed, got: {}",
+        err_msg
+    );
+    
+    // Verify the URL still exists
+    let url_after = storage.get_authoritative("pg_test_delete").await.unwrap();
+    assert!(url_after.is_some(), "URL should still exist after failed DELETE");
+    
+    // Clean up
+    let _ = sqlx::query("UPDATE urls SET is_active = false WHERE short_code = $1")
+        .bind("pg_test_delete")
+        .execute(storage.pool.as_ref())
+        .await;
+}
+
+#[tokio::test]
+async fn test_postgres_truncate_protection() {
+    // Test that TRUNCATE operations on urls table are blocked by trigger
+    use lynx::storage::PostgresStorage;
+    
+    // Skip test if DATABASE_URL is not set
+    let db_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            println!("SKIPPED: DATABASE_URL not set");
+            return;
+        }
+    };
+    
+    let storage = PostgresStorage::new(&db_url, 5).await.unwrap();
+    storage.init().await.unwrap();
+    
+    // Create a test URL
+    storage
+        .create_with_code("pg_test_truncate", "https://example.com", Some("user1"))
+        .await
+        .unwrap();
+    
+    // Count URLs before truncate attempt
+    let count_before: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM urls")
+        .fetch_one(storage.pool.as_ref())
+        .await
+        .unwrap();
+    
+    assert!(count_before.0 > 0, "Should have at least one URL");
+    
+    // Attempt to TRUNCATE - this should fail due to trigger
+    let result = sqlx::query("TRUNCATE urls")
+        .execute(storage.pool.as_ref())
+        .await;
+    
+    assert!(result.is_err(), "TRUNCATE should be blocked by trigger");
+    
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("TRUNCATE operations are not allowed"),
+        "Error should mention TRUNCATE not allowed, got: {}",
+        err_msg
+    );
+    
+    // Verify URLs still exist
+    let count_after: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM urls")
+        .fetch_one(storage.pool.as_ref())
+        .await
+        .unwrap();
+    
+    assert_eq!(
+        count_before.0, count_after.0,
+        "URL count should be unchanged after failed TRUNCATE"
+    );
+    
+    // Clean up
+    let _ = sqlx::query("UPDATE urls SET is_active = false WHERE short_code = $1")
+        .bind("pg_test_truncate")
+        .execute(storage.pool.as_ref())
+        .await;
+}
+
