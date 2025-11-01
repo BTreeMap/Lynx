@@ -816,6 +816,8 @@ impl Storage for PostgresStorage {
         let mut tx = self.pool.begin().await?;
 
         // Create aggregated entries with time_bucket set to cutoff_time
+        // Note: We don't exclude entries at cutoff_time since all old entries
+        // should be aggregated together with their new time_bucket value
         let aggregate_query = format!(
             "INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
              SELECT {}, SUM(visit_count)::BIGINT as visit_count, {} as created_at, {} as updated_at
