@@ -748,7 +748,10 @@ impl Storage for PostgresStorage {
         retention_days: i64,
         drop_dimensions: &[String],
     ) -> Result<(i64, i64)> {
-        let cutoff_time = chrono::Utc::now().timestamp() - (retention_days * 86400);
+        // Compute cutoff_time and round to the start of an hour
+        // This ensures time_bucket is always a valid hourly boundary
+        let raw_cutoff_time = chrono::Utc::now().timestamp() - (retention_days * 86400);
+        let cutoff_time = (raw_cutoff_time / 3600) * 3600;
 
         // Count old entries before pruning
         let count_query = "SELECT COUNT(*)::BIGINT FROM analytics WHERE time_bucket < $1";
@@ -767,23 +770,12 @@ impl Storage for PostgresStorage {
         let mut select_fields = vec!["short_code".to_string()];
 
         // Pre-compute dimension checks for efficiency
-        let drop_time_bucket = drop_dimensions.contains(&"time_bucket".to_string());
         let drop_country = drop_dimensions.contains(&"country_code".to_string())
             || drop_dimensions.contains(&"country".to_string());
 
-        // Handle time bucket dropping
-        // When aggregating old entries, we always need to set time_bucket to a value >= cutoff_time
-        // to avoid the aggregated entries being immediately deleted
-        let now = chrono::Utc::now().timestamp();
-        let time_bucket_expr = if drop_time_bucket {
-            // When dropping time_bucket, set all entries to cutoff_time (day boundary)
-            format!("CAST({} AS BIGINT)", cutoff_time)
-        } else {
-            // When keeping time_bucket, use current time to avoid deletion
-            // The time dimension info is preserved in the created_at/updated_at timestamps
-            format!("CAST({} AS BIGINT)", now)
-        };
-        select_fields.push(format!("{} as time_bucket", time_bucket_expr));
+        // Always set time_bucket to cutoff_time for aggregated entries
+        // This ensures they won't be immediately deleted and simplifies logic
+        select_fields.push(format!("CAST({} AS BIGINT) as time_bucket", cutoff_time));
 
         // Add dimension fields with conditional dropping
         for field in &["country_code", "region", "city", "asn", "ip_version"] {
@@ -820,15 +812,15 @@ impl Storage for PostgresStorage {
             .collect();
         let group_by_clause = group_by_expressions.join(", ");
 
-        // Create a view of aggregated old entries (without inserting yet)
+        let now = chrono::Utc::now().timestamp();
         let mut tx = self.pool.begin().await?;
 
-        // Create aggregated entries
+        // Create aggregated entries with time_bucket set to cutoff_time
         let aggregate_query = format!(
             "INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
              SELECT {}, SUM(visit_count)::BIGINT as visit_count, {} as created_at, {} as updated_at
              FROM analytics
-             WHERE time_bucket < $1 AND time_bucket != $2
+             WHERE time_bucket < $1
              GROUP BY {}",
             select_clause, now, now, group_by_clause
         );

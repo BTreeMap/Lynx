@@ -69,6 +69,9 @@ chrono = "0.4"
 # Analytics - GeoIP
 maxminddb = { version = "0.26", features = ["mmap", "simdutf8"] }
 
+# IP address and CIDR manipulation
+ipnet = "2"
+
 [build-dependencies]
 statrs = "0.18"
 
