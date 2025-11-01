@@ -1917,7 +1917,7 @@ mod tests {
 
         // Prune with dropping city and region dimensions
         let (deleted, _inserted) = storage
-            .prune_analytics(30, &vec!["city".to_string(), "region".to_string()])
+            .prune_analytics(30, &["city".to_string(), "region".to_string()])
             .await
             .unwrap();
 
@@ -1975,7 +1975,7 @@ mod tests {
 
         // Prune (time_bucket is always set to cutoff_time now)
         let (deleted, inserted) = storage
-            .prune_analytics(30, &vec![])
+            .prune_analytics(30, &[])
             .await
             .unwrap();
 

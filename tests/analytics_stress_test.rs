@@ -174,7 +174,7 @@ async fn test_prune_preserves_data_consistency() {
             Some(format!("C{}", i % 5)),  // 5 different countries
             Some(format!("R{}", i % 10)), // 10 different regions
             Some(format!("City{}", i % 20)), // 20 different cities
-            Some(15169 + (i % 3) as i64), // 3 different ASNs
+            Some(15169 + (i % 3)), // 3 different ASNs
             4,
             1,
         ));
@@ -193,7 +193,7 @@ async fn test_prune_preserves_data_consistency() {
     
     // Prune with dropping city and region
     let (deleted, inserted) = storage
-        .prune_analytics(30, &vec!["city".to_string(), "region".to_string()])
+        .prune_analytics(30, &["city".to_string(), "region".to_string()])
         .await
         .unwrap();
     
@@ -415,5 +415,5 @@ async fn test_aggregation_with_null_dimensions() {
         .get_analytics_aggregate("null_test", None, None, "asn", 10)
         .await
         .unwrap();
-    assert!(asn_agg.len() >= 1, "Should have at least 1 ASN entry");
+    assert!(!asn_agg.is_empty(), "Should have at least 1 ASN entry");
 }

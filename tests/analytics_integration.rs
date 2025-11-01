@@ -126,7 +126,7 @@ async fn test_storage_integration() {
     }
 
     println!("Aggregator has {} entries", agg.len());
-    assert!(agg.len() > 0);
+    assert!(!agg.is_empty());
 
     // Drain and save to storage
     let entries = agg.drain();
@@ -154,7 +154,7 @@ async fn test_storage_integration() {
         .await
         .unwrap();
     println!("Retrieved {} analytics entries", analytics.len());
-    assert!(analytics.len() > 0);
+    assert!(!analytics.is_empty());
 
     // Verify dimensions
     let has_ipv4 = analytics.iter().any(|a| a.ip_version == 4);
@@ -173,7 +173,7 @@ async fn test_storage_integration() {
         .await
         .unwrap();
     println!("Country aggregates: {:?}", agg_country);
-    assert!(agg_country.len() > 0);
+    assert!(!agg_country.is_empty());
 
     // Verify totals match
     let total_agg: i64 = agg_country.iter().map(|a| a.visit_count).sum();
@@ -314,7 +314,7 @@ async fn test_aggregation_dimensions() {
             .await
             .unwrap();
         println!("Aggregated by {}: {:?}", dim, agg);
-        assert!(agg.len() > 0);
+        assert!(!agg.is_empty());
 
         let total: i64 = agg.iter().map(|a| a.visit_count).sum();
         assert_eq!(total, 10, "Total should be 10 for {}", dim);
