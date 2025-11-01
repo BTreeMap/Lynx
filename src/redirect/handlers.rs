@@ -10,9 +10,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::middleware::RequestStart;
+use crate::analytics::{AnalyticsAggregator, GeoIpService};
 use crate::config::AnalyticsConfig;
 use crate::storage::Storage;
-use crate::analytics::{AnalyticsAggregator, GeoIpService};
 
 pub struct RedirectState {
     pub storage: Arc<dyn Storage>,
@@ -68,14 +68,7 @@ pub async fn redirect_url(
                         &state.analytics_aggregator,
                     ) {
                         if config.enabled {
-                            record_analytics(
-                                &code,
-                                &headers,
-                                addr.ip(),
-                                config,
-                                geoip,
-                                aggregator,
-                            );
+                            record_analytics(&code, &headers, addr.ip(), config, geoip, aggregator);
                         }
                     }
 

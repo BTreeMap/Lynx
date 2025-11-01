@@ -46,8 +46,8 @@ pub fn create_cursor(data: &CursorData) -> Result<String> {
 
     // Create HMAC signature
     let key = get_hmac_key();
-    let mut mac = Hmac::<Sha256>::new_from_slice(key)
-        .map_err(|e| anyhow!("Failed to create HMAC: {}", e))?;
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(key).map_err(|e| anyhow!("Failed to create HMAC: {}", e))?;
 
     mac.update(payload.as_bytes());
     let signature = mac.finalize();
@@ -71,8 +71,8 @@ pub fn verify_cursor(cursor: &str) -> Result<CursorData> {
 
     // Verify signature
     let key = get_hmac_key();
-    let mut mac = Hmac::<Sha256>::new_from_slice(key)
-        .map_err(|e| anyhow!("Failed to create HMAC: {}", e))?;
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(key).map_err(|e| anyhow!("Failed to create HMAC: {}", e))?;
 
     mac.update(payload.as_bytes());
 

@@ -8,22 +8,22 @@ use std::net::IpAddr;
 pub struct GeoLocation {
     /// ISO country code (e.g., "US", "GB")
     pub country_code: Option<String>,
-    
+
     /// Country name
     pub country_name: Option<String>,
-    
+
     /// Region/state/province
     pub region: Option<String>,
-    
+
     /// City name
     pub city: Option<String>,
-    
+
     /// Autonomous System Number
     pub asn: Option<u32>,
-    
+
     /// ASN organization name
     pub asn_org: Option<String>,
-    
+
     /// IP version (4 or 6)
     pub ip_version: u8,
 }
@@ -47,13 +47,13 @@ impl Default for GeoLocation {
 pub struct AnalyticsRecord {
     /// Short code that was accessed
     pub short_code: String,
-    
+
     /// Timestamp of the visit (Unix timestamp)
     pub timestamp: i64,
-    
+
     /// Geographic location information
     pub geo_location: GeoLocation,
-    
+
     /// Original client IP (optional, may be anonymized or omitted)
     pub client_ip: Option<IpAddr>,
 }
@@ -64,10 +64,10 @@ pub struct AnalyticsRecord {
 pub struct AnalyticsEvent {
     /// Short code that was accessed
     pub short_code: String,
-    
+
     /// Timestamp of the visit (Unix timestamp)
     pub timestamp: i64,
-    
+
     /// Client IP address (for deferred GeoIP lookup)
     pub client_ip: IpAddr,
 }
@@ -77,22 +77,22 @@ pub struct AnalyticsEvent {
 pub struct AnalyticsKey {
     /// Short code
     pub short_code: String,
-    
+
     /// Time bucket (hour granularity - Unix timestamp truncated to hour)
     pub time_bucket: i64,
-    
+
     /// Country code
     pub country_code: Option<String>,
-    
+
     /// Region
     pub region: Option<String>,
-    
+
     /// City
     pub city: Option<String>,
-    
+
     /// ASN
     pub asn: Option<u32>,
-    
+
     /// IP version
     pub ip_version: u8,
 }
@@ -102,7 +102,7 @@ impl AnalyticsKey {
     pub fn from_record(record: &AnalyticsRecord) -> Self {
         // Truncate timestamp to hour boundary
         let time_bucket = (record.timestamp / 3600) * 3600;
-        
+
         Self {
             short_code: record.short_code.clone(),
             time_bucket,
@@ -113,12 +113,12 @@ impl AnalyticsKey {
             ip_version: record.geo_location.ip_version,
         }
     }
-    
+
     /// Create a new analytics key from an event and geo location
     pub fn from_event(event: &AnalyticsEvent, geo_location: &GeoLocation) -> Self {
         // Truncate timestamp to hour boundary
         let time_bucket = (event.timestamp / 3600) * 3600;
-        
+
         Self {
             short_code: event.short_code.clone(),
             time_bucket,

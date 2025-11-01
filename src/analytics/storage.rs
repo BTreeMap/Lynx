@@ -23,13 +23,13 @@ pub struct AnalyticsEntry {
 pub struct AnalyticsQuery {
     /// Filter by short code
     pub short_code: Option<String>,
-    
+
     /// Start time (Unix timestamp)
     pub start_time: Option<i64>,
-    
+
     /// End time (Unix timestamp)
     pub end_time: Option<i64>,
-    
+
     /// Group by field
     pub group_by: Option<AnalyticsGroupBy>,
 }

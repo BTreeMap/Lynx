@@ -10,12 +10,12 @@ use crate::auth::{auth_middleware, AuthService};
 use crate::config::Config;
 use crate::storage::Storage;
 
+use super::analytics::{get_analytics, get_analytics_aggregate, AnalyticsState};
 use super::handlers::{
     create_url, deactivate_url, get_auth_mode, get_url, get_user_info, health_check, list_urls,
     reactivate_url, AppState,
 };
 use super::static_files::serve_static;
-use super::analytics::{get_analytics, get_analytics_aggregate, AnalyticsState};
 
 pub fn create_api_router(
     storage: Arc<dyn Storage>,
@@ -24,7 +24,10 @@ pub fn create_api_router(
     analytics_aggregator: Option<Arc<crate::analytics::AnalyticsAggregator>>,
 ) -> Router {
     let frontend_config = config.frontend.clone();
-    let state = Arc::new(AppState { storage: Arc::clone(&storage), config });
+    let state = Arc::new(AppState {
+        storage: Arc::clone(&storage),
+        config,
+    });
 
     // Configure CORS
     let cors = CorsLayer::new()
@@ -45,7 +48,7 @@ pub fn create_api_router(
             auth_middleware(auth, headers, req, next)
         }))
         .with_state(Arc::clone(&state));
-    
+
     // Analytics routes (also protected)
     let analytics_state = Arc::new(AnalyticsState {
         storage: Arc::clone(&storage),

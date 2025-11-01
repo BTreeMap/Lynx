@@ -1,6 +1,6 @@
+use crate::analytics::{DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER};
 use crate::models::ShortenedUrl;
 use crate::storage::{LookupMetadata, LookupResult, Storage, StorageError, StorageResult};
-use crate::analytics::{DROPPED_DIMENSION_MARKER, DEFAULT_IP_VERSION};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::postgres::PgPoolOptions;
@@ -120,11 +120,9 @@ impl Storage for PostgresStorage {
         .await?;
 
         // Index for analytics queries by short code
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_analytics_short_code ON analytics(short_code)",
-        )
-        .execute(self.pool.as_ref())
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_analytics_short_code ON analytics(short_code)")
+            .execute(self.pool.as_ref())
+            .await?;
 
         // Index for analytics queries by time bucket
         sqlx::query(
@@ -573,14 +571,24 @@ impl Storage for PostgresStorage {
 
     async fn upsert_analytics_batch(
         &self,
-        records: Vec<(String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64)>,
+        records: Vec<(
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            i32,
+            i64,
+        )>,
     ) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| anyhow!(e))?
             .as_secs() as i64;
 
-        for (short_code, time_bucket, country_code, region, city, asn, ip_version, count) in records {
+        for (short_code, time_bucket, country_code, region, city, asn, ip_version, count) in records
+        {
             sqlx::query(
                 r#"
                 INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
@@ -669,11 +677,11 @@ impl Storage for PostgresStorage {
             "region" => {
                 // Don't format if region is <dropped>
                 "CASE WHEN region = '<dropped>' THEN region ELSE CONCAT(COALESCE(region, 'Unknown'), ', ', COALESCE(country_code, 'Unknown')) END"
-            },
+            }
             "city" => {
                 // Don't format if city is <dropped>
                 "CASE WHEN city = '<dropped>' THEN city ELSE CONCAT(COALESCE(city, 'Unknown'), ', ', COALESCE(region, 'Unknown'), ', ', COALESCE(country_code, 'Unknown')) END"
-            },
+            }
             "asn" => "CAST(asn AS TEXT)",
             "hour" => "CAST(time_bucket AS TEXT)",
             "day" => "CAST((time_bucket / 86400) * 86400 AS TEXT)",
@@ -741,7 +749,7 @@ impl Storage for PostgresStorage {
         drop_dimensions: &[String],
     ) -> Result<(i64, i64)> {
         let cutoff_time = chrono::Utc::now().timestamp() - (retention_days * 86400);
-        
+
         // Count old entries before pruning
         let count_query = "SELECT COUNT(*)::BIGINT FROM analytics WHERE time_bucket < $1";
         let old_count: (i64,) = sqlx::query_as(count_query)
@@ -749,22 +757,20 @@ impl Storage for PostgresStorage {
             .fetch_one(self.pool.as_ref())
             .await?;
         let deleted_count = old_count.0;
-        
+
         // If no old entries, return early
         if deleted_count == 0 {
             return Ok((0, 0));
         }
-        
+
         // Build the SELECT clause with dropped dimensions replaced
-        let mut select_fields = vec![
-            "short_code".to_string(),
-        ];
-        
+        let mut select_fields = vec!["short_code".to_string()];
+
         // Pre-compute dimension checks for efficiency
         let drop_time_bucket = drop_dimensions.contains(&"time_bucket".to_string());
-        let drop_country = drop_dimensions.contains(&"country_code".to_string()) || 
-                          drop_dimensions.contains(&"country".to_string());
-        
+        let drop_country = drop_dimensions.contains(&"country_code".to_string())
+            || drop_dimensions.contains(&"country".to_string());
+
         // Handle time bucket dropping
         // When aggregating old entries, we always need to set time_bucket to a value >= cutoff_time
         // to avoid the aggregated entries being immediately deleted
@@ -778,28 +784,31 @@ impl Storage for PostgresStorage {
             format!("CAST({} AS BIGINT)", now)
         };
         select_fields.push(format!("{} as time_bucket", time_bucket_expr));
-        
+
         // Add dimension fields with conditional dropping
         for field in &["country_code", "region", "city", "asn", "ip_version"] {
-            if drop_dimensions.contains(&field.to_string()) || 
-               (field == &"country_code" && drop_country) {
+            if drop_dimensions.contains(&field.to_string())
+                || (field == &"country_code" && drop_country)
+            {
                 if field == &"asn" {
                     select_fields.push(format!("NULL::BIGINT as {}", field));
                 } else if field == &"ip_version" {
                     select_fields.push(format!("{} as {}", DEFAULT_IP_VERSION, field));
                 } else {
-                    select_fields.push(format!("'{}'::TEXT as {}", DROPPED_DIMENSION_MARKER, field));
+                    select_fields
+                        .push(format!("'{}'::TEXT as {}", DROPPED_DIMENSION_MARKER, field));
                 }
             } else {
                 select_fields.push(field.to_string());
             }
         }
-        
+
         // Build SELECT clause
         let select_clause = select_fields.join(", ");
-        
+
         // Build GROUP BY clause - use expressions without "as alias" parts
-        let group_by_expressions: Vec<String> = select_fields.iter()
+        let group_by_expressions: Vec<String> = select_fields
+            .iter()
             .map(|f| {
                 // Extract expression before "as" if present, otherwise use the whole field
                 if f.contains(" as ") {
@@ -810,10 +819,10 @@ impl Storage for PostgresStorage {
             })
             .collect();
         let group_by_clause = group_by_expressions.join(", ");
-        
+
         // Create a view of aggregated old entries (without inserting yet)
         let mut tx = self.pool.begin().await?;
-        
+
         // Create aggregated entries
         let aggregate_query = format!(
             "INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
@@ -823,23 +832,23 @@ impl Storage for PostgresStorage {
              GROUP BY {}",
             select_clause, now, now, group_by_clause
         );
-        
+
         let insert_result = sqlx::query(&aggregate_query)
             .bind(cutoff_time)
             .execute(&mut *tx)
             .await?;
-        
+
         let inserted_count = insert_result.rows_affected() as i64;
-        
+
         // Delete old entries
         let delete_query = "DELETE FROM analytics WHERE time_bucket < $1";
         sqlx::query(delete_query)
             .bind(cutoff_time)
             .execute(&mut *tx)
             .await?;
-        
+
         tx.commit().await?;
-        
+
         Ok((deleted_count, inserted_count))
     }
 }
@@ -905,7 +914,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(analytics.len(), 2);
-        
+
         // Verify visit counts
         let total_visits: i64 = analytics.iter().map(|a| a.visit_count).sum();
         assert_eq!(total_visits, 8);
@@ -927,9 +936,36 @@ mod tests {
         // Insert analytics from multiple countries
         let time_bucket = 1698768000;
         let records = vec![
-            ("multi".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), Some(15169), 4, 10),
-            ("multi".to_string(), time_bucket, Some("GB".to_string()), Some("England".to_string()), Some("London".to_string()), Some(16509), 4, 5),
-            ("multi".to_string(), time_bucket, Some("US".to_string()), Some("NY".to_string()), Some("NYC".to_string()), Some(15169), 4, 3),
+            (
+                "multi".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                Some("CA".to_string()),
+                Some("SF".to_string()),
+                Some(15169),
+                4,
+                10,
+            ),
+            (
+                "multi".to_string(),
+                time_bucket,
+                Some("GB".to_string()),
+                Some("England".to_string()),
+                Some("London".to_string()),
+                Some(16509),
+                4,
+                5,
+            ),
+            (
+                "multi".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                Some("NY".to_string()),
+                Some("NYC".to_string()),
+                Some(15169),
+                4,
+                3,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -941,15 +977,15 @@ mod tests {
             .unwrap();
 
         assert_eq!(aggregates.len(), 2); // US and GB
-        
+
         // Verify totals
         let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
         assert_eq!(total, 18);
-        
+
         // Find US aggregate (should be 13 = 10 + 3)
         let us_agg = aggregates.iter().find(|a| a.dimension == "US").unwrap();
         assert_eq!(us_agg.visit_count, 13);
-        
+
         // Find GB aggregate (should be 5)
         let gb_agg = aggregates.iter().find(|a| a.dimension == "GB").unwrap();
         assert_eq!(gb_agg.visit_count, 5);
@@ -969,9 +1005,36 @@ mod tests {
 
         let time_bucket = 1698768000;
         let records = vec![
-            ("test".to_string(), time_bucket, Some("US".to_string()), None, None, Some(15169), 4, 8),
-            ("test".to_string(), time_bucket, Some("US".to_string()), None, None, Some(16509), 4, 3),
-            ("test".to_string(), time_bucket, Some("GB".to_string()), None, None, Some(15169), 4, 2),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                None,
+                None,
+                Some(15169),
+                4,
+                8,
+            ),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                None,
+                None,
+                Some(16509),
+                4,
+                3,
+            ),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("GB".to_string()),
+                None,
+                None,
+                Some(15169),
+                4,
+                2,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -983,10 +1046,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(aggregates.len(), 2);
-        
+
         let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
         assert_eq!(total, 13);
-        
+
         // ASN 15169 should have 10 visits (8 + 2)
         let asn_agg = aggregates.iter().find(|a| a.dimension == "15169").unwrap();
         assert_eq!(asn_agg.visit_count, 10);
@@ -1006,9 +1069,36 @@ mod tests {
 
         // Insert records with different time buckets
         let records = vec![
-            ("test".to_string(), 1000, Some("US".to_string()), None, None, None, 4, 5),
-            ("test".to_string(), 2000, Some("US".to_string()), None, None, None, 4, 3),
-            ("test".to_string(), 3000, Some("US".to_string()), None, None, None, 4, 7),
+            (
+                "test".to_string(),
+                1000,
+                Some("US".to_string()),
+                None,
+                None,
+                None,
+                4,
+                5,
+            ),
+            (
+                "test".to_string(),
+                2000,
+                Some("US".to_string()),
+                None,
+                None,
+                None,
+                4,
+                3,
+            ),
+            (
+                "test".to_string(),
+                3000,
+                Some("US".to_string()),
+                None,
+                None,
+                None,
+                4,
+                7,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -1035,17 +1125,31 @@ mod tests {
             .unwrap();
 
         let time_bucket = 1698768000;
-        
+
         // Insert initial record - all fields need to match for the UNIQUE constraint to trigger
-        let records = vec![
-            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), Some(15169), 4, 5),
-        ];
+        let records = vec![(
+            "test".to_string(),
+            time_bucket,
+            Some("US".to_string()),
+            Some("CA".to_string()),
+            Some("SF".to_string()),
+            Some(15169),
+            4,
+            5,
+        )];
         storage.upsert_analytics_batch(records).await.unwrap();
 
         // Upsert same key with more visits - all fields must match
-        let records = vec![
-            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), Some(15169), 4, 3),
-        ];
+        let records = vec![(
+            "test".to_string(),
+            time_bucket,
+            Some("US".to_string()),
+            Some("CA".to_string()),
+            Some("SF".to_string()),
+            Some(15169),
+            4,
+            3,
+        )];
         storage.upsert_analytics_batch(records).await.unwrap();
 
         // Should have incremented, not replaced
@@ -1053,7 +1157,7 @@ mod tests {
             .get_analytics("test", None, None, 100)
             .await
             .unwrap();
-        
+
         assert_eq!(analytics.len(), 1);
         assert_eq!(analytics[0].visit_count, 8); // 5 + 3
     }

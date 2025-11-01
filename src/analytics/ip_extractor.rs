@@ -27,15 +27,11 @@ pub fn extract_client_ip(
     config: &AnalyticsConfig,
 ) -> IpAddr {
     match config.trusted_proxy_mode {
-        TrustedProxyMode::Cloudflare => {
-            extract_cloudflare_ip(headers).unwrap_or_else(|| {
-                warn!("CF-Connecting-IP header missing in Cloudflare mode, using socket address");
-                socket_addr
-            })
-        }
-        TrustedProxyMode::Standard => {
-            extract_standard_ip(headers, config).unwrap_or(socket_addr)
-        }
+        TrustedProxyMode::Cloudflare => extract_cloudflare_ip(headers).unwrap_or_else(|| {
+            warn!("CF-Connecting-IP header missing in Cloudflare mode, using socket address");
+            socket_addr
+        }),
+        TrustedProxyMode::Standard => extract_standard_ip(headers, config).unwrap_or(socket_addr),
         TrustedProxyMode::None => socket_addr,
     }
 }
@@ -54,7 +50,7 @@ fn extract_standard_ip(headers: &HeaderMap, config: &AnalyticsConfig) -> Option<
     if let Some(ip) = extract_from_forwarded(headers, config) {
         return Some(ip);
     }
-    
+
     // Fall back to X-Forwarded-For
     extract_from_x_forwarded_for(headers, config)
 }
@@ -62,7 +58,7 @@ fn extract_standard_ip(headers: &HeaderMap, config: &AnalyticsConfig) -> Option<
 /// Parse RFC 7239 Forwarded header
 fn extract_from_forwarded(headers: &HeaderMap, _config: &AnalyticsConfig) -> Option<IpAddr> {
     let forwarded = headers.get("forwarded")?.to_str().ok()?;
-    
+
     // Parse Forwarded header: Forwarded: for=192.0.2.60;proto=http;by=203.0.113.43
     // We want the "for" parameter
     for element in forwarded.split(',') {
@@ -79,7 +75,7 @@ fn extract_from_forwarded(headers: &HeaderMap, _config: &AnalyticsConfig) -> Opt
                     .split(':')
                     .next()
                     .unwrap_or(value);
-                
+
                 if let Ok(ip) = ip_str.parse::<IpAddr>() {
                     // For now, return the first IP (rightmost trust validation not yet implemented)
                     // TODO: Implement proper right-to-left trust chain validation
@@ -88,23 +84,23 @@ fn extract_from_forwarded(headers: &HeaderMap, _config: &AnalyticsConfig) -> Opt
             }
         }
     }
-    
+
     None
 }
 
 /// Parse X-Forwarded-For header with right-to-left trust validation
 fn extract_from_x_forwarded_for(headers: &HeaderMap, config: &AnalyticsConfig) -> Option<IpAddr> {
     let xff = headers.get("x-forwarded-for")?.to_str().ok()?;
-    
+
     let ips: Vec<IpAddr> = xff
         .split(',')
         .filter_map(|s| s.trim().parse::<IpAddr>().ok())
         .collect();
-    
+
     if ips.is_empty() {
         return None;
     }
-    
+
     // If num_trusted_proxies is specified, skip that many from the right
     if let Some(num_trusted) = config.num_trusted_proxies {
         if ips.len() > num_trusted {
@@ -114,7 +110,7 @@ fn extract_from_x_forwarded_for(headers: &HeaderMap, config: &AnalyticsConfig) -
             return ips.first().copied();
         }
     }
-    
+
     // If trusted_proxies CIDR list is specified, find first non-trusted IP from right
     if !config.trusted_proxies.is_empty() {
         // For simplicity, parse CIDR ranges (basic implementation)
@@ -123,7 +119,7 @@ fn extract_from_x_forwarded_for(headers: &HeaderMap, config: &AnalyticsConfig) -
         // TODO: Implement proper CIDR matching for trusted proxy validation
         return ips.last().copied();
     }
-    
+
     // No trust configuration, return the rightmost IP
     ips.last().copied()
 }
@@ -186,10 +182,7 @@ mod tests {
     #[test]
     fn test_extract_cloudflare_ip() {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            "cf-connecting-ip",
-            HeaderValue::from_static("203.0.113.1"),
-        );
+        headers.insert("cf-connecting-ip", HeaderValue::from_static("203.0.113.1"));
         let socket_addr: IpAddr = "192.168.1.1".parse().unwrap();
         let config = create_config(TrustedProxyMode::Cloudflare);
 

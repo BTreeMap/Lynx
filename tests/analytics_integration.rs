@@ -14,12 +14,12 @@ use tokio::time::{sleep, Duration};
 /// Helper to download GeoIP database
 async fn download_db(url: &str, path: &str) -> Result<(), Box<dyn std::error::Error>> {
     println!("Downloading from {} to {}", url, path);
-    
+
     // Create a client that follows redirects
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()?;
-    
+
     let response = client.get(url).send().await?;
     let bytes = response.bytes().await?;
     tokio::fs::write(path, bytes).await?;
@@ -31,24 +31,28 @@ async fn get_dbs() -> Option<(PathBuf, PathBuf)> {
     let temp = std::env::temp_dir();
     let city = temp.join("GeoLite2-City.mmdb");
     let asn = temp.join("GeoLite2-ASN.mmdb");
-    
+
     // Return if already exist
     if city.exists() && asn.exists() {
         return Some((city, asn));
     }
-    
+
     // Try to download
     println!("Downloading GeoIP databases...");
-    let c_result = download_db("https://s.joefang.org/GeoLite2-City", city.to_str().unwrap()).await;
+    let c_result = download_db(
+        "https://s.joefang.org/GeoLite2-City",
+        city.to_str().unwrap(),
+    )
+    .await;
     let a_result = download_db("https://s.joefang.org/GeoLite2-ASN", asn.to_str().unwrap()).await;
-    
+
     if let Err(e) = &c_result {
         println!("City download error: {}", e);
     }
     if let Err(e) = &a_result {
         println!("ASN download error: {}", e);
     }
-    
+
     if c_result.is_ok() && a_result.is_ok() {
         Some((city, asn))
     } else {
@@ -63,25 +67,25 @@ async fn test_geoip_lookups() {
         println!("SKIPPED: GeoIP databases not available");
         return;
     };
-    
+
     let geoip = GeoIpService::new(Some(city.to_str().unwrap()), Some(asn.to_str().unwrap()))
         .expect("Failed to create GeoIP service");
-    
+
     // Test Google DNS IPv4
     let ip: IpAddr = "8.8.8.8".parse().unwrap();
     let geo = geoip.lookup(ip);
     println!("8.8.8.8: {:?}", geo);
-    
+
     assert_eq!(geo.ip_version, 4);
     assert_eq!(geo.country_code, Some("US".to_string()));
     assert!(geo.asn.is_some(), "Should have ASN for 8.8.8.8");
     assert!(geo.asn_org.is_some(), "Should have ASN org");
-    
+
     // Test Google DNS IPv6
     let ip6: IpAddr = "2001:4860:4860::8888".parse().unwrap();
     let geo6 = geoip.lookup(ip6);
     println!("2001:4860:4860::8888: {:?}", geo6);
-    
+
     assert_eq!(geo6.ip_version, 6);
     assert_eq!(geo6.country_code, Some("US".to_string()));
     assert!(geo6.asn.is_some(), "Should have ASN for IPv6");
@@ -93,21 +97,20 @@ async fn test_storage_integration() {
         println!("SKIPPED: GeoIP databases not available");
         return;
     };
-    
+
     // Setup storage
     let storage = SqliteStorage::new("sqlite::memory:", 5).await.unwrap();
     storage.init().await.unwrap();
     let storage: Arc<dyn Storage> = Arc::new(storage);
-    
+
     // Setup GeoIP
-    let geoip = Arc::new(GeoIpService::new(
-        Some(city.to_str().unwrap()),
-        Some(asn.to_str().unwrap()),
-    ).unwrap());
-    
+    let geoip = Arc::new(
+        GeoIpService::new(Some(city.to_str().unwrap()), Some(asn.to_str().unwrap())).unwrap(),
+    );
+
     // Create aggregator
     let agg = Arc::new(AnalyticsAggregator::new());
-    
+
     // Record analytics for multiple IPs
     let ips = vec!["8.8.8.8", "1.1.1.1", "8.8.4.4", "2001:4860:4860::8888"];
     for ip_str in ips {
@@ -121,38 +124,57 @@ async fn test_storage_integration() {
         };
         agg.record(rec);
     }
-    
+
     println!("Aggregator has {} entries", agg.len());
     assert!(agg.len() > 0);
-    
+
     // Drain and save to storage
     let entries = agg.drain();
-    let records: Vec<_> = entries.into_iter().map(|(k, v)| {
-        (k.short_code, k.time_bucket, k.country_code, k.region, k.city,
-         k.asn.map(|a| a as i64), k.ip_version as i32, v.count as i64)
-    }).collect();
-    
+    let records: Vec<_> = entries
+        .into_iter()
+        .map(|(k, v)| {
+            (
+                k.short_code,
+                k.time_bucket,
+                k.country_code,
+                k.region,
+                k.city,
+                k.asn.map(|a| a as i64),
+                k.ip_version as i32,
+                v.count as i64,
+            )
+        })
+        .collect();
+
     storage.upsert_analytics_batch(records).await.unwrap();
-    
+
     // Query back
-    let analytics = storage.get_analytics("test123", None, None, 100).await.unwrap();
+    let analytics = storage
+        .get_analytics("test123", None, None, 100)
+        .await
+        .unwrap();
     println!("Retrieved {} analytics entries", analytics.len());
     assert!(analytics.len() > 0);
-    
+
     // Verify dimensions
     let has_ipv4 = analytics.iter().any(|a| a.ip_version == 4);
     let has_ipv6 = analytics.iter().any(|a| a.ip_version == 6);
     assert!(has_ipv4);
     assert!(has_ipv6);
-    
-    let has_us = analytics.iter().any(|a| a.country_code == Some("US".to_string()));
+
+    let has_us = analytics
+        .iter()
+        .any(|a| a.country_code == Some("US".to_string()));
     assert!(has_us);
-    
+
     // Test aggregation by country
-    let agg_country = storage.get_analytics_aggregate("test123", None, None, "country", 10).await.unwrap();
+    let agg_country = storage
+        .get_analytics_aggregate("test123", None, None, "country", 10)
+        .await
+        .unwrap();
     println!("Country aggregates: {:?}", agg_country);
     assert!(agg_country.len() > 0);
-    
+
     // Verify totals match
     let total_agg: i64 = agg_country.iter().map(|a| a.visit_count).sum();
     let total_detail: i64 = analytics.iter().map(|a| a.visit_count).sum();
@@ -165,32 +187,44 @@ async fn test_auto_flush() {
         println!("SKIPPED: GeoIP databases not available");
         return;
     };
-    
+
     let storage = SqliteStorage::new("sqlite::memory:", 5).await.unwrap();
     storage.init().await.unwrap();
     let storage: Arc<dyn Storage> = Arc::new(storage);
-    
-    let geoip = Arc::new(GeoIpService::new(
-        Some(city.to_str().unwrap()),
-        Some(asn.to_str().unwrap()),
-    ).unwrap());
-    
+
+    let geoip = Arc::new(
+        GeoIpService::new(Some(city.to_str().unwrap()), Some(asn.to_str().unwrap())).unwrap(),
+    );
+
     let agg = Arc::new(AnalyticsAggregator::new());
-    
+
     // Start auto-flush with 2 second interval
     let storage_clone = Arc::clone(&storage);
     let _handle = agg.start_flush_task_with_storage(2, move |entries| {
         let s = Arc::clone(&storage_clone);
         Box::pin(async move {
-            if entries.is_empty() { return; }
-            let recs: Vec<_> = entries.into_iter().map(|(k, v)| {
-                (k.short_code, k.time_bucket, k.country_code, k.region, k.city,
-                 k.asn.map(|a| a as i64), k.ip_version as i32, v.count as i64)
-            }).collect();
+            if entries.is_empty() {
+                return;
+            }
+            let recs: Vec<_> = entries
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        k.short_code,
+                        k.time_bucket,
+                        k.country_code,
+                        k.region,
+                        k.city,
+                        k.asn.map(|a| a as i64),
+                        k.ip_version as i32,
+                        v.count as i64,
+                    )
+                })
+                .collect();
             let _ = s.upsert_analytics_batch(recs).await;
         })
     });
-    
+
     // Record analytics
     for i in 0..10 {
         let ip: IpAddr = "8.8.8.8".parse().unwrap();
@@ -203,10 +237,10 @@ async fn test_auto_flush() {
         };
         agg.record(rec);
     }
-    
+
     println!("Recorded 10 entries, waiting for auto-flush...");
     sleep(Duration::from_secs(3)).await;
-    
+
     // Verify data was flushed
     let mut total = 0;
     for i in 0..3 {
@@ -227,18 +261,17 @@ async fn test_aggregation_dimensions() {
         println!("SKIPPED: GeoIP databases not available");
         return;
     };
-    
+
     let storage = SqliteStorage::new("sqlite::memory:", 5).await.unwrap();
     storage.init().await.unwrap();
     let storage: Arc<dyn Storage> = Arc::new(storage);
-    
-    let geoip = Arc::new(GeoIpService::new(
-        Some(city.to_str().unwrap()),
-        Some(asn.to_str().unwrap()),
-    ).unwrap());
-    
+
+    let geoip = Arc::new(
+        GeoIpService::new(Some(city.to_str().unwrap()), Some(asn.to_str().unwrap())).unwrap(),
+    );
+
     let agg = Arc::new(AnalyticsAggregator::new());
-    
+
     // Record from different IPs with known counts
     let tests = vec![("8.8.8.8", 5), ("1.1.1.1", 3), ("8.8.4.4", 2)];
     for (ip_str, count) in tests {
@@ -254,21 +287,35 @@ async fn test_aggregation_dimensions() {
             agg.record(rec);
         }
     }
-    
+
     // Flush to storage
     let entries = agg.drain();
-    let records: Vec<_> = entries.into_iter().map(|(k, v)| {
-        (k.short_code, k.time_bucket, k.country_code, k.region, k.city,
-         k.asn.map(|a| a as i64), k.ip_version as i32, v.count as i64)
-    }).collect();
+    let records: Vec<_> = entries
+        .into_iter()
+        .map(|(k, v)| {
+            (
+                k.short_code,
+                k.time_bucket,
+                k.country_code,
+                k.region,
+                k.city,
+                k.asn.map(|a| a as i64),
+                k.ip_version as i32,
+                v.count as i64,
+            )
+        })
+        .collect();
     storage.upsert_analytics_batch(records).await.unwrap();
-    
+
     // Test different dimensions
     for dim in &["country", "asn", "hour"] {
-        let agg = storage.get_analytics_aggregate("multi", None, None, dim, 10).await.unwrap();
+        let agg = storage
+            .get_analytics_aggregate("multi", None, None, dim, 10)
+            .await
+            .unwrap();
         println!("Aggregated by {}: {:?}", dim, agg);
         assert!(agg.len() > 0);
-        
+
         let total: i64 = agg.iter().map(|a| a.visit_count).sum();
         assert_eq!(total, 10, "Total should be 10 for {}", dim);
     }
@@ -277,11 +324,11 @@ async fn test_aggregation_dimensions() {
 #[test]
 fn test_ip_anonymization() {
     use lynx::analytics::ip_extractor::anonymize_ip;
-    
+
     let ip4: IpAddr = "192.168.1.100".parse().unwrap();
     let anon4 = anonymize_ip(ip4);
     assert_eq!(anon4.to_string(), "192.168.1.0");
-    
+
     let ip6: IpAddr = "2001:db8:85a3::8a2e:370:7334".parse().unwrap();
     let anon6 = anonymize_ip(ip6);
     assert!(anon6.to_string().starts_with("2001:db8:85a3::"));

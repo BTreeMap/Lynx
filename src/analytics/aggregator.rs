@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info, warn};
 
-use crate::analytics::models::{AnalyticsKey, AnalyticsEvent, AnalyticsRecord, AnalyticsValue};
+use crate::analytics::models::{AnalyticsEvent, AnalyticsKey, AnalyticsRecord, AnalyticsValue};
 use crate::analytics::DROPPED_DIMENSION_MARKER;
 
 /// Message types for the AnalyticsActor
@@ -28,7 +28,7 @@ enum ActorMessage {
 }
 
 /// Actor that manages analytics event buffering with zero lock contention
-/// 
+///
 /// Uses a 2-layer architecture:
 /// - Layer 1: Local HashMap (single-threaded, no locks)
 /// - Layer 2: Shared DashMap (for concurrent flush access)
@@ -46,10 +46,10 @@ struct AnalyticsActor {
 impl AnalyticsActor {
     async fn run(mut self) {
         let mut fast_flush_ticker = tokio::time::interval(self.fast_flush_interval);
-        
+
         // Skip the first tick which fires immediately
         fast_flush_ticker.tick().await;
-        
+
         loop {
             tokio::select! {
                 // Handle incoming analytics events
@@ -104,27 +104,24 @@ impl AnalyticsActor {
 pub struct AnalyticsAggregator {
     /// In-memory aggregation map (used when GeoIP service is available)
     aggregates: Arc<DashMap<AnalyticsKey, AnalyticsValue>>,
-    
+
     /// Actor message sender for lock-free event recording
     actor_tx: mpsc::Sender<ActorMessage>,
-    
+
     /// Shared event buffer (Layer 2) for concurrent flush access
     shared_buffer: Arc<DashMap<String, Vec<AnalyticsEvent>>>,
-    
+
     /// Shutdown signal
     shutdown: Arc<Mutex<bool>>,
 }
 
 impl AnalyticsAggregator {
     /// Create a new analytics aggregator with configurable parameters
-    pub fn new_with_config(
-        buffer_size: usize,
-        fast_flush_interval_ms: u64,
-    ) -> Self {
+    pub fn new_with_config(buffer_size: usize, fast_flush_interval_ms: u64) -> Self {
         let (actor_tx, actor_rx) = mpsc::channel(buffer_size);
         let shutdown = Arc::new(Mutex::new(false));
         let shared_buffer = Arc::new(DashMap::new());
-        
+
         // Spawn the analytics actor
         let actor = AnalyticsActor {
             receiver: actor_rx,
@@ -132,11 +129,11 @@ impl AnalyticsAggregator {
             shared_buffer: Arc::clone(&shared_buffer),
             fast_flush_interval: Duration::from_millis(fast_flush_interval_ms),
         };
-        
+
         tokio::spawn(async move {
             actor.run().await;
         });
-        
+
         Self {
             aggregates: Arc::new(DashMap::new()),
             actor_tx,
@@ -144,7 +141,7 @@ impl AnalyticsAggregator {
             shutdown,
         }
     }
-    
+
     /// Create a new analytics aggregator with default settings
     pub fn new() -> Self {
         Self::new_with_config(
@@ -172,7 +169,7 @@ impl AnalyticsAggregator {
     /// derived from the record.
     pub fn record(&self, record: AnalyticsRecord) {
         let key = AnalyticsKey::from_record(&record);
-        
+
         self.aggregates
             .entry(key)
             .and_modify(|v| v.count += 1)
@@ -185,41 +182,45 @@ impl AnalyticsAggregator {
     /// batch flushing to the database.
     pub fn drain(&self) -> Vec<(AnalyticsKey, AnalyticsValue)> {
         let mut result = Vec::new();
-        
+
         // Collect all keys
-        let keys: Vec<AnalyticsKey> = self.aggregates.iter()
+        let keys: Vec<AnalyticsKey> = self
+            .aggregates
+            .iter()
             .map(|entry| entry.key().clone())
             .collect();
-        
+
         // Remove and collect values
         for key in keys {
             if let Some((_, value)) = self.aggregates.remove(&key) {
                 result.push((key, value));
             }
         }
-        
+
         result
     }
-    
+
     /// Drain event buffer and return all events
     ///
     /// This clears the shared event buffer and returns all events for
     /// processing with GeoIP lookups.
     pub fn drain_events(&self) -> Vec<AnalyticsEvent> {
         let mut result = Vec::new();
-        
+
         // Collect all keys from shared buffer (Layer 2)
-        let keys: Vec<String> = self.shared_buffer.iter()
+        let keys: Vec<String> = self
+            .shared_buffer
+            .iter()
             .map(|entry| entry.key().clone())
             .collect();
-        
+
         // Remove and collect events
         for key in keys {
             if let Some((_, mut events)) = self.shared_buffer.remove(&key) {
                 result.append(&mut events);
             }
         }
-        
+
         result
     }
 
@@ -233,42 +234,44 @@ impl AnalyticsAggregator {
         flush_fn: F,
     ) -> tokio::task::JoinHandle<()>
     where
-        F: Fn(Vec<(AnalyticsKey, AnalyticsValue)>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + 'static,
+        F: Fn(
+                Vec<(AnalyticsKey, AnalyticsValue)>,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+            + Send
+            + 'static,
     {
         let aggregates = Arc::clone(&self.aggregates);
         let shutdown = Arc::clone(&self.shutdown);
-        
+
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(
-                tokio::time::Duration::from_secs(flush_interval_secs)
-            );
-            
+            let mut interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(flush_interval_secs));
+
             loop {
                 interval.tick().await;
-                
+
                 // Check shutdown signal
                 if *shutdown.lock().await {
                     info!("Analytics aggregator flush task shutting down");
                     break;
                 }
-                
+
                 // Drain aggregates
                 let count = aggregates.len();
                 if count > 0 {
                     debug!("Draining {} analytics aggregates", count);
-                    
+
                     // Collect keys and values
                     let mut entries = Vec::new();
-                    let keys: Vec<AnalyticsKey> = aggregates.iter()
-                        .map(|entry| entry.key().clone())
-                        .collect();
-                    
+                    let keys: Vec<AnalyticsKey> =
+                        aggregates.iter().map(|entry| entry.key().clone()).collect();
+
                     for key in keys {
                         if let Some((k, v)) = aggregates.remove(&key) {
                             entries.push((k, v));
                         }
                     }
-                    
+
                     // Call flush function
                     if !entries.is_empty() {
                         flush_fn(entries).await;
@@ -281,49 +284,44 @@ impl AnalyticsAggregator {
     /// Start the background flush task (without storage - for backward compatibility)
     ///
     /// This spawns a tokio task that periodically drains aggregates.
-    pub fn start_flush_task(
-        &self,
-        flush_interval_secs: u64,
-    ) -> tokio::task::JoinHandle<()> {
+    pub fn start_flush_task(&self, flush_interval_secs: u64) -> tokio::task::JoinHandle<()> {
         let aggregates = Arc::clone(&self.aggregates);
         let shutdown = Arc::clone(&self.shutdown);
-        
+
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(
-                tokio::time::Duration::from_secs(flush_interval_secs)
-            );
-            
+            let mut interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(flush_interval_secs));
+
             loop {
                 interval.tick().await;
-                
+
                 // Check shutdown signal
                 if *shutdown.lock().await {
                     info!("Analytics aggregator flush task shutting down");
                     break;
                 }
-                
+
                 // Drain and log aggregates
                 let count = aggregates.len();
                 if count > 0 {
                     debug!("Draining {} analytics aggregates", count);
-                    
+
                     // Collect keys
-                    let keys: Vec<AnalyticsKey> = aggregates.iter()
-                        .map(|entry| entry.key().clone())
-                        .collect();
-                    
+                    let keys: Vec<AnalyticsKey> =
+                        aggregates.iter().map(|entry| entry.key().clone()).collect();
+
                     // Remove entries
                     for key in keys {
                         aggregates.remove(&key);
                     }
-                    
+
                     // TODO: Batch insert into database
                     // For now, we just drain to prevent unbounded memory growth
                 }
             }
         })
     }
-    
+
     /// Start the background flush task with GeoIP service (OPTIMIZED)
     ///
     /// This spawns a tokio task that periodically drains events,
@@ -336,36 +334,40 @@ impl AnalyticsAggregator {
         flush_fn: F,
     ) -> tokio::task::JoinHandle<()>
     where
-        F: Fn(Vec<(AnalyticsKey, AnalyticsValue)>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + 'static,
+        F: Fn(
+                Vec<(AnalyticsKey, AnalyticsValue)>,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+            + Send
+            + 'static,
     {
         let shared_buffer = Arc::clone(&self.shared_buffer);
         let aggregates = Arc::clone(&self.aggregates);
         let shutdown = Arc::clone(&self.shutdown);
-        
+
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(
-                tokio::time::Duration::from_secs(flush_interval_secs)
-            );
-            
+            let mut interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(flush_interval_secs));
+
             loop {
                 interval.tick().await;
-                
+
                 // Check shutdown signal
                 if *shutdown.lock().await {
                     info!("Analytics aggregator flush task shutting down");
                     break;
                 }
-                
+
                 // Drain events from shared buffer (Layer 2) and process with GeoIP
                 let event_count = shared_buffer.len();
                 if event_count > 0 {
                     debug!("Processing {} analytics event buffers", event_count);
-                    
+
                     // Collect all event buffers from shared buffer
-                    let keys: Vec<String> = shared_buffer.iter()
+                    let keys: Vec<String> = shared_buffer
+                        .iter()
                         .map(|entry| entry.key().clone())
                         .collect();
-                    
+
                     // Process each buffer
                     for key in keys {
                         if let Some((_, events)) = shared_buffer.remove(&key) {
@@ -373,7 +375,7 @@ impl AnalyticsAggregator {
                             for event in events {
                                 let geo_location = geoip_service.lookup(event.client_ip);
                                 let analytics_key = AnalyticsKey::from_event(&event, &geo_location);
-                                
+
                                 // Aggregate the result
                                 aggregates
                                     .entry(analytics_key)
@@ -383,23 +385,22 @@ impl AnalyticsAggregator {
                         }
                     }
                 }
-                
+
                 // Now drain and flush aggregates
                 let agg_count = aggregates.len();
                 if agg_count > 0 {
                     debug!("Flushing {} analytics aggregates", agg_count);
-                    
+
                     let mut entries = Vec::new();
-                    let keys: Vec<AnalyticsKey> = aggregates.iter()
-                        .map(|entry| entry.key().clone())
-                        .collect();
-                    
+                    let keys: Vec<AnalyticsKey> =
+                        aggregates.iter().map(|entry| entry.key().clone()).collect();
+
                     for key in keys {
                         if let Some((k, v)) = aggregates.remove(&key) {
                             entries.push((k, v));
                         }
                     }
-                    
+
                     // Call flush function
                     if !entries.is_empty() {
                         flush_fn(entries).await;
@@ -412,26 +413,25 @@ impl AnalyticsAggregator {
     /// Get aggregated analytics from in-memory data for a specific short code
     /// This is used for near real-time analytics display
     /// Returns aggregates grouped by the specified dimension
-    pub fn get_in_memory_aggregate(
-        &self,
-        short_code: &str,
-        group_by: &str,
-    ) -> Vec<(String, i64)> {
+    pub fn get_in_memory_aggregate(&self, short_code: &str, group_by: &str) -> Vec<(String, i64)> {
         use std::collections::HashMap;
-        
+
         let mut grouped: HashMap<String, i64> = HashMap::new();
-        
+
         // Aggregate from both processed aggregates (Layer 3) and pending events (Layer 2)
-        
+
         // Process from aggregates (already GeoIP resolved)
         for entry in self.aggregates.iter() {
             let key = entry.key();
             if key.short_code != short_code {
                 continue;
             }
-            
+
             let dimension = match group_by {
-                "country" => key.country_code.clone().unwrap_or_else(|| "Unknown".to_string()),
+                "country" => key
+                    .country_code
+                    .clone()
+                    .unwrap_or_else(|| "Unknown".to_string()),
                 "region" => {
                     // Check if region is dropped marker
                     if let Some(region) = &key.region {
@@ -451,7 +451,7 @@ impl AnalyticsAggregator {
                             None => "Unknown".to_string(),
                         }
                     }
-                },
+                }
                 "city" => {
                     // Check if city is dropped marker
                     if let Some(city) = &key.city {
@@ -460,7 +460,9 @@ impl AnalyticsAggregator {
                         } else {
                             // Format: "City, Region, Country" (e.g., "Toronto, Ontario, CA")
                             match (&key.region, &key.country_code) {
-                                (Some(region), Some(country)) => format!("{}, {}, {}", city, region, country),
+                                (Some(region), Some(country)) => {
+                                    format!("{}, {}, {}", city, region, country)
+                                }
                                 (Some(region), None) => format!("{}, {}", city, region),
                                 (None, Some(country)) => format!("{}, Unknown, {}", city, country),
                                 (None, None) => city.clone(),
@@ -469,34 +471,43 @@ impl AnalyticsAggregator {
                     } else {
                         // Format when city is None
                         match (&key.region, &key.country_code) {
-                            (Some(region), Some(country)) => format!("Unknown, {}, {}", region, country),
+                            (Some(region), Some(country)) => {
+                                format!("Unknown, {}, {}", region, country)
+                            }
                             (Some(region), None) => format!("Unknown, {}", region),
                             (None, Some(country)) => format!("Unknown, Unknown, {}", country),
                             (None, None) => "Unknown".to_string(),
                         }
                     }
-                },
-                "asn" => key.asn.map(|a| a.to_string()).unwrap_or_else(|| "Unknown".to_string()),
+                }
+                "asn" => key
+                    .asn
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "Unknown".to_string()),
                 "hour" => key.time_bucket.to_string(),
                 "day" => ((key.time_bucket / 86400) * 86400).to_string(),
-                _ => key.country_code.clone().unwrap_or_else(|| "Unknown".to_string()),
+                _ => key
+                    .country_code
+                    .clone()
+                    .unwrap_or_else(|| "Unknown".to_string()),
             };
-            
+
             *grouped.entry(dimension).or_insert(0) += entry.value().count as i64;
         }
-        
+
         // Process from shared buffer (Layer 2) - events pending GeoIP lookup
         // These will be displayed as "Unknown" since GeoIP hasn't been resolved yet
-        let unknown_count: i64 = self.shared_buffer
+        let unknown_count: i64 = self
+            .shared_buffer
             .iter()
             .filter(|entry| entry.key() == short_code)
             .map(|entry| entry.value().len() as i64)
             .sum();
-        
+
         if unknown_count > 0 {
             *grouped.entry("Unknown".to_string()).or_insert(0) += unknown_count;
         }
-        
+
         // Convert to Vec and sort by count descending
         let mut result: Vec<(String, i64)> = grouped.into_iter().collect();
         result.sort_by(|a, b| b.1.cmp(&a.1));
@@ -507,7 +518,7 @@ impl AnalyticsAggregator {
     pub async fn shutdown(&self) {
         // Send shutdown message to actor
         let _ = self.actor_tx.send(ActorMessage::Shutdown).await;
-        
+
         // Signal shutdown to flush task
         let mut shutdown = self.shutdown.lock().await;
         *shutdown = true;
@@ -538,7 +549,7 @@ mod tests {
     #[tokio::test]
     async fn test_aggregator_record() {
         let aggregator = AnalyticsAggregator::new();
-        
+
         let record = AnalyticsRecord {
             short_code: "test123".to_string(),
             timestamp: 1234567890,
@@ -553,10 +564,10 @@ mod tests {
             },
             client_ip: None,
         };
-        
+
         aggregator.record(record.clone());
         assert_eq!(aggregator.len(), 1);
-        
+
         // Recording the same event should increment the counter
         aggregator.record(record);
         assert_eq!(aggregator.len(), 1);
@@ -565,17 +576,17 @@ mod tests {
     #[tokio::test]
     async fn test_aggregator_drain() {
         let aggregator = AnalyticsAggregator::new();
-        
+
         let record = AnalyticsRecord {
             short_code: "test123".to_string(),
             timestamp: 1234567890,
             geo_location: GeoLocation::default(),
             client_ip: None,
         };
-        
+
         aggregator.record(record.clone());
         aggregator.record(record);
-        
+
         let drained = aggregator.drain();
         assert_eq!(drained.len(), 1);
         assert_eq!(drained[0].1.count, 2);

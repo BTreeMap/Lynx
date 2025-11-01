@@ -1,9 +1,9 @@
 use axum::{middleware, routing::get, Router};
 use std::sync::Arc;
 
+use crate::analytics::{AnalyticsAggregator, GeoIpService};
 use crate::config::AnalyticsConfig;
 use crate::storage::Storage;
-use crate::analytics::{AnalyticsAggregator, GeoIpService};
 
 use super::handlers::{health_check, redirect_url, RedirectState};
 use super::middleware::record_request_start;

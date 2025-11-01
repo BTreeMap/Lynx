@@ -93,21 +93,27 @@ impl GeoIpService {
     fn extract_from_city(&self, city: &geoip2::City, geo_location: &mut GeoLocation) {
         if let Some(ref country) = city.country {
             geo_location.country_code = country.iso_code.map(|s| s.to_string());
-            geo_location.country_name = country.names.as_ref()
+            geo_location.country_name = country
+                .names
+                .as_ref()
                 .and_then(|names| names.get("en"))
                 .map(|s| s.to_string());
         }
 
         if let Some(ref subdivisions) = city.subdivisions {
             if let Some(subdivision) = subdivisions.first() {
-                geo_location.region = subdivision.names.as_ref()
+                geo_location.region = subdivision
+                    .names
+                    .as_ref()
                     .and_then(|names| names.get("en"))
                     .map(|s| s.to_string());
             }
         }
 
         if let Some(ref city_data) = city.city {
-            geo_location.city = city_data.names.as_ref()
+            geo_location.city = city_data
+                .names
+                .as_ref()
                 .and_then(|names| names.get("en"))
                 .map(|s| s.to_string());
         }
@@ -117,7 +123,9 @@ impl GeoIpService {
     fn extract_from_country(&self, country: &geoip2::Country, geo_location: &mut GeoLocation) {
         if let Some(ref country_data) = country.country {
             geo_location.country_code = country_data.iso_code.map(|s| s.to_string());
-            geo_location.country_name = country_data.names.as_ref()
+            geo_location.country_name = country_data
+                .names
+                .as_ref()
                 .and_then(|names| names.get("en"))
                 .map(|s| s.to_string());
         }
@@ -140,7 +148,7 @@ mod tests {
 
     // Note: These tests require actual MMDB files to run
     // They are mainly for documentation and would need a test database
-    
+
     #[test]
     fn test_geoip_service_creation_invalid_path() {
         let result = GeoIpService::new(Some("/nonexistent/path.mmdb"), None);

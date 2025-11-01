@@ -448,7 +448,16 @@ impl Storage for CachedStorage {
 
     async fn upsert_analytics_batch(
         &self,
-        records: Vec<(String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64)>,
+        records: Vec<(
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            i32,
+            i64,
+        )>,
     ) -> Result<()> {
         // Analytics are not cached, pass through to storage
         self.inner.upsert_analytics_batch(records).await
@@ -462,7 +471,9 @@ impl Storage for CachedStorage {
         limit: i64,
     ) -> Result<Vec<crate::analytics::AnalyticsEntry>> {
         // Analytics are not cached, pass through to storage
-        self.inner.get_analytics(short_code, start_time, end_time, limit).await
+        self.inner
+            .get_analytics(short_code, start_time, end_time, limit)
+            .await
     }
 
     async fn get_analytics_aggregate(
@@ -474,7 +485,9 @@ impl Storage for CachedStorage {
         limit: i64,
     ) -> Result<Vec<crate::analytics::AnalyticsAggregate>> {
         // Analytics aggregates are not cached, pass through to storage
-        self.inner.get_analytics_aggregate(short_code, start_time, end_time, group_by, limit).await
+        self.inner
+            .get_analytics_aggregate(short_code, start_time, end_time, group_by, limit)
+            .await
     }
 
     async fn prune_analytics(
@@ -483,6 +496,8 @@ impl Storage for CachedStorage {
         drop_dimensions: &[String],
     ) -> Result<(i64, i64)> {
         // Pass through to inner storage
-        self.inner.prune_analytics(retention_days, drop_dimensions).await
+        self.inner
+            .prune_analytics(retention_days, drop_dimensions)
+            .await
     }
 }

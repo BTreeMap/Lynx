@@ -126,28 +126,28 @@ pub struct AnalyticsConfig {
     /// Enable visitor IP analytics
     #[serde(default)]
     pub enabled: bool,
-    
+
     /// Path to MaxMind GeoLite2-City or GeoIP2-City database file (.mmdb)
     pub geoip_city_db_path: Option<String>,
-    
+
     /// Path to MaxMind GeoLite2-ASN database file (.mmdb)
     pub geoip_asn_db_path: Option<String>,
-    
+
     /// Enable IP address anonymization (truncate to network prefix)
     #[serde(default)]
     pub ip_anonymization: bool,
-    
+
     /// Trusted proxy mode for client IP extraction
     #[serde(default)]
     pub trusted_proxy_mode: TrustedProxyMode,
-    
+
     /// List of trusted proxy CIDR ranges (e.g., ["10.0.0.0/8", "172.16.0.0/12"])
     #[serde(default)]
     pub trusted_proxies: Vec<String>,
-    
+
     /// Number of trusted proxies to skip from the right in X-Forwarded-For
     pub num_trusted_proxies: Option<usize>,
-    
+
     /// Flush interval for analytics aggregator (seconds)
     #[serde(default = "AnalyticsConfig::default_flush_interval_secs")]
     pub flush_interval_secs: u64,
@@ -190,7 +190,6 @@ impl AnalyticsConfig {
         60 // 1 minute
     }
 }
-
 
 impl OAuthConfig {
     const fn default_cache_ttl_secs() -> u64 {
@@ -363,7 +362,7 @@ impl Config {
         let analytics = if analytics_enabled {
             let geoip_city_db_path = std::env::var("ANALYTICS_GEOIP_CITY_DB_PATH").ok();
             let geoip_asn_db_path = std::env::var("ANALYTICS_GEOIP_ASN_DB_PATH").ok();
-            
+
             let ip_anonymization = std::env::var("ANALYTICS_IP_ANONYMIZATION")
                 .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
                 .unwrap_or(false);
@@ -435,9 +434,7 @@ impl Config {
                 actor_buffer_size,
                 actor_flush_interval_ms,
             },
-            pagination: PaginationConfig {
-                cursor_hmac_secret,
-            },
+            pagination: PaginationConfig { cursor_hmac_secret },
             analytics,
         })
     }

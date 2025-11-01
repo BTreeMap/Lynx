@@ -139,7 +139,16 @@ pub trait Storage: Send + Sync {
     /// Uses UPSERT to increment visit counts for existing records
     async fn upsert_analytics_batch(
         &self,
-        records: Vec<(String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64)>,
+        records: Vec<(
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            i32,
+            i64,
+        )>,
     ) -> Result<()>;
     // (short_code, time_bucket, country_code, region, city, asn, ip_version, count)
 

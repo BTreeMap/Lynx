@@ -1,6 +1,6 @@
+use crate::analytics::{DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER};
 use crate::models::ShortenedUrl;
 use crate::storage::{LookupMetadata, LookupResult, Storage, StorageError, StorageResult};
-use crate::analytics::{DROPPED_DIMENSION_MARKER, DEFAULT_IP_VERSION};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -134,11 +134,9 @@ impl Storage for SqliteStorage {
         .await?;
 
         // Index for analytics queries by short code
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_analytics_short_code ON analytics(short_code)",
-        )
-        .execute(self.pool.as_ref())
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_analytics_short_code ON analytics(short_code)")
+            .execute(self.pool.as_ref())
+            .await?;
 
         // Index for analytics queries by time bucket
         sqlx::query(
@@ -589,14 +587,24 @@ impl Storage for SqliteStorage {
 
     async fn upsert_analytics_batch(
         &self,
-        records: Vec<(String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64)>,
+        records: Vec<(
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            i32,
+            i64,
+        )>,
     ) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| anyhow!(e))?
             .as_secs() as i64;
 
-        for (short_code, time_bucket, country_code, region, city, asn, ip_version, count) in records {
+        for (short_code, time_bucket, country_code, region, city, asn, ip_version, count) in records
+        {
             sqlx::query(
                 r#"
                 INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
@@ -686,11 +694,11 @@ impl Storage for SqliteStorage {
             "region" => {
                 // Don't format if region is <dropped>
                 "CASE WHEN region = '<dropped>' THEN region ELSE COALESCE(region, 'Unknown') || ', ' || COALESCE(country_code, 'Unknown') END"
-            },
+            }
             "city" => {
                 // Don't format if city is <dropped>
                 "CASE WHEN city = '<dropped>' THEN city ELSE COALESCE(city, 'Unknown') || ', ' || COALESCE(region, 'Unknown') || ', ' || COALESCE(country_code, 'Unknown') END"
-            },
+            }
             "asn" => "CAST(asn AS TEXT)",
             "hour" => "time_bucket",
             "day" => "(time_bucket / 86400) * 86400",
@@ -758,7 +766,7 @@ impl Storage for SqliteStorage {
         drop_dimensions: &[String],
     ) -> Result<(i64, i64)> {
         let cutoff_time = chrono::Utc::now().timestamp() - (retention_days * 86400);
-        
+
         // Count old entries before pruning
         let count_query = "SELECT COUNT(*) FROM analytics WHERE time_bucket < ?";
         let old_count: (i64,) = sqlx::query_as(count_query)
@@ -766,22 +774,20 @@ impl Storage for SqliteStorage {
             .fetch_one(self.pool.as_ref())
             .await?;
         let deleted_count = old_count.0;
-        
+
         // If no old entries, return early
         if deleted_count == 0 {
             return Ok((0, 0));
         }
-        
+
         // Build the SELECT clause with dropped dimensions replaced
-        let mut select_fields = vec![
-            "short_code".to_string(),
-        ];
-        
+        let mut select_fields = vec!["short_code".to_string()];
+
         // Pre-compute dimension checks for efficiency
         let drop_time_bucket = drop_dimensions.contains(&"time_bucket".to_string());
-        let drop_country = drop_dimensions.contains(&"country_code".to_string()) || 
-                          drop_dimensions.contains(&"country".to_string());
-        
+        let drop_country = drop_dimensions.contains(&"country_code".to_string())
+            || drop_dimensions.contains(&"country".to_string());
+
         // Handle time bucket dropping
         // When aggregating old entries, we always need to set time_bucket to a value >= cutoff_time
         // to avoid the aggregated entries being immediately deleted
@@ -795,11 +801,12 @@ impl Storage for SqliteStorage {
             format!("CAST({} AS INTEGER)", now)
         };
         select_fields.push(format!("{} as time_bucket", time_bucket_expr));
-        
+
         // Add dimension fields with conditional dropping
         for field in &["country_code", "region", "city", "asn", "ip_version"] {
-            if drop_dimensions.contains(&field.to_string()) || 
-               (field == &"country_code" && drop_country) {
+            if drop_dimensions.contains(&field.to_string())
+                || (field == &"country_code" && drop_country)
+            {
                 if field == &"asn" {
                     select_fields.push(format!("NULL as {}", field));
                 } else if field == &"ip_version" {
@@ -811,12 +818,13 @@ impl Storage for SqliteStorage {
                 select_fields.push(field.to_string());
             }
         }
-        
+
         // Build SELECT clause
         let select_clause = select_fields.join(", ");
-        
+
         // Build GROUP BY clause - use expressions without "as alias" parts
-        let group_by_expressions: Vec<String> = select_fields.iter()
+        let group_by_expressions: Vec<String> = select_fields
+            .iter()
             .map(|f| {
                 // Extract expression before "as" if present, otherwise use the whole field
                 if f.contains(" as ") {
@@ -827,10 +835,10 @@ impl Storage for SqliteStorage {
             })
             .collect();
         let group_by_clause = group_by_expressions.join(", ");
-        
+
         // Create a view of aggregated old entries (without inserting yet)
         let mut tx = self.pool.begin().await?;
-        
+
         // Create aggregated entries
         let aggregate_query = format!(
             "INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
@@ -840,23 +848,23 @@ impl Storage for SqliteStorage {
              GROUP BY {}",
             select_clause, now, now, group_by_clause
         );
-        
+
         let insert_result = sqlx::query(&aggregate_query)
             .bind(cutoff_time)
             .execute(&mut *tx)
             .await?;
-        
+
         let inserted_count = insert_result.rows_affected() as i64;
-        
+
         // Delete old entries
         let delete_query = "DELETE FROM analytics WHERE time_bucket < ?";
         sqlx::query(delete_query)
             .bind(cutoff_time)
             .execute(&mut *tx)
             .await?;
-        
+
         tx.commit().await?;
-        
+
         Ok((deleted_count, inserted_count))
     }
 }
@@ -961,7 +969,7 @@ mod tests {
             .patch_all_malformed_created_by("fixeduser")
             .await
             .unwrap();
-        
+
         // Should have patched 4 malformed entries (2 all-zero UUID, 1 empty string, 1 null)
         assert_eq!(count, 4, "Should have patched exactly 4 malformed URLs");
 
@@ -1005,7 +1013,7 @@ mod tests {
             .patch_all_malformed_created_by("fixeduser")
             .await
             .unwrap();
-        
+
         assert_eq!(count, 0, "Should have patched 0 URLs when all are normal");
 
         // Verify URLs are unchanged
@@ -1059,7 +1067,7 @@ mod tests {
             .patch_all_malformed_created_by("fixeduser")
             .await
             .unwrap();
-        
+
         assert_eq!(count, 1, "Should have patched only 1 malformed URL");
 
         // Verify valid UUIDs and other IDs are unchanged
@@ -1122,10 +1130,7 @@ mod tests {
         );
 
         let url2 = storage.get_authoritative("malformed2").await.unwrap();
-        assert_eq!(
-            url2.unwrap().created_by,
-            Some("specificuser".to_string())
-        );
+        assert_eq!(url2.unwrap().created_by, Some("specificuser".to_string()));
 
         let url3 = storage.get_authoritative("malformed3").await.unwrap();
         assert_eq!(url3.unwrap().created_by, Some("".to_string()));
@@ -1136,9 +1141,18 @@ mod tests {
         let storage = setup_sqlite().await;
 
         // Create test users
-        storage.upsert_user("user1", Some("user1@example.com"), "oauth").await.unwrap();
-        storage.upsert_user("user2", Some("user2@example.com"), "oauth").await.unwrap();
-        storage.upsert_user("user3", None, "cloudflare").await.unwrap();
+        storage
+            .upsert_user("user1", Some("user1@example.com"), "oauth")
+            .await
+            .unwrap();
+        storage
+            .upsert_user("user2", Some("user2@example.com"), "oauth")
+            .await
+            .unwrap();
+        storage
+            .upsert_user("user3", None, "cloudflare")
+            .await
+            .unwrap();
 
         // List all users
         let users = storage.list_all_users(10, 0).await.unwrap();
@@ -1157,9 +1171,18 @@ mod tests {
         let storage = setup_sqlite().await;
 
         // Create test URLs for different users
-        storage.create_with_code("link1", "https://example.com/1", Some("user1")).await.unwrap();
-        storage.create_with_code("link2", "https://example.com/2", Some("user1")).await.unwrap();
-        storage.create_with_code("link3", "https://example.com/3", Some("user2")).await.unwrap();
+        storage
+            .create_with_code("link1", "https://example.com/1", Some("user1"))
+            .await
+            .unwrap();
+        storage
+            .create_with_code("link2", "https://example.com/2", Some("user1"))
+            .await
+            .unwrap();
+        storage
+            .create_with_code("link3", "https://example.com/3", Some("user2"))
+            .await
+            .unwrap();
 
         // List links for user1
         let links = storage.list_user_links("user1", 10, 0).await.unwrap();
@@ -1179,9 +1202,18 @@ mod tests {
         let storage = setup_sqlite().await;
 
         // Create test URLs for a user
-        storage.create_with_code("link1", "https://example.com/1", Some("user1")).await.unwrap();
-        storage.create_with_code("link2", "https://example.com/2", Some("user1")).await.unwrap();
-        storage.create_with_code("link3", "https://example.com/3", Some("user2")).await.unwrap();
+        storage
+            .create_with_code("link1", "https://example.com/1", Some("user1"))
+            .await
+            .unwrap();
+        storage
+            .create_with_code("link2", "https://example.com/2", Some("user1"))
+            .await
+            .unwrap();
+        storage
+            .create_with_code("link3", "https://example.com/3", Some("user2"))
+            .await
+            .unwrap();
 
         // Deactivate all links for user1
         let count = storage.bulk_deactivate_user_links("user1").await.unwrap();
@@ -1208,8 +1240,14 @@ mod tests {
         let storage = setup_sqlite().await;
 
         // Create and deactivate test URLs for a user
-        storage.create_with_code("link1", "https://example.com/1", Some("user1")).await.unwrap();
-        storage.create_with_code("link2", "https://example.com/2", Some("user1")).await.unwrap();
+        storage
+            .create_with_code("link1", "https://example.com/1", Some("user1"))
+            .await
+            .unwrap();
+        storage
+            .create_with_code("link2", "https://example.com/2", Some("user1"))
+            .await
+            .unwrap();
         storage.deactivate("link1").await.unwrap();
         storage.deactivate("link2").await.unwrap();
 
@@ -1273,7 +1311,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(analytics.len(), 2);
-        
+
         // Verify visit counts
         let total_visits: i64 = analytics.iter().map(|a| a.visit_count).sum();
         assert_eq!(total_visits, 8);
@@ -1292,9 +1330,36 @@ mod tests {
         // Insert analytics from multiple countries
         let time_bucket = 1698768000;
         let records = vec![
-            ("multi".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), Some(15169), 4, 10),
-            ("multi".to_string(), time_bucket, Some("GB".to_string()), Some("England".to_string()), Some("London".to_string()), Some(16509), 4, 5),
-            ("multi".to_string(), time_bucket, Some("US".to_string()), Some("NY".to_string()), Some("NYC".to_string()), Some(15169), 4, 3),
+            (
+                "multi".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                Some("CA".to_string()),
+                Some("SF".to_string()),
+                Some(15169),
+                4,
+                10,
+            ),
+            (
+                "multi".to_string(),
+                time_bucket,
+                Some("GB".to_string()),
+                Some("England".to_string()),
+                Some("London".to_string()),
+                Some(16509),
+                4,
+                5,
+            ),
+            (
+                "multi".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                Some("NY".to_string()),
+                Some("NYC".to_string()),
+                Some(15169),
+                4,
+                3,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -1306,15 +1371,15 @@ mod tests {
             .unwrap();
 
         assert_eq!(aggregates.len(), 2); // US and GB
-        
+
         // Verify totals
         let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
         assert_eq!(total, 18);
-        
+
         // Find US aggregate (should be 13 = 10 + 3)
         let us_agg = aggregates.iter().find(|a| a.dimension == "US").unwrap();
         assert_eq!(us_agg.visit_count, 13);
-        
+
         // Find GB aggregate (should be 5)
         let gb_agg = aggregates.iter().find(|a| a.dimension == "GB").unwrap();
         assert_eq!(gb_agg.visit_count, 5);
@@ -1331,9 +1396,36 @@ mod tests {
 
         let time_bucket = 1698768000;
         let records = vec![
-            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("LA".to_string()), None, 4, 7),
-            ("test".to_string(), time_bucket, Some("US".to_string()), Some("NY".to_string()), Some("NYC".to_string()), None, 4, 4),
-            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), None, 4, 2),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                Some("CA".to_string()),
+                Some("LA".to_string()),
+                None,
+                4,
+                7,
+            ),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                Some("NY".to_string()),
+                Some("NYC".to_string()),
+                None,
+                4,
+                4,
+            ),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                Some("CA".to_string()),
+                Some("SF".to_string()),
+                None,
+                4,
+                2,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -1345,10 +1437,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(aggregates.len(), 2); // CA and NY
-        
+
         let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
         assert_eq!(total, 13);
-        
+
         // CA should have 9 visits (7 + 2), formatted as "CA, US"
         let ca_agg = aggregates.iter().find(|a| a.dimension == "CA, US").unwrap();
         assert_eq!(ca_agg.visit_count, 9);
@@ -1365,9 +1457,36 @@ mod tests {
 
         let time_bucket = 1698768000;
         let records = vec![
-            ("test".to_string(), time_bucket, Some("US".to_string()), None, None, Some(15169), 4, 8),
-            ("test".to_string(), time_bucket, Some("US".to_string()), None, None, Some(16509), 4, 3),
-            ("test".to_string(), time_bucket, Some("GB".to_string()), None, None, Some(15169), 4, 2),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                None,
+                None,
+                Some(15169),
+                4,
+                8,
+            ),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                None,
+                None,
+                Some(16509),
+                4,
+                3,
+            ),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("GB".to_string()),
+                None,
+                None,
+                Some(15169),
+                4,
+                2,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -1379,10 +1498,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(aggregates.len(), 2);
-        
+
         let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
         assert_eq!(total, 13);
-        
+
         // ASN 15169 should have 10 visits (8 + 2)
         let asn_agg = aggregates.iter().find(|a| a.dimension == "15169").unwrap();
         assert_eq!(asn_agg.visit_count, 10);
@@ -1399,9 +1518,36 @@ mod tests {
 
         // Insert records with different time buckets
         let records = vec![
-            ("test".to_string(), 1000, Some("US".to_string()), None, None, None, 4, 5),
-            ("test".to_string(), 2000, Some("US".to_string()), None, None, None, 4, 3),
-            ("test".to_string(), 3000, Some("US".to_string()), None, None, None, 4, 7),
+            (
+                "test".to_string(),
+                1000,
+                Some("US".to_string()),
+                None,
+                None,
+                None,
+                4,
+                5,
+            ),
+            (
+                "test".to_string(),
+                2000,
+                Some("US".to_string()),
+                None,
+                None,
+                None,
+                4,
+                3,
+            ),
+            (
+                "test".to_string(),
+                3000,
+                Some("US".to_string()),
+                None,
+                None,
+                None,
+                4,
+                7,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -1441,17 +1587,31 @@ mod tests {
             .unwrap();
 
         let time_bucket = 1698768000;
-        
+
         // Insert initial record - all fields need to match for the UNIQUE constraint to trigger
-        let records = vec![
-            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), Some(15169), 4, 5),
-        ];
+        let records = vec![(
+            "test".to_string(),
+            time_bucket,
+            Some("US".to_string()),
+            Some("CA".to_string()),
+            Some("SF".to_string()),
+            Some(15169),
+            4,
+            5,
+        )];
         storage.upsert_analytics_batch(records).await.unwrap();
 
         // Upsert same key with more visits - all fields must match
-        let records = vec![
-            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), Some(15169), 4, 3),
-        ];
+        let records = vec![(
+            "test".to_string(),
+            time_bucket,
+            Some("US".to_string()),
+            Some("CA".to_string()),
+            Some("SF".to_string()),
+            Some(15169),
+            4,
+            3,
+        )];
         storage.upsert_analytics_batch(records).await.unwrap();
 
         // Should have incremented, not replaced
@@ -1459,7 +1619,7 @@ mod tests {
             .get_analytics("test", None, None, 100)
             .await
             .unwrap();
-        
+
         assert_eq!(analytics.len(), 1);
         assert_eq!(analytics[0].visit_count, 8); // 5 + 3
     }
@@ -1475,9 +1635,36 @@ mod tests {
 
         // Insert records with different time buckets
         let records = vec![
-            ("test".to_string(), 1000, Some("US".to_string()), None, None, None, 4, 5),
-            ("test".to_string(), 2000, Some("GB".to_string()), None, None, None, 4, 3),
-            ("test".to_string(), 3000, Some("US".to_string()), None, None, None, 4, 7),
+            (
+                "test".to_string(),
+                1000,
+                Some("US".to_string()),
+                None,
+                None,
+                None,
+                4,
+                5,
+            ),
+            (
+                "test".to_string(),
+                2000,
+                Some("GB".to_string()),
+                None,
+                None,
+                None,
+                4,
+                3,
+            ),
+            (
+                "test".to_string(),
+                3000,
+                Some("US".to_string()),
+                None,
+                None,
+                None,
+                4,
+                7,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -1505,13 +1692,49 @@ mod tests {
         let time_bucket = 1698768000;
         let records = vec![
             // Full geo data: city, region, country
-            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Ontario".to_string()), Some("Toronto".to_string()), None, 4, 5),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("CA".to_string()),
+                Some("Ontario".to_string()),
+                Some("Toronto".to_string()),
+                None,
+                4,
+                5,
+            ),
             // Same city, different count
-            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Ontario".to_string()), Some("Toronto".to_string()), None, 4, 3),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("CA".to_string()),
+                Some("Ontario".to_string()),
+                Some("Toronto".to_string()),
+                None,
+                4,
+                3,
+            ),
             // Different city, same region and country
-            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Ontario".to_string()), Some("Ottawa".to_string()), None, 4, 2),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("CA".to_string()),
+                Some("Ontario".to_string()),
+                Some("Ottawa".to_string()),
+                None,
+                4,
+                2,
+            ),
             // Missing region
-            ("test".to_string(), time_bucket, Some("US".to_string()), None, Some("Portland".to_string()), None, 4, 1),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                None,
+                Some("Portland".to_string()),
+                None,
+                4,
+                1,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -1523,20 +1746,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(aggregates.len(), 3);
-        
+
         let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
         assert_eq!(total, 11);
-        
+
         // Toronto should be "Toronto, Ontario, CA" with 8 visits (5 + 3)
-        let toronto_agg = aggregates.iter().find(|a| a.dimension == "Toronto, Ontario, CA").unwrap();
+        let toronto_agg = aggregates
+            .iter()
+            .find(|a| a.dimension == "Toronto, Ontario, CA")
+            .unwrap();
         assert_eq!(toronto_agg.visit_count, 8);
-        
+
         // Ottawa should be "Ottawa, Ontario, CA" with 2 visits
-        let ottawa_agg = aggregates.iter().find(|a| a.dimension == "Ottawa, Ontario, CA").unwrap();
+        let ottawa_agg = aggregates
+            .iter()
+            .find(|a| a.dimension == "Ottawa, Ontario, CA")
+            .unwrap();
         assert_eq!(ottawa_agg.visit_count, 2);
-        
+
         // Portland should be "Portland, Unknown, US" (missing region)
-        let portland_agg = aggregates.iter().find(|a| a.dimension == "Portland, Unknown, US").unwrap();
+        let portland_agg = aggregates
+            .iter()
+            .find(|a| a.dimension == "Portland, Unknown, US")
+            .unwrap();
         assert_eq!(portland_agg.visit_count, 1);
     }
 
@@ -1552,12 +1784,48 @@ mod tests {
         let time_bucket = 1698768000;
         let records = vec![
             // Full data: country and region
-            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Ontario".to_string()), Some("Toronto".to_string()), None, 4, 5),
-            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Ontario".to_string()), Some("Ottawa".to_string()), None, 4, 3),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("CA".to_string()),
+                Some("Ontario".to_string()),
+                Some("Toronto".to_string()),
+                None,
+                4,
+                5,
+            ),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("CA".to_string()),
+                Some("Ontario".to_string()),
+                Some("Ottawa".to_string()),
+                None,
+                4,
+                3,
+            ),
             // Different region, same country
-            ("test".to_string(), time_bucket, Some("CA".to_string()), Some("Quebec".to_string()), Some("Montreal".to_string()), None, 4, 2),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("CA".to_string()),
+                Some("Quebec".to_string()),
+                Some("Montreal".to_string()),
+                None,
+                4,
+                2,
+            ),
             // Missing country (edge case)
-            ("test".to_string(), time_bucket, None, Some("Texas".to_string()), Some("Austin".to_string()), None, 4, 1),
+            (
+                "test".to_string(),
+                time_bucket,
+                None,
+                Some("Texas".to_string()),
+                Some("Austin".to_string()),
+                None,
+                4,
+                1,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -1569,20 +1837,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(aggregates.len(), 3);
-        
+
         let total: i64 = aggregates.iter().map(|a| a.visit_count).sum();
         assert_eq!(total, 11);
-        
+
         // Ontario should be "Ontario, CA" with 8 visits (5 + 3)
-        let ontario_agg = aggregates.iter().find(|a| a.dimension == "Ontario, CA").unwrap();
+        let ontario_agg = aggregates
+            .iter()
+            .find(|a| a.dimension == "Ontario, CA")
+            .unwrap();
         assert_eq!(ontario_agg.visit_count, 8);
-        
+
         // Quebec should be "Quebec, CA" with 2 visits
-        let quebec_agg = aggregates.iter().find(|a| a.dimension == "Quebec, CA").unwrap();
+        let quebec_agg = aggregates
+            .iter()
+            .find(|a| a.dimension == "Quebec, CA")
+            .unwrap();
         assert_eq!(quebec_agg.visit_count, 2);
-        
+
         // Texas should be "Texas, Unknown" (missing country)
-        let texas_agg = aggregates.iter().find(|a| a.dimension == "Texas, Unknown").unwrap();
+        let texas_agg = aggregates
+            .iter()
+            .find(|a| a.dimension == "Texas, Unknown")
+            .unwrap();
         assert_eq!(texas_agg.visit_count, 1);
     }
 
@@ -1598,20 +1875,56 @@ mod tests {
         // Create analytics data older than 30 days
         let old_time = chrono::Utc::now().timestamp() - (40 * 86400); // 40 days ago
         let recent_time = chrono::Utc::now().timestamp() - (10 * 86400); // 10 days ago
-        
+
         let records = vec![
             // Old records (will be pruned)
-            ("test".to_string(), old_time, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), Some(15169), 4, 5),
-            ("test".to_string(), old_time + 3600, Some("US".to_string()), Some("CA".to_string()), Some("LA".to_string()), Some(15169), 4, 3),
-            ("test".to_string(), old_time, Some("GB".to_string()), Some("England".to_string()), Some("London".to_string()), Some(16509), 4, 2),
+            (
+                "test".to_string(),
+                old_time,
+                Some("US".to_string()),
+                Some("CA".to_string()),
+                Some("SF".to_string()),
+                Some(15169),
+                4,
+                5,
+            ),
+            (
+                "test".to_string(),
+                old_time + 3600,
+                Some("US".to_string()),
+                Some("CA".to_string()),
+                Some("LA".to_string()),
+                Some(15169),
+                4,
+                3,
+            ),
+            (
+                "test".to_string(),
+                old_time,
+                Some("GB".to_string()),
+                Some("England".to_string()),
+                Some("London".to_string()),
+                Some(16509),
+                4,
+                2,
+            ),
             // Recent records (will not be pruned)
-            ("test".to_string(), recent_time, Some("CA".to_string()), Some("Ontario".to_string()), Some("Toronto".to_string()), None, 4, 4),
+            (
+                "test".to_string(),
+                recent_time,
+                Some("CA".to_string()),
+                Some("Ontario".to_string()),
+                Some("Toronto".to_string()),
+                None,
+                4,
+                4,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
 
         // Prune with dropping city and region dimensions
-        let (deleted, inserted) = storage
+        let (deleted, _inserted) = storage
             .prune_analytics(30, &vec!["city".to_string(), "region".to_string()])
             .await
             .unwrap();
@@ -1632,17 +1945,44 @@ mod tests {
 
         // Create analytics data with different hours
         let old_time = chrono::Utc::now().timestamp() - (40 * 86400); // 40 days ago
-        
+
         let records = vec![
-            ("test".to_string(), old_time, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), None, 4, 5),
-            ("test".to_string(), old_time + 3600, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), None, 4, 3), // Different hour
-            ("test".to_string(), old_time + 7200, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), None, 4, 2), // Another hour
+            (
+                "test".to_string(),
+                old_time,
+                Some("US".to_string()),
+                Some("CA".to_string()),
+                Some("SF".to_string()),
+                None,
+                4,
+                5,
+            ),
+            (
+                "test".to_string(),
+                old_time + 3600,
+                Some("US".to_string()),
+                Some("CA".to_string()),
+                Some("SF".to_string()),
+                None,
+                4,
+                3,
+            ), // Different hour
+            (
+                "test".to_string(),
+                old_time + 7200,
+                Some("US".to_string()),
+                Some("CA".to_string()),
+                Some("SF".to_string()),
+                None,
+                4,
+                2,
+            ), // Another hour
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
 
         // Prune with dropping time_bucket (should aggregate all to same day)
-        let (deleted, inserted) = storage
+        let (deleted, _inserted) = storage
             .prune_analytics(30, &vec!["time_bucket".to_string()])
             .await
             .unwrap();
@@ -1664,9 +2004,27 @@ mod tests {
         let time_bucket = 1698768000;
         let records = vec![
             // Normal entry
-            ("test".to_string(), time_bucket, Some("US".to_string()), Some("CA".to_string()), Some("SF".to_string()), None, 4, 5),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                Some("CA".to_string()),
+                Some("SF".to_string()),
+                None,
+                4,
+                5,
+            ),
             // Pruned entry with <dropped> markers
-            ("test".to_string(), time_bucket, Some("US".to_string()), Some("<dropped>".to_string()), Some("<dropped>".to_string()), None, 4, 3),
+            (
+                "test".to_string(),
+                time_bucket,
+                Some("US".to_string()),
+                Some("<dropped>".to_string()),
+                Some("<dropped>".to_string()),
+                None,
+                4,
+                3,
+            ),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -1702,8 +2060,12 @@ mod tests {
         assert!(ca_agg.is_some(), "Should have CA, US entry");
 
         // Dropped entry should remain as "<dropped>"
-        let dropped_region_agg = region_aggregates.iter().find(|a| a.dimension == "<dropped>");
-        assert!(dropped_region_agg.is_some(), "Should have <dropped> entry for region");
+        let dropped_region_agg = region_aggregates
+            .iter()
+            .find(|a| a.dimension == "<dropped>");
+        assert!(
+            dropped_region_agg.is_some(),
+            "Should have <dropped> entry for region"
+        );
     }
 }
-

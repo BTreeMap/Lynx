@@ -8,7 +8,16 @@ use lynx::config::{AuthMode, Config, DatabaseBackend};
 use lynx::storage::{CachedStorage, PostgresStorage, SqliteStorage, Storage};
 
 // Type alias for analytics record tuple to reduce complexity
-type AnalyticsRecord = (String, i64, Option<String>, Option<String>, Option<String>, Option<i64>, i32, i64);
+type AnalyticsRecord = (
+    String,
+    i64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    i32,
+    i64,
+);
 
 #[derive(Parser)]
 #[command(name = "lynx")]
@@ -257,10 +266,7 @@ async fn handle_patch_command(command: PatchCommands) -> Result<()> {
                     short_code, user_id
                 );
             } else {
-                println!(
-                    "⚠ Short code '{}' was not updated (not found)",
-                    short_code
-                );
+                println!("⚠ Short code '{}' was not updated (not found)", short_code);
             }
         }
         PatchCommands::FixAll { user_id } => {
@@ -316,7 +322,7 @@ async fn handle_user_command(command: UserCommands) -> Result<()> {
 
             let offset = (page - 1) * limit;
             let users = storage.list_all_users(limit, offset).await?;
-            
+
             if users.is_empty() {
                 if page == 1 {
                     println!("No users found.");
@@ -325,13 +331,19 @@ async fn handle_user_command(command: UserCommands) -> Result<()> {
                 }
             } else {
                 println!("Users (page {}, showing {} results):", page, users.len());
-                println!("{:<40} {:<15} {:<40} Created At", "User ID", "Auth Method", "Email");
+                println!(
+                    "{:<40} {:<15} {:<40} Created At",
+                    "User ID", "Auth Method", "Email"
+                );
                 println!("{}", "-".repeat(120));
                 for (user_id, auth_method, email, created_at) in users {
                     let datetime = chrono::DateTime::from_timestamp(created_at, 0)
                         .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
                         .unwrap_or_else(|| created_at.to_string());
-                    println!("{:<40} {:<15} {:<40} {}", user_id, auth_method, email, datetime);
+                    println!(
+                        "{:<40} {:<15} {:<40} {}",
+                        user_id, auth_method, email, datetime
+                    );
                 }
                 println!();
                 println!("To see more results, use: --page {}", page + 1);
@@ -350,7 +362,11 @@ async fn handle_user_command(command: UserCommands) -> Result<()> {
                 }
             }
         }
-        UserCommands::Links { user_id, limit, page } => {
+        UserCommands::Links {
+            user_id,
+            limit,
+            page,
+        } => {
             if page < 1 {
                 println!("✗ Page number must be >= 1");
                 return Ok(());
@@ -362,16 +378,27 @@ async fn handle_user_command(command: UserCommands) -> Result<()> {
 
             let offset = (page - 1) * limit;
             let links = storage.list_user_links(&user_id, limit, offset).await?;
-            
+
             if links.is_empty() {
                 if page == 1 {
                     println!("No links found for user '{}'.", user_id);
                 } else {
-                    println!("No more links found for user '{}' (page {}).", user_id, page);
+                    println!(
+                        "No more links found for user '{}' (page {}).",
+                        user_id, page
+                    );
                 }
             } else {
-                println!("Links for user '{}' (page {}, showing {} results):", user_id, page, links.len());
-                println!("{:<15} {:<60} {:<10} {:<10} Created At", "Short Code", "Original URL", "Clicks", "Active");
+                println!(
+                    "Links for user '{}' (page {}, showing {} results):",
+                    user_id,
+                    page,
+                    links.len()
+                );
+                println!(
+                    "{:<15} {:<60} {:<10} {:<10} Created At",
+                    "Short Code", "Original URL", "Clicks", "Active"
+                );
                 println!("{}", "-".repeat(120));
                 for link in links {
                     let url_display = if link.original_url.len() > 57 {
@@ -383,20 +410,25 @@ async fn handle_user_command(command: UserCommands) -> Result<()> {
                     let datetime = chrono::DateTime::from_timestamp(link.created_at, 0)
                         .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
                         .unwrap_or_else(|| link.created_at.to_string());
-                    println!("{:<15} {:<60} {:<10} {:<10} {}", 
-                        link.short_code, url_display, link.clicks, active_str, datetime);
+                    println!(
+                        "{:<15} {:<60} {:<10} {:<10} {}",
+                        link.short_code, url_display, link.clicks, active_str, datetime
+                    );
                 }
                 println!();
                 println!("To see more results, use: --page {}", page + 1);
             }
         }
         UserCommands::DeactivateLinks { user_id } => {
-            println!("⚠ This will mark all links created by user '{}' as inactive.", user_id);
+            println!(
+                "⚠ This will mark all links created by user '{}' as inactive.",
+                user_id
+            );
             println!("   Note: Cached links will remain active until instance restart.");
             println!();
-            
+
             let count = storage.bulk_deactivate_user_links(&user_id).await?;
-            
+
             if count > 0 {
                 println!("✓ Deactivated {} link(s) for user '{}'", count, user_id);
             } else {
@@ -404,12 +436,15 @@ async fn handle_user_command(command: UserCommands) -> Result<()> {
             }
         }
         UserCommands::ReactivateLinks { user_id } => {
-            println!("⚠ This will mark all links created by user '{}' as active.", user_id);
+            println!(
+                "⚠ This will mark all links created by user '{}' as active.",
+                user_id
+            );
             println!("   Note: Links will become active in cache after instance restart.");
             println!();
-            
+
             let count = storage.bulk_reactivate_user_links(&user_id).await?;
-            
+
             if count > 0 {
                 println!("✓ Reactivated {} link(s) for user '{}'", count, user_id);
             } else {
@@ -548,10 +583,10 @@ async fn run_server() -> Result<()> {
         use lynx::analytics::{AnalyticsAggregator, GeoIpService};
 
         info!("📊 Analytics enabled");
-        
+
         let city_path = config.analytics.geoip_city_db_path.as_deref();
         let asn_path = config.analytics.geoip_asn_db_path.as_deref();
-        
+
         let geoip = match GeoIpService::new(city_path, asn_path) {
             Ok(service) => {
                 if let Some(path) = city_path {
@@ -572,7 +607,7 @@ async fn run_server() -> Result<()> {
         };
 
         let aggregator = Arc::new(AnalyticsAggregator::new());
-        
+
         // Start optimized flush task with GeoIP service (if available)
         let storage_clone = Arc::clone(&storage);
         let _flush_handle = if let Some(ref geoip_svc) = geoip {
@@ -587,7 +622,7 @@ async fn run_server() -> Result<()> {
                         if entries.is_empty() {
                             return;
                         }
-                        
+
                         // Convert entries to storage format
                         let records: Vec<AnalyticsRecord> = entries
                             .into_iter()
@@ -604,7 +639,7 @@ async fn run_server() -> Result<()> {
                                 )
                             })
                             .collect();
-                        
+
                         // Batch insert to storage
                         if let Err(e) = storage.upsert_analytics_batch(records).await {
                             tracing::error!("Failed to flush analytics to storage: {}", e);
@@ -624,7 +659,7 @@ async fn run_server() -> Result<()> {
                         if entries.is_empty() {
                             return;
                         }
-                        
+
                         // Convert entries to storage format
                         let records: Vec<AnalyticsRecord> = entries
                             .into_iter()
@@ -641,7 +676,7 @@ async fn run_server() -> Result<()> {
                                 )
                             })
                             .collect();
-                        
+
                         // Batch insert to storage
                         if let Err(e) = storage.upsert_analytics_batch(records).await {
                             tracing::error!("Failed to flush analytics to storage: {}", e);
@@ -652,13 +687,23 @@ async fn run_server() -> Result<()> {
                 },
             )
         };
-        
+
         info!(
             "   - IP anonymization: {}",
-            if config.analytics.ip_anonymization { "enabled" } else { "disabled" }
+            if config.analytics.ip_anonymization {
+                "enabled"
+            } else {
+                "disabled"
+            }
         );
-        info!("   - Trusted proxy mode: {:?}", config.analytics.trusted_proxy_mode);
-        info!("   - Flush interval: {} seconds", config.analytics.flush_interval_secs);
+        info!(
+            "   - Trusted proxy mode: {:?}",
+            config.analytics.trusted_proxy_mode
+        );
+        info!(
+            "   - Flush interval: {} seconds",
+            config.analytics.flush_interval_secs
+        );
 
         (Some(config.analytics.clone()), geoip, Some(aggregator))
     } else {
@@ -666,14 +711,18 @@ async fn run_server() -> Result<()> {
         (None, None, None)
     };
 
-    let api_router =
-        lynx::api::create_api_router(Arc::clone(&storage), auth_service, Arc::clone(&config), analytics_aggregator.clone());
-    
+    let api_router = lynx::api::create_api_router(
+        Arc::clone(&storage),
+        auth_service,
+        Arc::clone(&config),
+        analytics_aggregator.clone(),
+    );
+
     // Check if timing headers should be enabled (disabled by default for max performance)
     let enable_timing_headers = std::env::var("ENABLE_TIMING_HEADERS")
         .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
         .unwrap_or(false);
-    
+
     let redirect_router = lynx::redirect::create_redirect_router(
         Arc::clone(&storage),
         analytics_config,
