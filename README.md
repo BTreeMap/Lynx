@@ -1,21 +1,19 @@
-# Lynx - URL Shortener
+# Lynx URL Shortener
 
-Lynx is a URL shortener backend API written in Rust with support for multiple storage backends (SQLite and PostgreSQL), access control, and separate API/client-facing servers.
+A high-performance URL shortener written in Rust with dual-server architecture, multi-backend storage support, and enterprise authentication.
 
 ## Features
 
-- 🔗 **URL Shortening**: Create short codes for long URLs with optional custom codes
-- 🗄️ **Extensible Storage**: Support for both SQLite and PostgreSQL backends
-- 🔐 **Access Control**: OAuth 2.0 and Cloudflare Zero Trust authentication with configurable pass-through mode
-- 🚀 **Dual Server Architecture**: Separate ports for API management and client redirects
-- 📊 **Analytics**: Track click counts for each shortened URL
-- 🌍 **Visitor IP Analytics** (Optional): GeoIP-based visitor analytics with privacy controls (see [Analytics Guide](docs/ANALYTICS.md))
-- 🔒 **Immutable URLs**: URLs are immutable and can only be deactivated, not deleted or modified
-- 🛡️ **Delete Protection**: Database-level triggers prevent accidental or malicious deletion of URLs (see [Delete Protection](docs/DELETE_PROTECTION.md))
-- 🔄 **Deactivation**: URLs can be deactivated and reactivated (e.g., for policy violations)
-- 👥 **Multi-User Support**: Each user can manage their own links; admins can manage all links
-- 🖥️ **Web Frontend**: React-based dashboard for managing URLs and viewing statistics
-- ⚡ **High Performance**: In-memory caching and write buffering for optimal performance (see [Performance Optimizations](docs/PERFORMANCE_OPTIMIZATIONS.md))
+- **URL Shortening**: Create short codes for long URLs with optional custom codes
+- **Extensible Storage**: SQLite and PostgreSQL backends with automatic schema initialization
+- **Access Control**: OAuth 2.0 and Cloudflare Zero Trust authentication with pass-through mode
+- **Dual Server Architecture**: Separate API server (management) and redirect server (public-facing)
+- **Analytics**: Click tracking with optional GeoIP-based visitor analytics ([Analytics Guide](docs/ANALYTICS.md))
+- **Immutable URLs**: URLs can be deactivated/reactivated but not deleted or modified
+- **Delete Protection**: Database-level triggers prevent accidental deletion ([Delete Protection](docs/DELETE_PROTECTION.md))
+- **Multi-User Support**: User-specific link management with admin roles
+- **Web Frontend**: React-based dashboard bundled into the binary
+- **High Performance**: In-memory caching and write buffering ([Performance Optimizations](docs/PERFORMANCE_OPTIMIZATIONS.md))
 
 ## Frontend
 
@@ -70,407 +68,379 @@ See the [frontend README](frontend/README.md) for development setup.
 
 Lynx runs two separate HTTP servers:
 
-1. **API Server** (default: port 8080): For management operations and frontend serving
-
+**API Server** (default: port 8080)
 - Serves the bundled React frontend at `/`
-- API endpoints available at `/api/...`
-- Optional OAuth 2.0 authentication (can be disabled)
+- API endpoints at `/api/...`
+- Optional authentication (OAuth 2.0, Cloudflare Zero Trust, or disabled)
 - Create URLs with auto-generated or custom codes
 - Deactivate/reactivate URLs
 - List and search capabilities
 
-2. **Redirect Server** (default: port 3000): For client-facing URL redirects
-   - No authentication required
-   - Fast redirects
-   - Click tracking
-   - Handles deactivated links
+**Redirect Server** (default: port 3000)
+- Public-facing URL redirects
+- No authentication required
+- Fast redirects with click tracking
+- Handles deactivated links with appropriate HTTP status codes
 
-This separation allows you to:
+This separation allows you to expose the redirect server publicly while keeping the API server internal, apply different security policies, and use separate domains via reverse proxy.
 
-- Expose the redirect server publicly while keeping the API server internal
-- Use different domains for each server via reverse proxy
-- Apply different rate limiting and security policies
-- Serve the management frontend only to authorized networks
+## Quick Start
 
-## Installation
+### Docker (Recommended)
 
-### Download Pre-built Binaries
-
-Pre-built binaries are available for download:
-
-**Latest main branch builds** (updated on every commit):
-
-- Available as artifacts from [GitHub Actions runs](https://github.com/BTreeMap/Lynx/actions)
-
-**Release builds** (stable versions):
-
-- Download from [GitHub Releases](https://github.com/BTreeMap/Lynx/releases)
-- Available for Linux (amd64, arm64), macOS (Intel, Apple Silicon), and Windows
+**For production deployments, use the stable release tag:**
 
 ```bash
-# Example: Download and run on Linux
+# Pull the latest stable release
+docker pull ghcr.io/btreemap/lynx:stable
+
+# Run with SQLite (simplest setup)
+docker run -d \
+  -p 8080:8080 \
+  -p 3000:3000 \
+  -v $(pwd)/data:/data \
+  -e DATABASE_BACKEND=sqlite \
+  -e DATABASE_URL=sqlite:///data/lynx.db \
+  -e AUTH_MODE=none \
+  ghcr.io/btreemap/lynx:stable
+```
+
+**For testing unreleased features, use the latest development tag:**
+
+```bash
+# Pull the latest main branch build (updated on every commit, may be unstable)
+docker pull ghcr.io/btreemap/lynx:latest
+```
+
+**Available Docker tags:**
+- `:stable` - Latest stable release (recommended for production)
+- `:latest` - Latest main branch build (unstable, for testing)
+- `:v1.0.0` - Specific version tag
+
+Access the web UI at `http://localhost:8080` and test a redirect:
+
+```bash
+# Create a short URL (no auth required with AUTH_MODE=none)
+curl -X POST http://localhost:8080/api/urls \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://github.com/BTreeMap/Lynx", "custom_code": "gh"}'
+
+# Access the shortened URL
+curl -L http://localhost:3000/gh
+```
+
+### Pre-built Binaries
+
+Download from [GitHub Releases](https://github.com/BTreeMap/Lynx/releases) for Linux, macOS, or Windows:
+
+```bash
+# Example: Linux
 wget https://github.com/BTreeMap/Lynx/releases/download/v1.0.0/lynx-linux-amd64
 chmod +x lynx-linux-amd64
 ./lynx-linux-amd64
 ```
 
-### Using Docker
-
-Docker images are automatically published to GitHub Container Registry:
-
-```bash
-# Pull latest main branch build
-docker pull ghcr.io/btreemap/lynx:latest
-
-# Or pull a specific release
-docker pull ghcr.io/btreemap/lynx:v1.0.0
-
-# Run with default SQLite database
-docker run -p 8080:8080 -p 3000:3000 ghcr.io/btreemap/lynx:latest
-
-# Run with custom environment variables
-docker run -p 8080:8080 -p 3000:3000 \
-  -e DATABASE_BACKEND=postgres \
-  -e DATABASE_URL=postgresql://user:password@host/db \
-  -e AUTH_MODE=oauth \
-  ghcr.io/btreemap/lynx:latest
-```
-
 ### Building from Source
 
-#### Prerequisites
-
-- Rust 1.70+ (install from [rustup.rs](https://rustup.rs))
-- For PostgreSQL: A running PostgreSQL instance
-
-#### Building
+Requires Rust 1.70+ and Node.js 20+ for frontend compilation:
 
 ```bash
+git clone https://github.com/BTreeMap/Lynx.git
+cd Lynx
 cargo build --release
-```
-
-## Configuration
-
-Copy the example environment file and edit it:
-
-```bash
-cp .env.example .env
-```
-
-### Environment Variables
-
-- `DATABASE_BACKEND`: Storage backend (`sqlite` or `postgres`)
-- `DATABASE_URL`: Database connection string
-  - SQLite: `sqlite://./lynx.db`
-  - PostgreSQL: `postgresql://user:password@localhost/lynx`
-- `DATABASE_MAX_CONNECTIONS`: Database connection pool size (default: `30`)
-- `CACHE_MAX_ENTRIES`: Maximum number of entries in the read cache (default: `500000`, approximately 100MB)
-- `API_HOST`: API server host (default: `127.0.0.1`)
-- `API_PORT`: API server port (default: `8080`)
-- `REDIRECT_HOST`: Redirect server host (default: `127.0.0.1`)
-- `REDIRECT_PORT`: Redirect server port (default: `3000`)
-- `AUTH_MODE`: Authentication mode (`none`, `oauth`, or `cloudflare`, default: `none`)
-- `DISABLE_AUTH`: Legacy override alias for `AUTH_MODE=none`
-
-**OAuth Configuration** (when `AUTH_MODE=oauth`):
-- `OAUTH_ISSUER_URL`: OpenID Connect issuer URL
-- `OAUTH_AUDIENCE`: Expected audience claim for incoming tokens
-- `OAUTH_JWKS_URL`: Optional JWKS endpoint override (defaults to issuer discovery document)
-- `OAUTH_JWKS_CACHE_SECS`: JWKS cache TTL in seconds (default: `300`)
-
-**Cloudflare Zero Trust Configuration** (when `AUTH_MODE=cloudflare`):
-- `CLOUDFLARE_TEAM_DOMAIN`: Your Cloudflare team domain (e.g., `https://your-team.cloudflareaccess.com`)
-- `CLOUDFLARE_AUDIENCE`: Application Audience (AUD) tag from your Access Application
-- `CLOUDFLARE_CERTS_CACHE_SECS`: Certificate cache TTL in seconds (default: `86400`)
-
-## Running
-
-```bash
-cargo run --release
-```
-
-Or run the binary directly:
-
-```bash
 ./target/release/lynx
 ```
 
-## API Endpoints
+## Sample Deployments
 
-### API Server (Port 8080)
+### Development (SQLite, No Auth)
 
-All endpoints require a valid OAuth 2.0 Bearer token in the `Authorization` header (unless authentication is disabled via `AUTH_MODE=none`).
-
-#### Health Check
+Simplest setup for local development:
 
 ```bash
-GET /health
-
-Response: 200 OK
-{
-  "message": "OK"
-}
+docker run -d \
+  -p 8080:8080 \
+  -p 3000:3000 \
+  -e DATABASE_BACKEND=sqlite \
+  -e DATABASE_URL=sqlite:///tmp/lynx.db \
+  -e AUTH_MODE=none \
+  ghcr.io/btreemap/lynx:stable
 ```
 
-#### Create Shortened URL
+Or with environment file:
 
 ```bash
-POST /urls
-Content-Type: application/json
-Authorization: Bearer <access-token>
-
-{
-  "url": "https://example.com/very/long/url",
-  "custom_code": "mycode"  // Optional
-}
-
-Response: 201 Created
-{
-  "id": 1,
-  "short_code": "mycode",
-  "original_url": "https://example.com/very/long/url",
-  "created_at": 1704067200,
-  "created_by": null,
-  "clicks": 0,
-  "is_active": true
-}
-```
-
-#### Get URL Details
-
-```bash
-GET /urls/:code
-Authorization: Bearer <access-token>
-
-Response: 200 OK
-{
-  "id": 1,
-  "short_code": "mycode",
-  "original_url": "https://example.com/very/long/url",
-  "created_at": 1704067200,
-  "created_by": null,
-  "clicks": 42,
-  "is_active": true
-}
-```
-
-#### Deactivate URL
-
-```bash
-PUT /urls/:code/deactivate
-Content-Type: application/json
-Authorization: Bearer <access-token>
-
-{
-  "reason": "Policy violation"  // Optional
-}
-
-Response: 200 OK
-{
-  "message": "URL deactivated successfully"
-}
-```
-
-#### Reactivate URL
-
-```bash
-PUT /urls/:code/reactivate
-Authorization: Bearer <access-token>
-
-Response: 200 OK
-{
-  "message": "URL reactivated successfully"
-}
-```
-
-#### List URLs
-
-```bash
-GET /urls?limit=50&offset=0
-Authorization: Bearer <access-token>
-
-Response: 200 OK
-[
-  {
-    "id": 1,
-    "short_code": "abc123",
-    "original_url": "https://example.com",
-    "created_at": 1704067200,
-    "created_by": null,
-    "clicks": 10,
-    "is_active": true
-  },
-  ...
-]
-```
-
-### Redirect Server (Port 3000)
-
-No authentication required.
-
-#### Health Check
-
-```bash
-GET /
-
-Response: 200 OK
-{
-  "status": "OK"
-}
-```
-
-#### Redirect to Original URL
-
-```bash
-GET /:code
-
-Response: 301 Permanent Redirect
-Location: https://example.com/original/url
-X-Lynx-Cache-Hit: true
-X-Lynx-Timing-Total-Ms: 1
-X-Lynx-Timing-Cache-Ms: 0
-X-Lynx-Timing-Db-Ms: 0
-```
-
-The redirect endpoint includes tracing headers to help monitor performance:
-- `X-Lynx-Cache-Hit`: Whether the URL was served from cache (`true`) or database (`false`)
-- `X-Lynx-Timing-Total-Ms`: Total request processing time in milliseconds
-- `X-Lynx-Timing-Cache-Ms`: Time spent in cache lookup in milliseconds (measured for both hits and misses to detect contention)
-- `X-Lynx-Timing-Db-Ms`: Time spent in database lookup in milliseconds (0 if cache hit)
-
-## Example Usage
-
-### Using SQLite (Development)
-
-```bash
-# .env file
+# .env
 DATABASE_BACKEND=sqlite
 DATABASE_URL=sqlite://./lynx.db
+AUTH_MODE=none
 API_HOST=127.0.0.1
 API_PORT=8080
 REDIRECT_HOST=127.0.0.1
 REDIRECT_PORT=3000
+```
+
+```bash
+./lynx
+```
+
+### Production with PostgreSQL and OAuth 2.0
+
+Enterprise deployment with OAuth authentication:
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -p 3000:3000 \
+  -e DATABASE_BACKEND=postgres \
+  -e DATABASE_URL=postgresql://user:password@postgres:5432/lynx \
+  -e AUTH_MODE=oauth \
+  -e OAUTH_ISSUER_URL=https://auth.example.com/realms/lynx \
+  -e OAUTH_AUDIENCE=lynx-api \
+  -e API_HOST=0.0.0.0 \
+  -e REDIRECT_HOST=0.0.0.0 \
+  ghcr.io/btreemap/lynx:stable
+```
+
+See [OAuth Setup](#authentication) for detailed configuration.
+
+### Production with Cloudflare Zero Trust
+
+Use Cloudflare Access for authentication:
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -p 3000:3000 \
+  -e DATABASE_BACKEND=postgres \
+  -e DATABASE_URL=postgresql://user:password@postgres:5432/lynx \
+  -e AUTH_MODE=cloudflare \
+  -e CLOUDFLARE_TEAM_DOMAIN=https://your-team.cloudflareaccess.com \
+  -e CLOUDFLARE_AUDIENCE=your-aud-tag \
+  -e API_HOST=0.0.0.0 \
+  -e REDIRECT_HOST=0.0.0.0 \
+  ghcr.io/btreemap/lynx:stable
+```
+
+See [Cloudflare Setup Guide](docs/CLOUDFLARE_SETUP.md) for complete instructions.
+
+### Docker Compose with PostgreSQL
+
+Complete stack with PostgreSQL:
+
+```yaml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lynx
+      POSTGRES_PASSWORD: secure_password
+      POSTGRES_DB: lynx
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lynx"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  lynx:
+    image: ghcr.io/btreemap/lynx:stable
+    ports:
+      - "8080:8080"
+      - "3000:3000"
+    environment:
+      DATABASE_BACKEND: postgres
+      DATABASE_URL: postgresql://lynx:secure_password@postgres:5432/lynx
+      AUTH_MODE: oauth
+      OAUTH_ISSUER_URL: https://auth.example.com
+      OAUTH_AUDIENCE: lynx-api
+      API_HOST: 0.0.0.0
+      REDIRECT_HOST: 0.0.0.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+```
+
+## Authentication
+
+Lynx supports three authentication modes configured via the `AUTH_MODE` environment variable.
+
+### No Authentication (Development Only)
+
+```bash
 AUTH_MODE=none
 ```
 
-### Using PostgreSQL with Cloudflare Zero Trust (Production)
+All API endpoints are accessible without authentication. All users are automatically granted admin privileges. **Not recommended for production.**
+
+### OAuth 2.0
+
+Validates JWT Bearer tokens from any OpenID Connect provider (Keycloak, Auth0, Okta, etc.):
 
 ```bash
-# .env file
-DATABASE_BACKEND=postgres
-DATABASE_URL=postgresql://lynx_user:secure_password@localhost/lynx
-API_HOST=0.0.0.0
-API_PORT=8080
-REDIRECT_HOST=0.0.0.0
-REDIRECT_PORT=3000
+AUTH_MODE=oauth
+OAUTH_ISSUER_URL=https://auth.example.com/realms/lynx
+OAUTH_AUDIENCE=lynx-api
+# Optional: OAUTH_JWKS_URL (if not using OIDC discovery)
+# Optional: OAUTH_JWKS_CACHE_SECS=300
+```
+
+API clients must include a valid Bearer token:
+
+```bash
+curl -H "Authorization: Bearer <access-token>" \
+  http://localhost:8080/api/urls
+```
+
+### Cloudflare Zero Trust
+
+Validates Cloudflare Access JWT tokens when deployed behind Cloudflare Access:
+
+```bash
 AUTH_MODE=cloudflare
 CLOUDFLARE_TEAM_DOMAIN=https://your-team.cloudflareaccess.com
-CLOUDFLARE_AUDIENCE=abc123def456...your-aud-tag
+CLOUDFLARE_AUDIENCE=your-aud-tag
+# Optional: CLOUDFLARE_CERTS_CACHE_SECS=86400
 ```
 
-See [Cloudflare Zero Trust Setup Guide](docs/CLOUDFLARE_SETUP.md) for detailed configuration instructions.
+See the [Cloudflare Setup Guide](docs/CLOUDFLARE_SETUP.md) for complete configuration including:
+- Creating a Cloudflare Access application
+- Obtaining your team domain and audience tag
+- Configuring identity providers
+- Setting up admin users
 
-### Using PostgreSQL with OAuth (Production)
+## Configuration
+
+All configuration is done via environment variables. See `.env.example` for a complete reference.
+
+### Core Settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_BACKEND` | Storage backend: `sqlite` or `postgres` | `sqlite` |
+| `DATABASE_URL` | Database connection string | `sqlite://./lynx.db` |
+| `DATABASE_MAX_CONNECTIONS` | Connection pool size | `30` |
+| `API_HOST` | API server bind address | `127.0.0.1` |
+| `API_PORT` | API server port | `8080` |
+| `REDIRECT_HOST` | Redirect server bind address | `127.0.0.1` |
+| `REDIRECT_PORT` | Redirect server port | `3000` |
+| `AUTH_MODE` | Authentication mode: `none`, `oauth`, or `cloudflare` | `none` |
+
+### Performance Tuning
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CACHE_MAX_ENTRIES` | Maximum entries in read cache | `500000` (~100MB) |
+
+### Frontend
+
+| Variable | Description |
+|----------|-------------|
+| `FRONTEND_STATIC_DIR` | Optional: Serve frontend from custom directory instead of embedded version |
+
+For advanced configuration including analytics, see the [full documentation](docs/).
+
+## Web Frontend
+
+The React-based web frontend is bundled into the binary and served at the root path (`/`).
+
+**Features:**
+- Create short URLs with optional custom codes
+- View statistics (clicks, status, creation date)
+- User-specific URL filtering
+- Admin panel for managing all links
+- Deactivate/reactivate URLs
+
+Access at `http://localhost:8080/` (or your configured API server address).
+
+For custom frontend deployment or development, see the [Frontend README](frontend/README.md).
+
+## API Reference
+
+The API server exposes RESTful endpoints at `/api/*`. Authentication is required unless `AUTH_MODE=none`.
+
+### Quick Examples
 
 ```bash
-# .env file
-DATABASE_BACKEND=postgres
-DATABASE_URL=postgresql://lynx_user:secure_password@localhost/lynx
-API_HOST=0.0.0.0
-API_PORT=8080
-REDIRECT_HOST=0.0.0.0
-REDIRECT_PORT=3000
-AUTH_MODE=oauth
-OAUTH_ISSUER_URL=https://auth.yourdomain.com/realms/lynx
-OAUTH_AUDIENCE=lynx-api
-# Optional if discovery document exposes JWKS endpoint
-# OAUTH_JWKS_URL=https://auth.yourdomain.com/realms/lynx/protocol/openid-connect/certs
+# Health check
+GET /api/health
+
+# Create short URL
+POST /api/urls
+{
+  "url": "https://example.com/very/long/url",
+  "custom_code": "mycode"  // optional
+}
+
+# Get URL details
+GET /api/urls/:code
+
+# List URLs (paginated)
+GET /api/urls?limit=50&offset=0
+
+# Deactivate URL
+PUT /api/urls/:code/deactivate
+
+# Reactivate URL
+PUT /api/urls/:code/reactivate
 ```
 
-### Example API Calls
+### Redirect Server
+
+The redirect server handles public-facing redirects:
 
 ```bash
-# Create a shortened URL
-curl -X POST http://localhost:8080/urls \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <access-token>" \
-  -d '{
-    "url": "https://github.com/BTreeMap/Lynx",
-    "custom_code": "lynx"
-  }'
+# Redirect to original URL
+GET /:code
+→ 301 Redirect to original URL
 
-# Access the shortened URL (will redirect)
-curl -L http://localhost:3000/lynx
-
-# Get URL statistics
-curl http://localhost:8080/urls/lynx \
-  -H "Authorization: Bearer <access-token>"
-
-# List all URLs
-curl http://localhost:8080/urls?limit=10 \
-  -H "Authorization: Bearer <access-token>"
-
-# Deactivate a URL
-curl -X PUT http://localhost:8080/urls/lynx/deactivate \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <access-token>" \
-  -d '{}'
-
-# Reactivate a URL
-curl -X PUT http://localhost:8080/urls/lynx/reactivate \
-  -H "Authorization: Bearer <access-token>"
+# Returns 410 Gone for deactivated URLs
+# Returns 404 Not Found for non-existent codes
 ```
 
-### Running with Authentication Disabled
+The redirect endpoint includes performance tracing headers:
+- `X-Lynx-Cache-Hit`: Whether served from cache (`true`/`false`)
+- `X-Lynx-Timing-Total-Ms`: Total request time in milliseconds
+- `X-Lynx-Timing-Cache-Ms`: Cache lookup time
+- `X-Lynx-Timing-Db-Ms`: Database lookup time (0 if cache hit)
 
-For secure environments where the control plane is already protected:
-
-```bash
-# .env file
-DATABASE_BACKEND=sqlite
-DATABASE_URL=sqlite://./lynx.db
-API_HOST=127.0.0.1
-API_PORT=8080
-REDIRECT_HOST=127.0.0.1
-REDIRECT_PORT=3000
-AUTH_MODE=none
-```
-
-With `AUTH_MODE=none` (or `DISABLE_AUTH=true` for backward compatibility), no authentication is required for management endpoints. All users are automatically granted admin privileges and URLs are associated with a legacy user account.
+For complete API documentation, see the API section in the [old README](README.old.md) or explore the OpenAPI schema (if available).
 
 ## Admin Management
 
-When using `AUTH_MODE=oauth` or `AUTH_MODE=cloudflare`, you can manually promote users to admin using the CLI:
+Promote users to admin role using the CLI:
 
 ```bash
-# Promote a user to admin
+# Promote user to admin
 ./lynx admin promote <user-id> <auth-method>
 
 # Example for Cloudflare
 ./lynx admin promote "google-oauth2|123456" cloudflare
 
-# List all manually promoted admins
+# List admins
 ./lynx admin list
 
-# Demote a user from admin
+# Demote admin
 ./lynx admin demote <user-id> <auth-method>
 ```
 
-**Note:** Admin status from OAuth/Cloudflare JWT claims takes precedence. Manual promotion only applies when the JWT doesn't grant admin status.
-
-For detailed Cloudflare Zero Trust setup, see [Cloudflare Setup Guide](docs/CLOUDFLARE_SETUP.md).
+Admin status from OAuth/Cloudflare JWT claims takes precedence over manual promotion.
 
 ## Deployment with Reverse Proxy
 
-You can use a reverse proxy (like Nginx or Caddy) to expose the two servers on different domains:
-
-### Example Nginx Configuration
+Example Nginx configuration:
 
 ```nginx
-# API server (internal only, or with additional authentication)
+# API server (internal or with additional auth)
 server {
     listen 443 ssl;
-    server_name api.yourdomain.com;
+    server_name api.example.com;
     
     location / {
         proxy_pass http://localhost:8080;
@@ -482,7 +452,7 @@ server {
 # Redirect server (public)
 server {
     listen 443 ssl;
-    server_name short.yourdomain.com;
+    server_name short.example.com;
     
     location / {
         proxy_pass http://localhost:3000;
@@ -492,17 +462,9 @@ server {
 }
 ```
 
-## Database Migrations
-
-The application automatically creates the necessary database tables on startup. No manual migration steps are required.
+For Caddy, Apache, or advanced configurations, see the [deployment documentation](docs/).
 
 ## Development
-
-### Building for Development
-
-```bash
-cargo build
-```
 
 ### Running Tests
 
@@ -510,17 +472,14 @@ cargo build
 # Unit and integration tests
 cargo test
 
-# Functional integration tests (requires running service)
+# Bash integration tests (requires running service)
 bash tests/integration_test.sh http://localhost:8080 http://localhost:3000
 
 # Concurrent load tests
 bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 100
-
-# Performance benchmarks (requires wrk)
-bash tests/benchmark.sh http://localhost:8080 http://localhost:3000 ./results 30s
 ```
 
-See [tests/README.md](tests/README.md) for comprehensive testing documentation and [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for performance benchmark details.
+See [tests/README.md](tests/README.md) for comprehensive testing documentation.
 
 ### Running with Logging
 
@@ -528,37 +487,32 @@ See [tests/README.md](tests/README.md) for comprehensive testing documentation a
 RUST_LOG=debug cargo run
 ```
 
-## Security Considerations
-
-1. **OAuth Scopes**: Delegate least-privilege scopes to Lynx API clients and rotate credentials regularly
-2. **HTTPS**: Use HTTPS in production (configure via reverse proxy)
-3. **Network Isolation**: Consider running the API server on a private network
-4. **Rate Limiting**: Implement rate limiting at the reverse proxy level
-5. **Database Credentials**: Use strong database passwords and restrict network access
-
 ## Documentation
 
 ### Core Documentation
-
-- [Performance Optimizations](docs/PERFORMANCE_OPTIMIZATIONS.md) - Detailed explanation of caching strategies and actor pattern
-- [Performance Benchmarks](docs/BENCHMARKS.md) - Comprehensive benchmarking guide and methodology
-- [Benchmark Results](docs/BENCHMARK_RESULTS.md) - How to interpret and analyze benchmark output
+- [Performance Optimizations](docs/PERFORMANCE_OPTIMIZATIONS.md) - Caching strategies and actor pattern
+- [Performance Benchmarks](docs/BENCHMARKS.md) - Benchmarking guide and methodology
+- [Analytics Guide](docs/ANALYTICS.md) - GeoIP-based visitor analytics
+- [Delete Protection](docs/DELETE_PROTECTION.md) - Database-level delete prevention
+- [Cloudflare Setup Guide](docs/CLOUDFLARE_SETUP.md) - Cloudflare Zero Trust configuration
 
 ### Testing Documentation
+- [Tests Overview](tests/README.md) - Integration and benchmark test documentation
+- [Frontend README](frontend/README.md) - Frontend development and deployment
 
-- [Tests Overview](tests/README.md) - Integration, concurrent, and benchmark test documentation
-- [Frontend README](frontend/README.md) - Frontend development and deployment guide
+## Security Considerations
 
-### GitHub Actions Workflows
-
-- **Build and Publish** - Builds Docker images for amd64 and arm64, publishes to GHCR
-- **Integration Tests** - Runs functional tests on SQLite and PostgreSQL backends
-- **Performance Benchmarks** - Measures throughput and latency under various load conditions
+1. **Authentication**: Use OAuth or Cloudflare Zero Trust in production; never expose `AUTH_MODE=none` publicly
+2. **HTTPS**: Always use HTTPS in production (configure via reverse proxy)
+3. **Network Isolation**: Run the API server on a private network when possible
+4. **Rate Limiting**: Implement rate limiting at the reverse proxy level
+5. **Database Credentials**: Use strong passwords and restrict network access
+6. **Token Rotation**: Rotate OAuth credentials and secrets regularly
 
 ## License
 
-This project is open source and available under the MIT License.
+MIT License - see LICENSE file for details.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please submit a Pull Request.

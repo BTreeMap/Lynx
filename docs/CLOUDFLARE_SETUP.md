@@ -57,7 +57,7 @@ CLOUDFLARE_CERTS_CACHE_SECS=86400  # Default: 24 hours
 
 ### 4. Restart Lynx
 
-You should see: `☁️  Cloudflare Zero Trust authentication enabled`
+You should see: `Cloudflare Zero Trust authentication enabled`
 
 ## Admin Management
 

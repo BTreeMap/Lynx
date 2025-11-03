@@ -200,9 +200,10 @@ jobs:
           AMD64_TAG="${DOCKER_IMAGE_NAME}:${TAG_NAME}.amd64"
           ARM64_TAG="${DOCKER_IMAGE_NAME}:${TAG_NAME}.arm64"
 
-          # Create manifest for the release tag
+          # Create manifest for the release tag and stable tag
           docker buildx imagetools create \
             --tag "${DOCKER_IMAGE_NAME}:${TAG_NAME}" \
+            --tag "${DOCKER_IMAGE_NAME}:stable" \
             "${AMD64_TAG}" "${ARM64_TAG}"
         env:
           DOCKER_IMAGE_NAME: ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}
