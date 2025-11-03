@@ -318,6 +318,8 @@ jobs:
     name: Rust Integration Tests (SQLite)
     runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -359,6 +361,8 @@ jobs:
     name: Rust Integration Tests (PostgreSQL)
     runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
 
     services:
       postgres:
