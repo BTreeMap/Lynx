@@ -210,7 +210,7 @@ This reduces database write load and improves performance.
 
 4. **Review logs** for GeoIP initialization messages:
    ```
-   📊 Analytics enabled
+   Analytics enabled
       - GeoIP database loaded from: /path/to/GeoLite2-City.mmdb
    ```
 
