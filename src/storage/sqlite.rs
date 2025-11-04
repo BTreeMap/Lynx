@@ -715,8 +715,8 @@ impl Storage for SqliteStorage {
                 "CASE WHEN city = '<dropped>' THEN city ELSE COALESCE(city, 'Unknown') || ', ' || COALESCE(region, 'Unknown') || ', ' || COALESCE(country_code, 'Unknown') END"
             }
             "asn" => "CAST(asn AS TEXT)",
-            "hour" => "time_bucket",
-            "day" => "(time_bucket / 86400) * 86400",
+            "hour" => "CAST(time_bucket AS TEXT)",
+            "day" => "CAST((time_bucket / 86400) * 86400 AS TEXT)",
             _ => "country_code",
         };
 
