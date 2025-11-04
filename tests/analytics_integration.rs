@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::sync::OnceCell;
 use tokio::time::{sleep, Duration};
 
-// Global OnceCell to ensure databases are downloaded only once across all tests
+// Global OnceCell to prevent race conditions when multiple tests download databases concurrently
 static DB_PATHS: OnceCell<Option<(PathBuf, PathBuf)>> = OnceCell::const_new();
 
 /// Helper to download GeoIP database
