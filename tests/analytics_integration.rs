@@ -138,7 +138,7 @@ async fn test_storage_integration() {
         "8.8.8.8",              // Google US, AS15169
         "9.9.9.9",              // Quad9 US, AS19281
         "208.67.222.222",       // OpenDNS US, AS36692
-        "2001:4860:4860::8888"  // Google IPv6 US, AS15169
+        "2001:4860:4860::8888", // Google IPv6 US, AS15169
     ];
     for ip_str in ips {
         let ip: IpAddr = ip_str.parse().unwrap();
@@ -302,9 +302,9 @@ async fn test_aggregation_dimensions() {
     // Record from different IPs with known counts
     // Use IPs with different ASNs and/or locations to avoid aggregation into same key
     let tests = vec![
-        ("8.8.8.8", 5),         // Google US, AS15169
-        ("9.9.9.9", 3),         // Quad9 US, AS19281 (different ASN)
-        ("208.67.222.222", 2)   // OpenDNS US, AS36692 (different ASN)
+        ("8.8.8.8", 5),        // Google US, AS15169
+        ("9.9.9.9", 3),        // Quad9 US, AS19281 (different ASN)
+        ("208.67.222.222", 2), // OpenDNS US, AS36692 (different ASN)
     ];
     for (ip_str, count) in tests {
         for _ in 0..count {

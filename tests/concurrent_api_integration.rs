@@ -11,6 +11,7 @@ use lynx::api;
 use lynx::auth::AuthService;
 use lynx::config::{AuthConfig, AuthMode, Config};
 use lynx::storage::{SqliteStorage, Storage};
+use rand::Rng;
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -95,7 +96,7 @@ async fn test_concurrent_short_code_creation() {
         let handle = tokio::spawn(async move {
             let request = Request::builder()
                 .method("POST")
-                .uri("/api/shorten")
+                .uri("/api/urls")
                 .header("content-type", "application/json")
                 .body(Body::from(format!(
                     r#"{{"url": "https://example.com", "custom_code": "concurrent_test"}}"#
@@ -271,16 +272,20 @@ async fn test_concurrent_deactivate_and_lookup() {
 
     // Spawn a deactivation task
     let deactivate_handle = tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
         storage_clone.deactivate("race_test").await
     });
 
     // Spawn multiple lookup tasks
     let mut lookup_handles = vec![];
-    for _ in 0..20 {
+    let mut rng = rand::rng();
+    for _ in 0..1000 {
         let storage_clone = storage.clone();
-        let handle =
-            tokio::spawn(async move { storage_clone.get_authoritative("race_test").await });
+        let sleep_duration = tokio::time::Duration::from_micros(rng.random_range(0..250));
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(sleep_duration).await;
+            storage_clone.get_authoritative("race_test").await
+        });
         lookup_handles.push(handle);
     }
 
@@ -288,15 +293,21 @@ async fn test_concurrent_deactivate_and_lookup() {
     deactivate_handle.await.unwrap().unwrap();
 
     // Check lookups - some may see active, some inactive, but all should succeed
+    let mut found_active = false;
     let mut found_inactive = false;
 
     for handle in lookup_handles {
         if let Ok(Ok(Some(url))) = handle.await {
-            if !url.is_active {
+            if url.is_active {
+                found_active = true;
+            } else {
                 found_inactive = true;
             }
         }
     }
+
+    // Should have found at least the active state before deactivation completed
+    assert!(found_active, "Should have found active state");
 
     // Should have found at least the inactive state after deactivation completed
     assert!(found_inactive, "Should have found inactive state");
