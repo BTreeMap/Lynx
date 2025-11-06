@@ -7,16 +7,63 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use lynx::redirect;
+use lynx::redirect::{self, middleware::RequestStart};
 use lynx::storage::{SqliteStorage, Storage};
+use std::net::SocketAddr;
 use std::sync::Arc;
-use tower::ServiceExt;
+use std::time::Instant;
+use tower::{Layer, ServiceExt};
 
 /// Helper to create test storage
 async fn create_test_storage() -> Arc<dyn Storage> {
     let storage = SqliteStorage::new("sqlite::memory:", 5).await.unwrap();
     storage.init().await.unwrap();
     Arc::new(storage)
+}
+
+/// Helper layer to inject ConnectInfo for tests
+#[derive(Clone)]
+struct TestConnectInfoLayer;
+
+impl<S> Layer<S> for TestConnectInfoLayer {
+    type Service = TestConnectInfoMiddleware<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        TestConnectInfoMiddleware { inner }
+    }
+}
+
+#[derive(Clone)]
+struct TestConnectInfoMiddleware<S> {
+    inner: S,
+}
+
+impl<S, B> tower::Service<Request<B>> for TestConnectInfoMiddleware<S>
+where
+    S: tower::Service<Request<B>> + Clone,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = S::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: Request<B>) -> Self::Future {
+        // Insert test ConnectInfo extension
+        let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+        req.extensions_mut()
+            .insert(axum::extract::connect_info::ConnectInfo(addr));
+
+        // Insert RequestStart extension
+        req.extensions_mut().insert(RequestStart(Instant::now()));
+
+        self.inner.call(req)
+    }
 }
 
 #[tokio::test]
@@ -30,7 +77,8 @@ async fn test_redirect_active_url() {
         .await
         .unwrap();
 
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false);
+    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
+        .layer(TestConnectInfoLayer);
 
     let request = Request::builder()
         .uri("/redirect_test")
@@ -39,11 +87,11 @@ async fn test_redirect_active_url() {
 
     let response = app.oneshot(request).await.unwrap();
 
-    // Should redirect (307 or 302)
-    assert!(
-        response.status() == StatusCode::TEMPORARY_REDIRECT
-            || response.status() == StatusCode::FOUND,
-        "Should return redirect status, got: {}",
+    // Should redirect (308 permanent redirect)
+    assert_eq!(
+        response.status(),
+        StatusCode::PERMANENT_REDIRECT,
+        "Should return permanent redirect status, got: {}",
         response.status()
     );
 
@@ -70,7 +118,8 @@ async fn test_redirect_inactive_url() {
 
     storage.deactivate("inactive_test").await.unwrap();
 
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false);
+    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
+        .layer(TestConnectInfoLayer);
 
     let request = Request::builder()
         .uri("/inactive_test")
@@ -79,11 +128,11 @@ async fn test_redirect_inactive_url() {
 
     let response = app.oneshot(request).await.unwrap();
 
-    // Should return 404 for inactive URL
+    // Should return 410 GONE for inactive URL
     assert_eq!(
         response.status(),
-        StatusCode::NOT_FOUND,
-        "Inactive URL should return 404"
+        StatusCode::GONE,
+        "Inactive URL should return 410 GONE"
     );
 }
 
@@ -91,7 +140,8 @@ async fn test_redirect_inactive_url() {
 async fn test_redirect_nonexistent_url() {
     // Test that nonexistent short codes return 404
     let storage = create_test_storage().await;
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false);
+    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
+        .layer(TestConnectInfoLayer);
 
     let request = Request::builder()
         .uri("/nonexistent")
@@ -118,7 +168,8 @@ async fn test_concurrent_redirects() {
         .await
         .unwrap();
 
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false);
+    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
+        .layer(TestConnectInfoLayer);
 
     // Spawn many concurrent redirect requests
     let mut handles = vec![];
@@ -142,9 +193,7 @@ async fn test_concurrent_redirects() {
     for handle in handles {
         match handle.await {
             Ok(Ok(response)) => {
-                if response.status() == StatusCode::TEMPORARY_REDIRECT
-                    || response.status() == StatusCode::FOUND
-                {
+                if response.status() == StatusCode::PERMANENT_REDIRECT {
                     success_count += 1;
                 }
             }
@@ -175,7 +224,8 @@ async fn test_redirect_during_deactivation() {
         .await
         .unwrap();
 
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false);
+    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
+        .layer(TestConnectInfoLayer);
 
     // Spawn redirect tasks
     let mut redirect_handles = vec![];
@@ -198,13 +248,13 @@ async fn test_redirect_during_deactivation() {
 
     // Some redirects may succeed (before deactivation), some may fail (after)
     let mut redirect_success = 0;
-    let mut not_found = 0;
+    let mut gone_count = 0;
 
     for handle in redirect_handles {
         if let Ok(Ok(response)) = handle.await {
             match response.status() {
-                StatusCode::TEMPORARY_REDIRECT | StatusCode::FOUND => redirect_success += 1,
-                StatusCode::NOT_FOUND => not_found += 1,
+                StatusCode::PERMANENT_REDIRECT => redirect_success += 1,
+                StatusCode::GONE => gone_count += 1,
                 _ => {}
             }
         }
@@ -212,8 +262,8 @@ async fn test_redirect_during_deactivation() {
 
     // Should have some of each (race condition)
     assert!(
-        redirect_success + not_found == 20,
-        "All requests should complete with either redirect or 404"
+        redirect_success + gone_count == 20,
+        "All requests should complete with either redirect or 410 GONE"
     );
 
     // Final state should be inactive
@@ -242,7 +292,8 @@ async fn test_redirect_multiple_different_urls() {
             .unwrap();
     }
 
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false);
+    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
+        .layer(TestConnectInfoLayer);
 
     // Spawn concurrent redirects to different URLs
     let mut handles = vec![];
@@ -268,9 +319,7 @@ async fn test_redirect_multiple_different_urls() {
 
     for handle in handles {
         if let Ok(Ok(response)) = handle.await {
-            if response.status() == StatusCode::TEMPORARY_REDIRECT
-                || response.status() == StatusCode::FOUND
-            {
+            if response.status() == StatusCode::PERMANENT_REDIRECT {
                 success_count += 1;
             }
         }
