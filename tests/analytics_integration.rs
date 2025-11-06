@@ -9,7 +9,11 @@ use lynx::storage::{SqliteStorage, Storage};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::OnceCell;
 use tokio::time::{sleep, Duration};
+
+// Global OnceCell to prevent race conditions when multiple tests download databases concurrently
+static DB_PATHS: OnceCell<Option<(PathBuf, PathBuf)>> = OnceCell::const_new();
 
 /// Helper to download GeoIP database
 async fn download_db(url: &str, path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -26,15 +30,24 @@ async fn download_db(url: &str, path: &str) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
-/// Get GeoIP database paths, downloading if necessary
-async fn get_dbs() -> Option<(PathBuf, PathBuf)> {
+/// Initialize and download GeoIP databases once
+async fn init_dbs() -> Option<(PathBuf, PathBuf)> {
     let temp = std::env::temp_dir();
     let city = temp.join("GeoLite2-City.mmdb");
     let asn = temp.join("GeoLite2-ASN.mmdb");
 
-    // Return if already exist
+    // Check if databases already exist and are valid
     if city.exists() && asn.exists() {
-        return Some((city, asn));
+        // Quick validation: try to read as MaxMind DB
+        if let (Ok(_), Ok(_)) = (
+            maxminddb::Reader::open_readfile(&city),
+            maxminddb::Reader::open_readfile(&asn),
+        ) {
+            println!("Using existing GeoIP databases from cache");
+            return Some((city, asn));
+        } else {
+            println!("Cached databases are invalid, re-downloading...");
+        }
     }
 
     // Try to download
@@ -59,6 +72,14 @@ async fn get_dbs() -> Option<(PathBuf, PathBuf)> {
         println!("Could not download databases - tests will be skipped");
         None
     }
+}
+
+/// Get GeoIP database paths, downloading if necessary (thread-safe)
+async fn get_dbs() -> Option<(PathBuf, PathBuf)> {
+    DB_PATHS
+        .get_or_init(|| async { init_dbs().await })
+        .await
+        .clone()
 }
 
 #[tokio::test]
@@ -111,8 +132,14 @@ async fn test_storage_integration() {
     // Create aggregator
     let agg = Arc::new(AnalyticsAggregator::new());
 
-    // Record analytics for multiple IPs
-    let ips = vec!["8.8.8.8", "1.1.1.1", "8.8.4.4", "2001:4860:4860::8888"];
+    // Record analytics for multiple IPs - all with valid country codes to ensure proper aggregation
+    // Using distinct IPs from different ASNs and locations to avoid over-aggregation
+    let ips = vec![
+        "8.8.8.8",              // Google US, AS15169
+        "9.9.9.9",              // Quad9 US, AS19281
+        "208.67.222.222",       // OpenDNS US, AS36692
+        "2001:4860:4860::8888"  // Google IPv6 US, AS15169
+    ];
     for ip_str in ips {
         let ip: IpAddr = ip_str.parse().unwrap();
         let geo = geoip.lookup(ip);
@@ -273,7 +300,12 @@ async fn test_aggregation_dimensions() {
     let agg = Arc::new(AnalyticsAggregator::new());
 
     // Record from different IPs with known counts
-    let tests = vec![("8.8.8.8", 5), ("1.1.1.1", 3), ("8.8.4.4", 2)];
+    // Use IPs with different ASNs and/or locations to avoid aggregation into same key
+    let tests = vec![
+        ("8.8.8.8", 5),         // Google US, AS15169
+        ("9.9.9.9", 3),         // Quad9 US, AS19281 (different ASN)
+        ("208.67.222.222", 2)   // OpenDNS US, AS36692 (different ASN)
+    ];
     for (ip_str, count) in tests {
         for _ in 0..count {
             let ip: IpAddr = ip_str.parse().unwrap();
