@@ -1082,14 +1082,14 @@ mod tests {
         };
 
         storage
-            .create_with_code("test", "https://example.com", Some("user1"))
+            .create_with_code("test_agg_asn", "https://example.com", Some("user1"))
             .await
             .unwrap();
 
         let time_bucket = 1698768000;
         let records = vec![
             (
-                "test".to_string(),
+                "test_agg_asn".to_string(),
                 time_bucket,
                 Some("US".to_string()),
                 None,
@@ -1099,7 +1099,7 @@ mod tests {
                 8,
             ),
             (
-                "test".to_string(),
+                "test_agg_asn".to_string(),
                 time_bucket,
                 Some("US".to_string()),
                 None,
@@ -1109,7 +1109,7 @@ mod tests {
                 3,
             ),
             (
-                "test".to_string(),
+                "test_agg_asn".to_string(),
                 time_bucket,
                 Some("GB".to_string()),
                 None,
@@ -1124,7 +1124,7 @@ mod tests {
 
         // Aggregate by ASN
         let aggregates = storage
-            .get_analytics_aggregate("test", None, None, "asn", 10)
+            .get_analytics_aggregate("test_agg_asn", None, None, "asn", 10)
             .await
             .unwrap();
 
@@ -1146,14 +1146,14 @@ mod tests {
         };
 
         storage
-            .create_with_code("test", "https://example.com", Some("user1"))
+            .create_with_code("test_time_range", "https://example.com", Some("user1"))
             .await
             .unwrap();
 
         // Insert records with different time buckets
         let records = vec![
             (
-                "test".to_string(),
+                "test_time_range".to_string(),
                 1000,
                 Some("US".to_string()),
                 None,
@@ -1163,7 +1163,7 @@ mod tests {
                 5,
             ),
             (
-                "test".to_string(),
+                "test_time_range".to_string(),
                 2000,
                 Some("US".to_string()),
                 None,
@@ -1173,7 +1173,7 @@ mod tests {
                 3,
             ),
             (
-                "test".to_string(),
+                "test_time_range".to_string(),
                 3000,
                 Some("US".to_string()),
                 None,
@@ -1188,7 +1188,7 @@ mod tests {
 
         // Query with start and end time
         let analytics = storage
-            .get_analytics("test", Some(1500), Some(2500), 100)
+            .get_analytics("test_time_range", Some(1500), Some(2500), 100)
             .await
             .unwrap();
         let total: i64 = analytics.iter().map(|a| a.visit_count).sum();
@@ -1203,7 +1203,7 @@ mod tests {
         };
 
         storage
-            .create_with_code("test", "https://example.com", Some("user1"))
+            .create_with_code("test_upsert_incr", "https://example.com", Some("user1"))
             .await
             .unwrap();
 
@@ -1211,7 +1211,7 @@ mod tests {
 
         // Insert initial record - all fields need to match for the UNIQUE constraint to trigger
         let records = vec![(
-            "test".to_string(),
+            "test_upsert_incr".to_string(),
             time_bucket,
             Some("US".to_string()),
             Some("CA".to_string()),
@@ -1224,7 +1224,7 @@ mod tests {
 
         // Upsert same key with more visits - all fields must match
         let records = vec![(
-            "test".to_string(),
+            "test_upsert_incr".to_string(),
             time_bucket,
             Some("US".to_string()),
             Some("CA".to_string()),
@@ -1237,7 +1237,7 @@ mod tests {
 
         // Should have incremented, not replaced
         let analytics = storage
-            .get_analytics("test", None, None, 100)
+            .get_analytics("test_upsert_incr", None, None, 100)
             .await
             .unwrap();
 
