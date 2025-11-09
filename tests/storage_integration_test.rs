@@ -10,6 +10,12 @@
 
 use lynx::storage::{PostgresStorage, SqliteStorage, Storage};
 use std::sync::Arc;
+use tokio::sync::OnceCell;
+
+/// Mutex to serialize all Postgres tests since they share the same database instance.
+/// This prevents concurrent tests from conflicting with each other, especially when
+/// one test performs table-level operations like TRUNCATE that acquire exclusive locks.
+static POSTGRES_TABLE_LOCK: OnceCell<Arc<tokio::sync::Mutex<()>>> = OnceCell::const_new();
 
 /// Get the database backend to test from environment variable
 fn should_test_backend(backend: &str) -> bool {
@@ -553,6 +559,12 @@ async fn test_postgres_delete_protection() {
         return;
     }
 
+    // Acquire lock to serialize all Postgres tests (shared database)
+    let lock = POSTGRES_TABLE_LOCK
+        .get_or_init(|| async { Arc::new(tokio::sync::Mutex::new(())) })
+        .await;
+    let _guard = lock.lock().await;
+
     // Test that DELETE operations on urls table are blocked by trigger
     use lynx::storage::PostgresStorage;
 
@@ -612,6 +624,12 @@ async fn test_postgres_truncate_protection() {
     if !should_test_backend("postgres") {
         return;
     }
+
+    // Acquire lock to serialize table-level operations
+    let lock = POSTGRES_TABLE_LOCK
+        .get_or_init(|| async { Arc::new(tokio::sync::Mutex::new(())) })
+        .await;
+    let _guard = lock.lock().await;
 
     // Test that TRUNCATE operations on urls table are blocked by trigger
     use lynx::storage::PostgresStorage;
@@ -679,6 +697,12 @@ async fn test_postgres_concurrent_init() {
     if !should_test_backend("postgres") {
         return;
     }
+
+    // Acquire lock to serialize all Postgres tests (shared database)
+    let lock = POSTGRES_TABLE_LOCK
+        .get_or_init(|| async { Arc::new(tokio::sync::Mutex::new(())) })
+        .await;
+    let _guard = lock.lock().await;
 
     // Test that concurrent init() calls don't cause conflicts
     use lynx::storage::PostgresStorage;
