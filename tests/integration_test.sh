@@ -240,23 +240,30 @@ fi
 echo ""
 echo "Test 19: Test statistics accuracy"
 # Create a new URL with unique code (must be <= 20 chars)
-unique_code="st$RANDOM$RANDOM"
-response=$(curl -s -X POST "$API_URL/api/urls" \
+# Use timestamp-based code to ensure uniqueness and reasonable length
+unique_code="st$(date +%s%N | cut -c10-18)"
+create_response=$(curl -s -X POST "$API_URL/api/urls" \
     -H "Content-Type: application/json" \
     -d "{\"url\": \"https://example.com/stats\", \"custom_code\": \"$unique_code\"}")
+
+# Verify URL was created successfully
+if ! echo "$create_response" | grep -q "\"short_code\""; then
+    echo "Failed to create URL for stats test. Response: $create_response"
+    print_result 1 "Failed to create URL for stats test"
+fi
 
 # Make 10 redirects
 for i in {1..10}; do
     curl -s -o /dev/null -L "$REDIRECT_URL/$unique_code"
 done
-sleep 2  # Wait for flush
-
+sleep 5  # Wait for flush
 # Check stats
 response=$(curl -s "$API_URL/api/urls/$unique_code")
 clicks=$(echo "$response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
 if [ -n "$clicks" ] && [ "$clicks" -ge 10 ]; then
     print_result 0 "Statistics accurate (clicks: $clicks)"
 else
+    echo "Full response: $response"
     print_result 1 "Statistics inaccurate (expected >=10, got ${clicks:-0})"
 fi
 
