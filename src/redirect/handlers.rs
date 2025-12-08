@@ -90,10 +90,8 @@ pub async fn redirect_url(
                                 error = %e,
                                 "Failed to create Location header - URL contains invalid characters"
                             );
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "URL contains invalid characters for HTTP header",
-                            )
+                            // Use a generic error message to avoid information disclosure
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
                                 .into_response()
                         }
                     };
