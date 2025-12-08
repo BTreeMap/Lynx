@@ -1,7 +1,10 @@
 use axum::{
     extract::{ConnectInfo, Path, State},
-    http::{header::HeaderMap, StatusCode},
-    response::{IntoResponse, Redirect},
+    http::{
+        header::{HeaderMap, HeaderValue, LOCATION},
+        StatusCode,
+    },
+    response::IntoResponse,
     Extension, Json,
 };
 use serde::Serialize;
@@ -20,6 +23,9 @@ pub struct RedirectState {
     pub geoip_service: Option<Arc<GeoIpService>>,
     pub analytics_aggregator: Option<Arc<AnalyticsAggregator>>,
     pub enable_timing_headers: bool,
+    /// Configurable redirect status code (301/302/303/307/308).
+    /// Stored as StatusCode for zero-cost access during redirects.
+    pub redirect_status: StatusCode,
 }
 
 /// Redirect to original URL
@@ -72,12 +78,24 @@ pub async fn redirect_url(
                         }
                     }
 
+                    // Pre-calculate the Location header value.
+                    // This does the same work as Redirect::permanent (HeaderValue::try_from).
+                    // We handle the error gracefully instead of panicking.
+                    let location_val = match HeaderValue::try_from(&url.original_url) {
+                        Ok(val) => val,
+                        Err(_) => {
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid URL")
+                                .into_response()
+                        }
+                    };
+
                     let handler_time = handler_start.elapsed();
                     let total_time = request_start.elapsed();
 
                     // Create headers with tracing info (optional for maximum performance)
                     if state.enable_timing_headers {
                         let mut response_headers = HeaderMap::new();
+                        response_headers.insert(LOCATION, location_val);
                         response_headers.insert(
                             "x-lynx-cache-hit",
                             if cache_hit { "true" } else { "false" }.parse().unwrap(),
@@ -99,11 +117,12 @@ pub async fn redirect_url(
                             handler_time.as_millis().to_string().parse().unwrap(),
                         );
 
-                        // Redirect with headers
-                        (response_headers, Redirect::permanent(&url.original_url)).into_response()
+                        // Use the configured status code and the populated HeaderMap
+                        (state.redirect_status, response_headers).into_response()
                     } else {
-                        // Fast path: redirect without timing headers
-                        Redirect::permanent(&url.original_url).into_response()
+                        // Fast path: Construct response directly with an array of headers.
+                        // This avoids allocating a HeaderMap and is the fastest possible way to return a redirect.
+                        (state.redirect_status, [(LOCATION, location_val)]).into_response()
                     }
                 }
                 None => (StatusCode::NOT_FOUND, "URL not found").into_response(),

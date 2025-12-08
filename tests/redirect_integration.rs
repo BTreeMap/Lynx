@@ -14,6 +14,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use tower::{Layer, ServiceExt};
 
+/// Default redirect status code for tests (308 Permanent Redirect)
+const DEFAULT_REDIRECT_STATUS: StatusCode = StatusCode::PERMANENT_REDIRECT;
+
 /// Helper to create test storage
 async fn create_test_storage() -> Arc<dyn Storage> {
     let storage = SqliteStorage::new("sqlite::memory:", 5).await.unwrap();
@@ -77,8 +80,15 @@ async fn test_redirect_active_url() {
         .await
         .unwrap();
 
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
-        .layer(TestConnectInfoLayer);
+    let app = redirect::routes::create_redirect_router(
+        storage.clone(),
+        None,
+        None,
+        None,
+        false,
+        DEFAULT_REDIRECT_STATUS,
+    )
+    .layer(TestConnectInfoLayer);
 
     let request = Request::builder()
         .uri("/redirect_test")
@@ -118,8 +128,15 @@ async fn test_redirect_inactive_url() {
 
     storage.deactivate("inactive_test").await.unwrap();
 
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
-        .layer(TestConnectInfoLayer);
+    let app = redirect::routes::create_redirect_router(
+        storage.clone(),
+        None,
+        None,
+        None,
+        false,
+        DEFAULT_REDIRECT_STATUS,
+    )
+    .layer(TestConnectInfoLayer);
 
     let request = Request::builder()
         .uri("/inactive_test")
@@ -140,8 +157,15 @@ async fn test_redirect_inactive_url() {
 async fn test_redirect_nonexistent_url() {
     // Test that nonexistent short codes return 404
     let storage = create_test_storage().await;
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
-        .layer(TestConnectInfoLayer);
+    let app = redirect::routes::create_redirect_router(
+        storage.clone(),
+        None,
+        None,
+        None,
+        false,
+        DEFAULT_REDIRECT_STATUS,
+    )
+    .layer(TestConnectInfoLayer);
 
     let request = Request::builder()
         .uri("/nonexistent")
@@ -168,8 +192,15 @@ async fn test_concurrent_redirects() {
         .await
         .unwrap();
 
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
-        .layer(TestConnectInfoLayer);
+    let app = redirect::routes::create_redirect_router(
+        storage.clone(),
+        None,
+        None,
+        None,
+        false,
+        DEFAULT_REDIRECT_STATUS,
+    )
+    .layer(TestConnectInfoLayer);
 
     // Spawn many concurrent redirect requests
     let mut handles = vec![];
@@ -224,8 +255,15 @@ async fn test_redirect_during_deactivation() {
         .await
         .unwrap();
 
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
-        .layer(TestConnectInfoLayer);
+    let app = redirect::routes::create_redirect_router(
+        storage.clone(),
+        None,
+        None,
+        None,
+        false,
+        DEFAULT_REDIRECT_STATUS,
+    )
+    .layer(TestConnectInfoLayer);
 
     // Spawn redirect tasks
     let mut redirect_handles = vec![];
@@ -292,8 +330,15 @@ async fn test_redirect_multiple_different_urls() {
             .unwrap();
     }
 
-    let app = redirect::routes::create_redirect_router(storage.clone(), None, None, None, false)
-        .layer(TestConnectInfoLayer);
+    let app = redirect::routes::create_redirect_router(
+        storage.clone(),
+        None,
+        None,
+        None,
+        false,
+        DEFAULT_REDIRECT_STATUS,
+    )
+    .layer(TestConnectInfoLayer);
 
     // Spawn concurrent redirects to different URLs
     let mut handles = vec![];
@@ -326,4 +371,58 @@ async fn test_redirect_multiple_different_urls() {
     }
 
     assert_eq!(success_count, 50, "All 50 redirects should succeed");
+}
+
+#[tokio::test]
+async fn test_configurable_redirect_status_codes() {
+    // Test that different redirect status codes can be configured
+    let storage = create_test_storage().await;
+
+    // Create a test URL
+    storage
+        .create_with_code("status_test", "https://example.com", None)
+        .await
+        .unwrap();
+
+    // Test with different status codes
+    let test_cases = vec![
+        (StatusCode::MOVED_PERMANENTLY, "301"),      // 301
+        (StatusCode::FOUND, "302"),                  // 302
+        (StatusCode::SEE_OTHER, "303"),              // 303
+        (StatusCode::TEMPORARY_REDIRECT, "307"),     // 307
+        (StatusCode::PERMANENT_REDIRECT, "308"),     // 308
+    ];
+
+    for (status_code, description) in test_cases {
+        let app = redirect::routes::create_redirect_router(
+            storage.clone(),
+            None,
+            None,
+            None,
+            false,
+            status_code,
+        )
+        .layer(TestConnectInfoLayer);
+
+        let request = Request::builder()
+            .uri("/status_test")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(
+            response.status(),
+            status_code,
+            "Should return {} status code",
+            description
+        );
+
+        // Verify the Location header is present
+        let headers = response.headers();
+        assert!(
+            headers.contains_key("location"),
+            "Response should contain Location header"
+        );
+    }
 }
