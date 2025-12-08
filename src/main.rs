@@ -727,12 +727,17 @@ async fn run_server() -> Result<()> {
         .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
         .unwrap_or(false);
 
+    // Convert RedirectMode to StatusCode for runtime performance
+    let redirect_status: axum::http::StatusCode = config.redirect_status.into();
+    info!("🔀 Redirect status code: {}", redirect_status.as_u16());
+
     let redirect_router = lynx::redirect::create_redirect_router(
         Arc::clone(&storage),
         analytics_config,
         geoip_service,
         analytics_aggregator,
         enable_timing_headers,
+        redirect_status,
     );
 
     // Log frontend configuration

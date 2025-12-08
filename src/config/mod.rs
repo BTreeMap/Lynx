@@ -1,5 +1,72 @@
 use anyhow::Context;
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
+
+/// HTTP redirect status code configuration
+///
+/// This enum represents the valid redirect status codes (3xx) that can be used
+/// for URL redirection. It validates the configuration at startup to ensure
+/// only valid redirect codes are used.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(try_from = "u16")]
+pub enum RedirectMode {
+    /// HTTP 308: Permanent Redirect (Axum default).
+    /// Method and body are preserved (e.g., POST stays POST).
+    Permanent,
+
+    /// HTTP 307: Temporary Redirect.
+    /// Method and body are preserved.
+    Temporary,
+
+    /// HTTP 303: See Other.
+    /// Always converts to GET. Specific for "Post/Redirect/Get" pattern.
+    SeeOther,
+
+    /// HTTP 301: Moved Permanently (Legacy).
+    /// May change method from POST to GET.
+    MovedPermanently,
+
+    /// HTTP 302: Found (Legacy).
+    /// May change method from POST to GET.
+    Found,
+}
+
+impl TryFrom<u16> for RedirectMode {
+    type Error = String;
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        match value {
+            308 => Ok(RedirectMode::Permanent),
+            307 => Ok(RedirectMode::Temporary),
+            303 => Ok(RedirectMode::SeeOther),
+            301 => Ok(RedirectMode::MovedPermanently),
+            302 => Ok(RedirectMode::Found),
+            other => Err(format!(
+                "Invalid redirect code: {}. Allowed: 301, 302, 303, 307, 308",
+                other
+            )),
+        }
+    }
+}
+
+impl Default for RedirectMode {
+    fn default() -> Self {
+        RedirectMode::Permanent // Default to 308 as per Axum's Redirect::permanent
+    }
+}
+
+// Zero-cost conversion back to StatusCode for the response
+impl From<RedirectMode> for StatusCode {
+    fn from(mode: RedirectMode) -> Self {
+        match mode {
+            RedirectMode::Permanent => StatusCode::PERMANENT_REDIRECT,        // 308
+            RedirectMode::Temporary => StatusCode::TEMPORARY_REDIRECT,        // 307
+            RedirectMode::SeeOther => StatusCode::SEE_OTHER,                  // 303
+            RedirectMode::MovedPermanently => StatusCode::MOVED_PERMANENTLY,  // 301
+            RedirectMode::Found => StatusCode::FOUND,                         // 302
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -13,6 +80,8 @@ pub struct Config {
     pub pagination: PaginationConfig,
     #[serde(default)]
     pub analytics: AnalyticsConfig,
+    #[serde(default)]
+    pub redirect_status: RedirectMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -405,6 +474,13 @@ impl Config {
             AnalyticsConfig::default()
         };
 
+        // Redirect status code configuration
+        let redirect_status = std::env::var("REDIRECT_STATUS_CODE")
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .and_then(|code| RedirectMode::try_from(code).ok())
+            .unwrap_or_default();
+
         Ok(Config {
             database: DatabaseConfig {
                 backend,
@@ -436,6 +512,7 @@ impl Config {
             },
             pagination: PaginationConfig { cursor_hmac_secret },
             analytics,
+            redirect_status,
         })
     }
 }

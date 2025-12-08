@@ -67,6 +67,7 @@ fn create_test_config() -> Arc<Config> {
             num_trusted_proxies: None,
             flush_interval_secs: 30,
         },
+        redirect_status: RedirectMode::default(),
     })
 }
 
