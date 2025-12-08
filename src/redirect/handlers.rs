@@ -83,8 +83,17 @@ pub async fn redirect_url(
                     // We handle the error gracefully instead of panicking.
                     let location_val = match HeaderValue::try_from(&url.original_url) {
                         Ok(val) => val,
-                        Err(_) => {
-                            return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid URL")
+                        Err(e) => {
+                            tracing::error!(
+                                short_code = %code,
+                                url = %url.original_url,
+                                error = %e,
+                                "Failed to create Location header - URL contains invalid characters"
+                            );
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "URL contains invalid characters for HTTP header",
+                            )
                                 .into_response()
                         }
                     };
