@@ -67,3 +67,19 @@ export interface AnalyticsAggregateResponse {
   total: number;
   clicks: number;
 }
+
+export interface SearchParams {
+  q: string;
+  created_by?: string;
+  created_from?: number;
+  created_to?: number;
+  is_active?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface SearchResponse {
+  items: ShortenedUrl[];
+  next_cursor?: string | null;
+  has_more: boolean;
+}

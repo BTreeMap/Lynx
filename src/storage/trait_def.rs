@@ -1,6 +1,7 @@
 use crate::models::ShortenedUrl;
 use anyhow::Result;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -33,6 +34,36 @@ pub struct LookupResult {
     pub url: Option<Arc<ShortenedUrl>>,
     /// Metadata about the lookup operation
     pub metadata: LookupMetadata,
+}
+
+/// Parameters for search queries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchParams {
+    /// Search query string (matches against short_code and original_url)
+    pub q: String,
+    /// Filter by creator (use "__null__" for NULL created_by)
+    pub created_by: Option<String>,
+    /// Filter by created_at >= this value (inclusive)
+    pub created_from: Option<i64>,
+    /// Filter by created_at < this value (exclusive)
+    pub created_to: Option<i64>,
+    /// Filter by is_active status
+    pub is_active: Option<bool>,
+    /// Maximum number of results to return
+    pub limit: i64,
+    /// Cursor for pagination (created_at, id)
+    pub cursor: Option<(i64, i64)>,
+}
+
+/// Result of a search operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResult {
+    /// Matching URLs
+    pub items: Vec<Arc<ShortenedUrl>>,
+    /// Next cursor for pagination (if there are more results)
+    pub next_cursor: Option<(i64, i64)>,
+    /// Whether there are more results
+    pub has_more: bool,
 }
 
 #[async_trait]
@@ -178,4 +209,16 @@ pub trait Storage: Send + Sync {
         retention_days: i64,
         drop_dimensions: &[String],
     ) -> Result<(i64, i64)>; // (deleted_count, inserted_count)
+
+    /// Search for URLs matching a query string with optional filters
+    /// - Matches short_code (case-sensitive) or original_url (case-insensitive)
+    /// - Applies filters: created_by, created_from, created_to, is_active
+    /// - Uses cursor-based pagination ordered by created_at DESC, id DESC
+    /// - Non-admin users can only search their own URLs
+    async fn search(
+        &self,
+        params: &SearchParams,
+        is_admin: bool,
+        user_id: Option<&str>,
+    ) -> Result<SearchResult>;
 }

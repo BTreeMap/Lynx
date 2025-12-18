@@ -13,7 +13,7 @@ use crate::storage::Storage;
 use super::analytics::{get_analytics, get_analytics_aggregate, AnalyticsState};
 use super::handlers::{
     create_url, deactivate_url, get_auth_mode, get_url, get_user_info, health_check, list_urls,
-    reactivate_url, AppState,
+    reactivate_url, search_urls, AppState,
 };
 use super::static_files::serve_static;
 
@@ -39,6 +39,7 @@ pub fn create_api_router(
     let protected_routes = Router::new()
         .route("/urls", post(create_url))
         .route("/urls", get(list_urls))
+        .route("/urls/search", get(search_urls))
         .route("/urls/{code}", get(get_url))
         .route("/urls/{code}/deactivate", put(deactivate_url))
         .route("/urls/{code}/reactivate", put(reactivate_url))

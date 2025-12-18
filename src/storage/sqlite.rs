@@ -1,6 +1,8 @@
 use crate::analytics::{DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER};
 use crate::models::ShortenedUrl;
-use crate::storage::{LookupMetadata, LookupResult, Storage, StorageError, StorageResult};
+use crate::storage::{
+    LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageError, StorageResult,
+};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -36,6 +38,1167 @@ impl SqliteStorage {
         Ok(Self {
             pool: Arc::new(pool),
         })
+    }
+
+    // Helper methods for search queries
+    async fn search_with_created_by_cursor(
+        &self,
+        fts_query: &str,
+        created_by: &str,
+        created_from: Option<i64>,
+        created_to: Option<i64>,
+        is_active: Option<bool>,
+        cursor_created_at: i64,
+        cursor_id: i64,
+        fetch_limit: i64,
+    ) -> Result<Vec<ShortenedUrl>> {
+        match (created_from, created_to, is_active) {
+            (Some(from), Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at >= ? AND u.created_at < ?
+                      AND u.is_active = ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(from)
+                .bind(to)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at >= ? AND u.created_at < ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(from)
+                .bind(to)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at >= ?
+                      AND u.is_active = ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(from)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at >= ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(from)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at < ?
+                      AND u.is_active = ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(to)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at < ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(to)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.is_active = ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn search_without_created_by_cursor(
+        &self,
+        fts_query: &str,
+        created_from: Option<i64>,
+        created_to: Option<i64>,
+        is_active: Option<bool>,
+        cursor_created_at: i64,
+        cursor_id: i64,
+        fetch_limit: i64,
+    ) -> Result<Vec<ShortenedUrl>> {
+        match (created_from, created_to, is_active) {
+            (Some(from), Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at >= ? AND u.created_at < ?
+                      AND u.is_active = ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(to)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at >= ? AND u.created_at < ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(to)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at >= ?
+                      AND u.is_active = ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at >= ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at < ?
+                      AND u.is_active = ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(to)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at < ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(to)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.is_active = ?
+                      AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(cursor_created_at)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn search_null_created_by_no_cursor(
+        &self,
+        fts_query: &str,
+        created_from: Option<i64>,
+        created_to: Option<i64>,
+        is_active: Option<bool>,
+        fetch_limit: i64,
+    ) -> Result<Vec<ShortenedUrl>> {
+        match (created_from, created_to, is_active) {
+            (Some(from), Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by IS NULL
+                      AND u.created_at >= ? AND u.created_at < ?
+                      AND u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by IS NULL
+                      AND u.created_at >= ? AND u.created_at < ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by IS NULL
+                      AND u.created_at >= ?
+                      AND u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by IS NULL
+                      AND u.created_at >= ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by IS NULL
+                      AND u.created_at < ?
+                      AND u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by IS NULL
+                      AND u.created_at < ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by IS NULL
+                      AND u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by IS NULL
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn search_with_created_by_no_cursor(
+        &self,
+        fts_query: &str,
+        created_by: &str,
+        created_from: Option<i64>,
+        created_to: Option<i64>,
+        is_active: Option<bool>,
+        fetch_limit: i64,
+    ) -> Result<Vec<ShortenedUrl>> {
+        match (created_from, created_to, is_active) {
+            (Some(from), Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at >= ? AND u.created_at < ?
+                      AND u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(from)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at >= ? AND u.created_at < ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(from)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at >= ?
+                      AND u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(from)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at >= ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(from)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at < ?
+                      AND u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.created_at < ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                      AND u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_by = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(created_by)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn search_without_created_by_no_cursor(
+        &self,
+        fts_query: &str,
+        created_from: Option<i64>,
+        created_to: Option<i64>,
+        is_active: Option<bool>,
+        fetch_limit: i64,
+    ) -> Result<Vec<ShortenedUrl>> {
+        match (created_from, created_to, is_active) {
+            (Some(from), Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at >= ? AND u.created_at < ?
+                      AND u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at >= ? AND u.created_at < ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at >= ?
+                      AND u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at >= ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(from)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at < ?
+                      AND u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.created_at < ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    WHERE u.is_active = ?
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    WITH matched(id) AS (
+                        SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                        UNION
+                        SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                    )
+                    SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                    FROM urls u
+                    JOIN matched m ON m.id = u.id
+                    ORDER BY u.created_at DESC, u.id DESC
+                    LIMIT ?
+                    "#,
+                )
+                .bind(fts_query)
+                .bind(fts_query)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+        }
     }
 }
 
@@ -166,6 +1329,71 @@ impl Storage for SqliteStorage {
         )
         .execute(self.pool.as_ref())
         .await?;
+
+        // FTS5 trigram search tables for efficient substring matching
+        // Table for case-sensitive short_code search
+        sqlx::query(
+            r#"
+            CREATE VIRTUAL TABLE IF NOT EXISTS urls_fts_code USING fts5(
+                short_code,
+                tokenize = 'trigram case_sensitive 1',
+                content = 'urls',
+                content_rowid = 'id'
+            )
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Table for case-insensitive original_url search
+        sqlx::query(
+            r#"
+            CREATE VIRTUAL TABLE IF NOT EXISTS urls_fts_url USING fts5(
+                original_url,
+                tokenize = 'trigram',
+                content = 'urls',
+                content_rowid = 'id'
+            )
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Triggers to keep FTS tables in sync with urls table
+        // Insert trigger
+        sqlx::query(
+            r#"
+            CREATE TRIGGER IF NOT EXISTS urls_fts_insert AFTER INSERT ON urls BEGIN
+                INSERT INTO urls_fts_code(rowid, short_code) VALUES (new.id, new.short_code);
+                INSERT INTO urls_fts_url(rowid, original_url) VALUES (new.id, new.original_url);
+            END
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Update trigger
+        sqlx::query(
+            r#"
+            CREATE TRIGGER IF NOT EXISTS urls_fts_update AFTER UPDATE ON urls BEGIN
+                INSERT INTO urls_fts_code(urls_fts_code, rowid, short_code) VALUES('delete', old.id, old.short_code);
+                INSERT INTO urls_fts_url(urls_fts_url, rowid, original_url) VALUES('delete', old.id, old.original_url);
+                INSERT INTO urls_fts_code(rowid, short_code) VALUES (new.id, new.short_code);
+                INSERT INTO urls_fts_url(rowid, original_url) VALUES (new.id, new.original_url);
+            END
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        // Rebuild FTS indexes to ensure existing data is indexed
+        // This is idempotent and safe to run on every init
+        sqlx::query("INSERT INTO urls_fts_code(urls_fts_code) VALUES('rebuild')")
+            .execute(self.pool.as_ref())
+            .await?;
+        sqlx::query("INSERT INTO urls_fts_url(urls_fts_url) VALUES('rebuild')")
+            .execute(self.pool.as_ref())
+            .await?;
 
         Ok(())
     }
@@ -875,6 +2103,352 @@ impl Storage for SqliteStorage {
         tx.commit().await?;
 
         Ok((deleted_count, inserted_count))
+    }
+
+    async fn search(
+        &self,
+        params: &SearchParams,
+        is_admin: bool,
+        user_id: Option<&str>,
+    ) -> Result<SearchResult> {
+        // Escape the query for FTS5 MATCH - treat as literal by wrapping in quotes
+        // Double any quotes in the query to escape them
+        let fts_query = format!("\"{}\"", params.q.replace('"', "\"\""));
+
+        // Build the query based on user permissions
+        // Non-admin users can only search their own URLs
+        let effective_created_by = if is_admin {
+            params.created_by.clone()
+        } else {
+            // Non-admin must search only their own URLs
+            user_id.map(|s| s.to_string())
+        };
+
+        // Fetch limit + 1 to determine if there are more results
+        let fetch_limit = params.limit + 1;
+
+        // Build and execute the query
+        let urls = if let Some((cursor_created_at, cursor_id)) = params.cursor {
+            if let Some(ref created_by_filter) = effective_created_by {
+                if created_by_filter == "__null__" {
+                    // Filter for NULL created_by with cursor
+                    if let (Some(created_from), Some(created_to)) =
+                        (params.created_from, params.created_to)
+                    {
+                        if let Some(is_active) = params.is_active {
+                            sqlx::query_as::<_, ShortenedUrl>(
+                                r#"
+                                WITH matched(id) AS (
+                                    SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                                    UNION
+                                    SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                                )
+                                SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                                FROM urls u
+                                JOIN matched m ON m.id = u.id
+                                WHERE u.created_by IS NULL
+                                  AND u.created_at >= ? AND u.created_at < ?
+                                  AND u.is_active = ?
+                                  AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                                ORDER BY u.created_at DESC, u.id DESC
+                                LIMIT ?
+                                "#,
+                            )
+                            .bind(&fts_query)
+                            .bind(&fts_query)
+                            .bind(created_from)
+                            .bind(created_to)
+                            .bind(is_active)
+                            .bind(cursor_created_at)
+                            .bind(cursor_created_at)
+                            .bind(cursor_id)
+                            .bind(fetch_limit)
+                            .fetch_all(self.pool.as_ref())
+                            .await?
+                        } else {
+                            sqlx::query_as::<_, ShortenedUrl>(
+                                r#"
+                                WITH matched(id) AS (
+                                    SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                                    UNION
+                                    SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                                )
+                                SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                                FROM urls u
+                                JOIN matched m ON m.id = u.id
+                                WHERE u.created_by IS NULL
+                                  AND u.created_at >= ? AND u.created_at < ?
+                                  AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                                ORDER BY u.created_at DESC, u.id DESC
+                                LIMIT ?
+                                "#,
+                            )
+                            .bind(&fts_query)
+                            .bind(&fts_query)
+                            .bind(created_from)
+                            .bind(created_to)
+                            .bind(cursor_created_at)
+                            .bind(cursor_created_at)
+                            .bind(cursor_id)
+                            .bind(fetch_limit)
+                            .fetch_all(self.pool.as_ref())
+                            .await?
+                        }
+                    } else if let Some(created_from) = params.created_from {
+                        if let Some(is_active) = params.is_active {
+                            sqlx::query_as::<_, ShortenedUrl>(
+                                r#"
+                                WITH matched(id) AS (
+                                    SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                                    UNION
+                                    SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                                )
+                                SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                                FROM urls u
+                                JOIN matched m ON m.id = u.id
+                                WHERE u.created_by IS NULL
+                                  AND u.created_at >= ?
+                                  AND u.is_active = ?
+                                  AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                                ORDER BY u.created_at DESC, u.id DESC
+                                LIMIT ?
+                                "#,
+                            )
+                            .bind(&fts_query)
+                            .bind(&fts_query)
+                            .bind(created_from)
+                            .bind(is_active)
+                            .bind(cursor_created_at)
+                            .bind(cursor_created_at)
+                            .bind(cursor_id)
+                            .bind(fetch_limit)
+                            .fetch_all(self.pool.as_ref())
+                            .await?
+                        } else {
+                            sqlx::query_as::<_, ShortenedUrl>(
+                                r#"
+                                WITH matched(id) AS (
+                                    SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                                    UNION
+                                    SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                                )
+                                SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                                FROM urls u
+                                JOIN matched m ON m.id = u.id
+                                WHERE u.created_by IS NULL
+                                  AND u.created_at >= ?
+                                  AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                                ORDER BY u.created_at DESC, u.id DESC
+                                LIMIT ?
+                                "#,
+                            )
+                            .bind(&fts_query)
+                            .bind(&fts_query)
+                            .bind(created_from)
+                            .bind(cursor_created_at)
+                            .bind(cursor_created_at)
+                            .bind(cursor_id)
+                            .bind(fetch_limit)
+                            .fetch_all(self.pool.as_ref())
+                            .await?
+                        }
+                    } else if let Some(created_to) = params.created_to {
+                        if let Some(is_active) = params.is_active {
+                            sqlx::query_as::<_, ShortenedUrl>(
+                                r#"
+                                WITH matched(id) AS (
+                                    SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                                    UNION
+                                    SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                                )
+                                SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                                FROM urls u
+                                JOIN matched m ON m.id = u.id
+                                WHERE u.created_by IS NULL
+                                  AND u.created_at < ?
+                                  AND u.is_active = ?
+                                  AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                                ORDER BY u.created_at DESC, u.id DESC
+                                LIMIT ?
+                                "#,
+                            )
+                            .bind(&fts_query)
+                            .bind(&fts_query)
+                            .bind(created_to)
+                            .bind(is_active)
+                            .bind(cursor_created_at)
+                            .bind(cursor_created_at)
+                            .bind(cursor_id)
+                            .bind(fetch_limit)
+                            .fetch_all(self.pool.as_ref())
+                            .await?
+                        } else {
+                            sqlx::query_as::<_, ShortenedUrl>(
+                                r#"
+                                WITH matched(id) AS (
+                                    SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                                    UNION
+                                    SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                                )
+                                SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                                FROM urls u
+                                JOIN matched m ON m.id = u.id
+                                WHERE u.created_by IS NULL
+                                  AND u.created_at < ?
+                                  AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                                ORDER BY u.created_at DESC, u.id DESC
+                                LIMIT ?
+                                "#,
+                            )
+                            .bind(&fts_query)
+                            .bind(&fts_query)
+                            .bind(created_to)
+                            .bind(cursor_created_at)
+                            .bind(cursor_created_at)
+                            .bind(cursor_id)
+                            .bind(fetch_limit)
+                            .fetch_all(self.pool.as_ref())
+                            .await?
+                        }
+                    } else if let Some(is_active) = params.is_active {
+                        sqlx::query_as::<_, ShortenedUrl>(
+                            r#"
+                            WITH matched(id) AS (
+                                SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                                UNION
+                                SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                            )
+                            SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                            FROM urls u
+                            JOIN matched m ON m.id = u.id
+                            WHERE u.created_by IS NULL
+                              AND u.is_active = ?
+                              AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                            ORDER BY u.created_at DESC, u.id DESC
+                            LIMIT ?
+                            "#,
+                        )
+                        .bind(&fts_query)
+                        .bind(&fts_query)
+                        .bind(is_active)
+                        .bind(cursor_created_at)
+                        .bind(cursor_created_at)
+                        .bind(cursor_id)
+                        .bind(fetch_limit)
+                        .fetch_all(self.pool.as_ref())
+                        .await?
+                    } else {
+                        sqlx::query_as::<_, ShortenedUrl>(
+                            r#"
+                            WITH matched(id) AS (
+                                SELECT rowid FROM urls_fts_code WHERE urls_fts_code MATCH ?
+                                UNION
+                                SELECT rowid FROM urls_fts_url WHERE urls_fts_url MATCH ?
+                            )
+                            SELECT u.id, u.short_code, u.original_url, u.created_at, u.created_by, u.clicks, u.is_active
+                            FROM urls u
+                            JOIN matched m ON m.id = u.id
+                            WHERE u.created_by IS NULL
+                              AND (u.created_at < ? OR (u.created_at = ? AND u.id < ?))
+                            ORDER BY u.created_at DESC, u.id DESC
+                            LIMIT ?
+                            "#,
+                        )
+                        .bind(&fts_query)
+                        .bind(&fts_query)
+                        .bind(cursor_created_at)
+                        .bind(cursor_created_at)
+                        .bind(cursor_id)
+                        .bind(fetch_limit)
+                        .fetch_all(self.pool.as_ref())
+                        .await?
+                    }
+                } else {
+                    // Filter for specific created_by with cursor
+                    self.search_with_created_by_cursor(
+                        &fts_query,
+                        created_by_filter,
+                        params.created_from,
+                        params.created_to,
+                        params.is_active,
+                        cursor_created_at,
+                        cursor_id,
+                        fetch_limit,
+                    )
+                    .await?
+                }
+            } else {
+                // No created_by filter with cursor
+                self.search_without_created_by_cursor(
+                    &fts_query,
+                    params.created_from,
+                    params.created_to,
+                    params.is_active,
+                    cursor_created_at,
+                    cursor_id,
+                    fetch_limit,
+                )
+                .await?
+            }
+        } else {
+            // No cursor
+            if let Some(ref created_by_filter) = effective_created_by {
+                if created_by_filter == "__null__" {
+                    // Filter for NULL created_by without cursor
+                    self.search_null_created_by_no_cursor(
+                        &fts_query,
+                        params.created_from,
+                        params.created_to,
+                        params.is_active,
+                        fetch_limit,
+                    )
+                    .await?
+                } else {
+                    // Filter for specific created_by without cursor
+                    self.search_with_created_by_no_cursor(
+                        &fts_query,
+                        created_by_filter,
+                        params.created_from,
+                        params.created_to,
+                        params.is_active,
+                        fetch_limit,
+                    )
+                    .await?
+                }
+            } else {
+                // No created_by filter without cursor
+                self.search_without_created_by_no_cursor(
+                    &fts_query,
+                    params.created_from,
+                    params.created_to,
+                    params.is_active,
+                    fetch_limit,
+                )
+                .await?
+            }
+        };
+
+        // Check if there are more results
+        let has_more = urls.len() > params.limit as usize;
+        let items: Vec<Arc<ShortenedUrl>> = urls
+            .into_iter()
+            .take(params.limit as usize)
+            .map(Arc::new)
+            .collect();
+
+        // Generate next cursor if there are more results
+        let next_cursor = if has_more && !items.is_empty() {
+            let last = items.last().unwrap();
+            Some((last.created_at, last.id))
+        } else {
+            None
+        };
+
+        Ok(SearchResult {
+            items,
+            next_cursor,
+            has_more,
+        })
     }
 }
 
@@ -2088,5 +3662,246 @@ mod tests {
             dropped_region_agg.is_some(),
             "Should have <dropped> entry for region"
         );
+    }
+
+    // Search functionality tests
+    #[tokio::test]
+    async fn test_search_by_short_code() {
+        let storage = setup_sqlite().await;
+
+        // Create test URLs
+        storage
+            .create_with_code("abc123", "https://example.com/1", Some("user1"))
+            .await
+            .unwrap();
+        storage
+            .create_with_code("xyz789", "https://example.com/2", Some("user1"))
+            .await
+            .unwrap();
+        storage
+            .create_with_code("abc456", "https://different.com/3", Some("user2"))
+            .await
+            .unwrap();
+
+        // Search for "abc" - should find abc123 and abc456
+        let params = SearchParams {
+            q: "abc".to_string(),
+            created_by: None,
+            created_from: None,
+            created_to: None,
+            is_active: None,
+            limit: 50,
+            cursor: None,
+        };
+
+        let result = storage.search(&params, true, None).await.unwrap();
+        assert_eq!(result.items.len(), 2);
+        assert!(result
+            .items
+            .iter()
+            .any(|u| u.short_code == "abc123"));
+        assert!(result
+            .items
+            .iter()
+            .any(|u| u.short_code == "abc456"));
+    }
+
+    #[tokio::test]
+    async fn test_search_by_original_url() {
+        let storage = setup_sqlite().await;
+
+        // Create test URLs
+        storage
+            .create_with_code("link1", "https://github.com/project", Some("user1"))
+            .await
+            .unwrap();
+        storage
+            .create_with_code("link2", "https://GITHUB.com/other", Some("user1"))
+            .await
+            .unwrap();
+        storage
+            .create_with_code("link3", "https://example.com/test", Some("user1"))
+            .await
+            .unwrap();
+
+        // Search for "github" - should find both github URLs (case-insensitive)
+        let params = SearchParams {
+            q: "github".to_string(),
+            created_by: None,
+            created_from: None,
+            created_to: None,
+            is_active: None,
+            limit: 50,
+            cursor: None,
+        };
+
+        let result = storage.search(&params, true, None).await.unwrap();
+        assert_eq!(result.items.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_search_user_isolation() {
+        let storage = setup_sqlite().await;
+
+        // Create URLs for different users
+        storage
+            .create_with_code("user1link", "https://example.com/1", Some("user1"))
+            .await
+            .unwrap();
+        storage
+            .create_with_code("user2link", "https://example.com/2", Some("user2"))
+            .await
+            .unwrap();
+
+        // Non-admin user1 searching should only see their own URLs
+        let params = SearchParams {
+            q: "link".to_string(),
+            created_by: None,
+            created_from: None,
+            created_to: None,
+            is_active: None,
+            limit: 50,
+            cursor: None,
+        };
+
+        // Non-admin user1 should only see user1link
+        let result = storage
+            .search(&params, false, Some("user1"))
+            .await
+            .unwrap();
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].short_code, "user1link");
+
+        // Admin should see all links
+        let result = storage.search(&params, true, Some("admin")).await.unwrap();
+        assert_eq!(result.items.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_search_with_filters() {
+        let storage = setup_sqlite().await;
+
+        // Create test URLs
+        storage
+            .create_with_code("active1", "https://example.com/1", Some("user1"))
+            .await
+            .unwrap();
+
+        // Deactivate one URL
+        storage.deactivate("active1").await.unwrap();
+
+        storage
+            .create_with_code("active2", "https://example.com/2", Some("user1"))
+            .await
+            .unwrap();
+
+        // Search for active URLs only
+        let params = SearchParams {
+            q: "example".to_string(),
+            created_by: None,
+            created_from: None,
+            created_to: None,
+            is_active: Some(true),
+            limit: 50,
+            cursor: None,
+        };
+
+        let result = storage.search(&params, true, None).await.unwrap();
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].short_code, "active2");
+
+        // Search for inactive URLs only
+        let params = SearchParams {
+            q: "example".to_string(),
+            created_by: None,
+            created_from: None,
+            created_to: None,
+            is_active: Some(false),
+            limit: 50,
+            cursor: None,
+        };
+
+        let result = storage.search(&params, true, None).await.unwrap();
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].short_code, "active1");
+    }
+
+    #[tokio::test]
+    async fn test_search_pagination() {
+        let storage = setup_sqlite().await;
+
+        // Create multiple URLs
+        for i in 0..5 {
+            storage
+                .create_with_code(
+                    &format!("test{}", i),
+                    &format!("https://example.com/{}", i),
+                    Some("user1"),
+                )
+                .await
+                .unwrap();
+        }
+
+        // Search with limit 2
+        let params = SearchParams {
+            q: "test".to_string(),
+            created_by: None,
+            created_from: None,
+            created_to: None,
+            is_active: None,
+            limit: 2,
+            cursor: None,
+        };
+
+        let result = storage.search(&params, true, None).await.unwrap();
+        assert_eq!(result.items.len(), 2);
+        assert!(result.has_more);
+        assert!(result.next_cursor.is_some());
+
+        // Fetch next page
+        let params = SearchParams {
+            q: "test".to_string(),
+            created_by: None,
+            created_from: None,
+            created_to: None,
+            is_active: None,
+            limit: 2,
+            cursor: result.next_cursor,
+        };
+
+        let result2 = storage.search(&params, true, None).await.unwrap();
+        assert_eq!(result2.items.len(), 2);
+        assert!(result2.has_more);
+    }
+
+    #[tokio::test]
+    async fn test_search_short_code_case_sensitive() {
+        let storage = setup_sqlite().await;
+
+        // Create URLs with mixed case short codes
+        storage
+            .create_with_code("AbCdEf", "https://example.com/1", Some("user1"))
+            .await
+            .unwrap();
+        storage
+            .create_with_code("abcdef", "https://example.com/2", Some("user1"))
+            .await
+            .unwrap();
+
+        // Search for "AbC" (uppercase) - should only find AbCdEf
+        let params = SearchParams {
+            q: "AbC".to_string(),
+            created_by: None,
+            created_from: None,
+            created_to: None,
+            is_active: None,
+            limit: 50,
+            cursor: None,
+        };
+
+        let result = storage.search(&params, true, None).await.unwrap();
+        // Short code search is case-sensitive, so only AbCdEf should match
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].short_code, "AbCdEf");
     }
 }

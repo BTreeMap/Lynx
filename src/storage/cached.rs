@@ -1,5 +1,5 @@
 use crate::models::ShortenedUrl;
-use crate::storage::{LookupMetadata, LookupResult, Storage, StorageResult};
+use crate::storage::{LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageResult};
 use anyhow::Result;
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -499,5 +499,25 @@ impl Storage for CachedStorage {
         self.inner
             .prune_analytics(retention_days, drop_dimensions)
             .await
+    }
+
+    async fn search(
+        &self,
+        params: &SearchParams,
+        is_admin: bool,
+        user_id: Option<&str>,
+    ) -> Result<SearchResult> {
+        // Get search results from database
+        let mut result = self.inner.search(params, is_admin, user_id).await?;
+
+        // Add buffered clicks to each URL in the result
+        for url in &mut result.items {
+            let buffered = self.get_buffered_clicks(&url.short_code);
+            if buffered > 0 {
+                Arc::make_mut(url).clicks += buffered as i64;
+            }
+        }
+
+        Ok(result)
     }
 }

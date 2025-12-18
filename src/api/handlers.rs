@@ -12,14 +12,14 @@ use rand::distr::{Alphanumeric, Distribution};
 use crate::auth::AuthClaims;
 use crate::config::Config;
 use crate::models::{CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl};
-use crate::storage::{Storage, StorageError};
+use crate::storage::{SearchParams, Storage, StorageError};
 
 pub struct AppState {
     pub storage: Arc<dyn Storage>,
     pub config: Arc<Config>,
 }
 
-use crate::cursor::{create_cursor, CursorData};
+use crate::cursor::{create_cursor, verify_cursor, CursorData};
 
 #[derive(Serialize)]
 pub struct ErrorResponse {
@@ -448,4 +448,122 @@ pub async fn get_auth_mode(State(state): State<Arc<AppState>>) -> Json<AuthModeR
     Json(AuthModeResponse {
         mode: mode.to_string(),
     })
+}
+
+/// Query parameters for search endpoint
+#[derive(Debug, Deserialize)]
+pub struct SearchQuery {
+    /// Search query string (required, min 1 character)
+    pub q: String,
+    /// Filter by creator (use "__null__" for NULL created_by)
+    pub created_by: Option<String>,
+    /// Filter by created_at >= this value (inclusive)
+    pub created_from: Option<i64>,
+    /// Filter by created_at < this value (exclusive)
+    pub created_to: Option<i64>,
+    /// Filter by is_active status
+    pub is_active: Option<bool>,
+    /// Maximum number of results (default 50, max 200)
+    #[serde(default = "default_search_limit")]
+    pub limit: u32,
+    /// Cursor for pagination
+    pub cursor: Option<String>,
+}
+
+fn default_search_limit() -> u32 {
+    50
+}
+
+/// Response for search endpoint
+#[derive(Serialize)]
+pub struct SearchResponse {
+    pub items: Vec<ShortenedUrlResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+}
+
+/// Search for URLs matching a query string
+pub async fn search_urls(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<SearchResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Validate query
+    let q = query.q.trim();
+    if q.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Search query 'q' cannot be empty".to_string(),
+            }),
+        ));
+    }
+
+    // Clamp limit to valid range
+    let limit = query.limit.clamp(1, 200) as i64;
+
+    // Parse cursor if provided
+    let cursor = if let Some(cursor_str) = query.cursor {
+        let cursor_data = verify_cursor(&cursor_str).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!("Invalid cursor: {}", e),
+                }),
+            )
+        })?;
+        Some((cursor_data.created_at, cursor_data.id))
+    } else {
+        None
+    };
+
+    // Check if user is admin
+    let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
+    let user_id = claims.as_ref().and_then(|c| c.user_id());
+
+    // Build search params
+    let params = SearchParams {
+        q: q.to_string(),
+        created_by: query.created_by,
+        created_from: query.created_from,
+        created_to: query.created_to,
+        is_active: query.is_active,
+        limit,
+        cursor,
+    };
+
+    // Execute search
+    let result = state
+        .storage
+        .search(&params, is_admin, user_id.as_deref())
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Search failed: {}", e),
+                }),
+            )
+        })?;
+
+    // Build response
+    let base = Some(state.config.redirect_base_url.as_str());
+
+    let next_cursor = if let Some((created_at, id)) = result.next_cursor {
+        let cursor_data = CursorData { created_at, id };
+        create_cursor(&cursor_data).ok()
+    } else {
+        None
+    };
+
+    Ok(Json(SearchResponse {
+        items: result
+            .items
+            .into_iter()
+            .map(|url| ShortenedUrlResponse::with_base(url, base))
+            .collect(),
+        next_cursor,
+        has_more: result.has_more,
+    }))
 }
