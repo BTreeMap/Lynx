@@ -2066,7 +2066,15 @@ impl Storage for PostgresStorage {
         user_id: Option<&str>,
     ) -> Result<SearchResult> {
         // Build the LIKE pattern for substring search
-        let like_pattern = format!("%{}%", params.q.replace('%', "\\%").replace('_', "\\_"));
+        // Escape backslashes first, then special LIKE characters
+        let like_pattern = format!(
+            "%{}%",
+            params
+                .q
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
 
         // Build the query based on user permissions
         // Non-admin users can only search their own URLs

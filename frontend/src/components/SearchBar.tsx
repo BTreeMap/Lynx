@@ -73,6 +73,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
             <button
               type="button"
               onClick={handleClear}
+              aria-label="Clear search"
               style={{
                 position: 'absolute',
                 right: '12px',
