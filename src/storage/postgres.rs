@@ -1,6 +1,8 @@
 use crate::analytics::{DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER};
 use crate::models::ShortenedUrl;
-use crate::storage::{LookupMetadata, LookupResult, Storage, StorageError, StorageResult};
+use crate::storage::{
+    LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageError, StorageResult,
+};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::postgres::PgPoolOptions;
@@ -22,6 +24,1107 @@ impl PostgresStorage {
         Ok(Self {
             pool: Arc::new(pool),
         })
+    }
+
+    // Helper methods for PostgreSQL search queries using pg_trgm
+    async fn pg_search_with_created_by_cursor(
+        &self,
+        like_pattern: &str,
+        created_by: &str,
+        created_from: Option<i64>,
+        created_to: Option<i64>,
+        is_active: Option<bool>,
+        cursor_created_at: i64,
+        cursor_id: i64,
+        fetch_limit: i64,
+    ) -> Result<Vec<ShortenedUrl>> {
+        match (created_from, created_to, is_active) {
+            (Some(from), Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at >= $3 AND created_at < $4
+                      AND is_active = $5
+                      AND (created_at, id) < ($6, $7)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $8
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(from)
+                .bind(to)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at >= $3 AND created_at < $4
+                      AND (created_at, id) < ($5, $6)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $7
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(from)
+                .bind(to)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at >= $3
+                      AND is_active = $4
+                      AND (created_at, id) < ($5, $6)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $7
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(from)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at >= $3
+                      AND (created_at, id) < ($4, $5)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $6
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(from)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at < $3
+                      AND is_active = $4
+                      AND (created_at, id) < ($5, $6)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $7
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(to)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at < $3
+                      AND (created_at, id) < ($4, $5)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $6
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(to)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND is_active = $3
+                      AND (created_at, id) < ($4, $5)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $6
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND (created_at, id) < ($3, $4)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn pg_search_without_created_by_cursor(
+        &self,
+        like_pattern: &str,
+        created_from: Option<i64>,
+        created_to: Option<i64>,
+        is_active: Option<bool>,
+        cursor_created_at: i64,
+        cursor_id: i64,
+        fetch_limit: i64,
+    ) -> Result<Vec<ShortenedUrl>> {
+        match (created_from, created_to, is_active) {
+            (Some(from), Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at >= $2 AND created_at < $3
+                      AND is_active = $4
+                      AND (created_at, id) < ($5, $6)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $7
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(to)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at >= $2 AND created_at < $3
+                      AND (created_at, id) < ($4, $5)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $6
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(to)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at >= $2
+                      AND is_active = $3
+                      AND (created_at, id) < ($4, $5)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $6
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at >= $2
+                      AND (created_at, id) < ($3, $4)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at < $2
+                      AND is_active = $3
+                      AND (created_at, id) < ($4, $5)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $6
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(to)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at < $2
+                      AND (created_at, id) < ($3, $4)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(to)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND is_active = $2
+                      AND (created_at, id) < ($3, $4)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND (created_at, id) < ($2, $3)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn pg_search_null_created_by_cursor(
+        &self,
+        like_pattern: &str,
+        created_from: Option<i64>,
+        created_to: Option<i64>,
+        is_active: Option<bool>,
+        cursor_created_at: i64,
+        cursor_id: i64,
+        fetch_limit: i64,
+    ) -> Result<Vec<ShortenedUrl>> {
+        match (created_from, created_to, is_active) {
+            (Some(from), Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at >= $2 AND created_at < $3
+                      AND is_active = $4
+                      AND (created_at, id) < ($5, $6)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $7
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(to)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at >= $2 AND created_at < $3
+                      AND (created_at, id) < ($4, $5)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $6
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(to)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at >= $2
+                      AND is_active = $3
+                      AND (created_at, id) < ($4, $5)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $6
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at >= $2
+                      AND (created_at, id) < ($3, $4)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at < $2
+                      AND is_active = $3
+                      AND (created_at, id) < ($4, $5)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $6
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(to)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at < $2
+                      AND (created_at, id) < ($3, $4)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(to)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND is_active = $2
+                      AND (created_at, id) < ($3, $4)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(active)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND (created_at, id) < ($2, $3)
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(cursor_created_at)
+                .bind(cursor_id)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn pg_search_null_created_by_no_cursor(
+        &self,
+        like_pattern: &str,
+        created_from: Option<i64>,
+        created_to: Option<i64>,
+        is_active: Option<bool>,
+        fetch_limit: i64,
+    ) -> Result<Vec<ShortenedUrl>> {
+        match (created_from, created_to, is_active) {
+            (Some(from), Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at >= $2 AND created_at < $3
+                      AND is_active = $4
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at >= $2 AND created_at < $3
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at >= $2
+                      AND is_active = $3
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at >= $2
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $3
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at < $2
+                      AND is_active = $3
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND created_at < $2
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $3
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                      AND is_active = $2
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $3
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by IS NULL
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $2
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn pg_search_with_created_by_no_cursor(
+        &self,
+        like_pattern: &str,
+        created_by: &str,
+        created_from: Option<i64>,
+        created_to: Option<i64>,
+        is_active: Option<bool>,
+        fetch_limit: i64,
+    ) -> Result<Vec<ShortenedUrl>> {
+        match (created_from, created_to, is_active) {
+            (Some(from), Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at >= $3 AND created_at < $4
+                      AND is_active = $5
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $6
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(from)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at >= $3 AND created_at < $4
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(from)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at >= $3
+                      AND is_active = $4
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(from)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at >= $3
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(from)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at < $3
+                      AND is_active = $4
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND created_at < $3
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                      AND is_active = $3
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_by = $2
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $3
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(created_by)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+        }
+    }
+
+    async fn pg_search_without_created_by_no_cursor(
+        &self,
+        like_pattern: &str,
+        created_from: Option<i64>,
+        created_to: Option<i64>,
+        is_active: Option<bool>,
+        fetch_limit: i64,
+    ) -> Result<Vec<ShortenedUrl>> {
+        match (created_from, created_to, is_active) {
+            (Some(from), Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at >= $2 AND created_at < $3
+                      AND is_active = $4
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $5
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at >= $2 AND created_at < $3
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at >= $2
+                      AND is_active = $3
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (Some(from), None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at >= $2
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $3
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(from)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at < $2
+                      AND is_active = $3
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $4
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(to)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, Some(to), None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND created_at < $2
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $3
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(to)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, Some(active)) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                      AND is_active = $2
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $3
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(active)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+            (None, None, None) => {
+                sqlx::query_as::<_, ShortenedUrl>(
+                    r#"
+                    SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
+                    FROM urls
+                    WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT $2
+                    "#,
+                )
+                .bind(like_pattern)
+                .bind(fetch_limit)
+                .fetch_all(self.pool.as_ref())
+                .await
+                .map_err(Into::into)
+            }
+        }
     }
 }
 
@@ -226,6 +1329,27 @@ impl Storage for PostgresStorage {
 
         // Commit the transaction
         tx.commit().await?;
+
+        // Enable pg_trgm extension for trigram substring search
+        // This may fail if the extension is not available, which is acceptable
+        let _ = sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+            .execute(self.pool.as_ref())
+            .await;
+
+        // Create trigram indexes for substring search
+        // GIN index on short_code for case-sensitive LIKE searches
+        let _ = sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_urls_short_code_trgm ON urls USING GIN (short_code gin_trgm_ops)",
+        )
+        .execute(self.pool.as_ref())
+        .await;
+
+        // GIN index on lower(original_url) for case-insensitive LIKE searches
+        let _ = sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_urls_original_url_trgm ON urls USING GIN (lower(original_url) gin_trgm_ops)",
+        )
+        .execute(self.pool.as_ref())
+        .await;
 
         Ok(())
     }
@@ -933,6 +2057,130 @@ impl Storage for PostgresStorage {
         tx.commit().await?;
 
         Ok((deleted_count, inserted_count))
+    }
+
+    async fn search(
+        &self,
+        params: &SearchParams,
+        is_admin: bool,
+        user_id: Option<&str>,
+    ) -> Result<SearchResult> {
+        // Build the LIKE pattern for substring search
+        let like_pattern = format!("%{}%", params.q.replace('%', "\\%").replace('_', "\\_"));
+
+        // Build the query based on user permissions
+        // Non-admin users can only search their own URLs
+        let effective_created_by = if is_admin {
+            params.created_by.clone()
+        } else {
+            // Non-admin must search only their own URLs
+            user_id.map(|s| s.to_string())
+        };
+
+        // Fetch limit + 1 to determine if there are more results
+        let fetch_limit = params.limit + 1;
+
+        // Build and execute the query using pg_trgm LIKE/ILIKE
+        let urls = if let Some((cursor_created_at, cursor_id)) = params.cursor {
+            if let Some(ref created_by_filter) = effective_created_by {
+                if created_by_filter == "__null__" {
+                    // Filter for NULL created_by with cursor
+                    self.pg_search_null_created_by_cursor(
+                        &like_pattern,
+                        params.created_from,
+                        params.created_to,
+                        params.is_active,
+                        cursor_created_at,
+                        cursor_id,
+                        fetch_limit,
+                    )
+                    .await?
+                } else {
+                    // Filter for specific created_by with cursor
+                    self.pg_search_with_created_by_cursor(
+                        &like_pattern,
+                        created_by_filter,
+                        params.created_from,
+                        params.created_to,
+                        params.is_active,
+                        cursor_created_at,
+                        cursor_id,
+                        fetch_limit,
+                    )
+                    .await?
+                }
+            } else {
+                // No created_by filter with cursor
+                self.pg_search_without_created_by_cursor(
+                    &like_pattern,
+                    params.created_from,
+                    params.created_to,
+                    params.is_active,
+                    cursor_created_at,
+                    cursor_id,
+                    fetch_limit,
+                )
+                .await?
+            }
+        } else {
+            // No cursor
+            if let Some(ref created_by_filter) = effective_created_by {
+                if created_by_filter == "__null__" {
+                    // Filter for NULL created_by without cursor
+                    self.pg_search_null_created_by_no_cursor(
+                        &like_pattern,
+                        params.created_from,
+                        params.created_to,
+                        params.is_active,
+                        fetch_limit,
+                    )
+                    .await?
+                } else {
+                    // Filter for specific created_by without cursor
+                    self.pg_search_with_created_by_no_cursor(
+                        &like_pattern,
+                        created_by_filter,
+                        params.created_from,
+                        params.created_to,
+                        params.is_active,
+                        fetch_limit,
+                    )
+                    .await?
+                }
+            } else {
+                // No created_by filter without cursor
+                self.pg_search_without_created_by_no_cursor(
+                    &like_pattern,
+                    params.created_from,
+                    params.created_to,
+                    params.is_active,
+                    fetch_limit,
+                )
+                .await?
+            }
+        };
+
+        // Check if there are more results
+        let has_more = urls.len() > params.limit as usize;
+        let items: Vec<Arc<ShortenedUrl>> = urls
+            .into_iter()
+            .take(params.limit as usize)
+            .map(Arc::new)
+            .collect();
+
+        // Generate next cursor if there are more results
+        let next_cursor = if has_more && !items.is_empty() {
+            let last = items.last().unwrap();
+            Some((last.created_at, last.id))
+        } else {
+            None
+        };
+
+        Ok(SearchResult {
+            items,
+            next_cursor,
+            has_more,
+        })
     }
 }
 

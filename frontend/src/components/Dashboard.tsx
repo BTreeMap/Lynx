@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { apiClient } from '../api';
 import CreateUrlForm from './CreateUrlForm';
+import SearchBar from './SearchBar';
 import UrlList from './UrlList';
 import type { ShortenedUrl } from '../types';
 
@@ -10,10 +11,12 @@ const Dashboard: React.FC = () => {
   const [urls, setUrls] = useState<ShortenedUrl[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
+  const [searchQuery, setSearchQuery] = useState<string | null>(null);
 
   const loadUrls = async (reset = true) => {
     if (reset) {
@@ -45,10 +48,19 @@ const Dashboard: React.FC = () => {
     setIsLoadingMore(true);
     setError(null);
     try {
-      const data = await apiClient.listUrls(50, nextCursor);
-      setUrls(prev => [...prev, ...data.urls]);
-      setNextCursor(data.next_cursor || null);
-      setHasMore(data.has_more);
+      if (searchQuery) {
+        // Load more search results
+        const data = await apiClient.searchUrls({ q: searchQuery, limit: 50, cursor: nextCursor });
+        setUrls(prev => [...prev, ...data.items]);
+        setNextCursor(data.next_cursor || null);
+        setHasMore(data.has_more);
+      } else {
+        // Load more list results
+        const data = await apiClient.listUrls(50, nextCursor);
+        setUrls(prev => [...prev, ...data.urls]);
+        setNextCursor(data.next_cursor || null);
+        setHasMore(data.has_more);
+      }
     } catch (err: unknown) {
       const error = err as { response?: { data?: { error?: string } } };
       setError(error.response?.data?.error || 'Failed to load more URLs');
@@ -56,6 +68,31 @@ const Dashboard: React.FC = () => {
       setIsLoadingMore(false);
     }
   };
+
+  const handleSearch = useCallback(async (query: string) => {
+    setIsSearching(true);
+    setError(null);
+    setSearchQuery(query);
+    setUrls([]);
+    setNextCursor(null);
+    
+    try {
+      const data = await apiClient.searchUrls({ q: query, limit: 50 });
+      setUrls(data.items);
+      setNextCursor(data.next_cursor || null);
+      setHasMore(data.has_more);
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      setError(error.response?.data?.error || 'Search failed');
+    } finally {
+      setIsSearching(false);
+    }
+  }, []);
+
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery(null);
+    loadUrls(true);
+  }, []);
 
   const exportToJson = async () => {
     setIsExporting(true);
@@ -170,6 +207,43 @@ const Dashboard: React.FC = () => {
       </div>
 
       <CreateUrlForm onUrlCreated={() => loadUrls(true)} />
+
+      <SearchBar
+        onSearch={handleSearch}
+        onClear={handleClearSearch}
+        isSearching={isSearching}
+      />
+
+      {searchQuery && (
+        <div style={{
+          marginBottom: '16px',
+          padding: '12px 16px',
+          backgroundColor: 'var(--color-bg-secondary)',
+          borderRadius: 'var(--radius-md)',
+          border: '1px solid var(--color-border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}>
+          <span style={{ color: 'var(--color-text-secondary)', fontSize: '14px' }}>
+            Search results for: <strong style={{ color: 'var(--color-text-primary)' }}>"{searchQuery}"</strong>
+            {' '}({urls.length}{hasMore ? '+' : ''} found)
+          </span>
+          <button
+            onClick={handleClearSearch}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--color-text-tertiary)',
+              cursor: 'pointer',
+              fontSize: '14px',
+              textDecoration: 'underline',
+            }}
+          >
+            Clear search
+          </button>
+        </div>
+      )}
 
       {error && (
         <div style={{ 
