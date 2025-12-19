@@ -332,12 +332,12 @@ async fn test_aggregation_dimensions() {
             expected_asn_count += *count as i64;
         }
 
+        // Reuse the same geo lookup for all iterations of this IP
         for _ in 0..*count {
-            let geo = geoip.lookup(ip);
             let rec = lynx::analytics::AnalyticsRecord {
                 short_code: "multi".to_string(),
                 timestamp: chrono::Utc::now().timestamp(),
-                geo_location: geo,
+                geo_location: geo.clone(),
                 client_ip: Some(ip),
             };
             agg.record(rec);
