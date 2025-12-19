@@ -76,8 +76,10 @@ impl GeoIpService {
                 extracted = true;
             }
 
-            // Fallback to Country lookup if City data wasn't available
-            // This handles both Ok(None) from City lookup and lookup errors
+            // Fallback to Country lookup if City data wasn't available.
+            // This works because the City database is a superset of Country data,
+            // and geoip2::Country extracts just the country fields from any GeoIP2 database.
+            // This handles both Ok(None) from City lookup and lookup errors.
             if !extracted {
                 if let Ok(Some(country)) = reader.lookup::<geoip2::Country>(ip) {
                     self.extract_from_country(&country, &mut geo_location);
