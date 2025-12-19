@@ -68,13 +68,20 @@ impl GeoIpService {
 
         // Try to lookup city information (which includes country)
         if let Some(ref reader) = self.city_reader {
-            if let Ok(city_opt) = reader.lookup::<geoip2::City>(ip) {
-                if let Some(city) = city_opt {
-                    self.extract_from_city(&city, &mut geo_location);
+            let mut extracted = false;
+
+            // First try City lookup (includes country, region, city)
+            if let Ok(Some(city)) = reader.lookup::<geoip2::City>(ip) {
+                self.extract_from_city(&city, &mut geo_location);
+                extracted = true;
+            }
+
+            // Fallback to Country lookup if City data wasn't available
+            // This handles both Ok(None) from City lookup and lookup errors
+            if !extracted {
+                if let Ok(Some(country)) = reader.lookup::<geoip2::Country>(ip) {
+                    self.extract_from_country(&country, &mut geo_location);
                 }
-            } else if let Ok(Some(country)) = reader.lookup::<geoip2::Country>(ip) {
-                // Fallback: try country-only lookup
-                self.extract_from_country(&country, &mut geo_location);
             }
         }
 
