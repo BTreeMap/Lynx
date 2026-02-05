@@ -105,7 +105,7 @@ fn random_code(length: usize) -> String {
         .collect()
 }
 
-fn normalized_short_code_max_length(max_length: usize) -> usize {
+fn validated_short_code_max_length(max_length: usize) -> usize {
     max_length.max(MIN_SHORT_CODE_LENGTH)
 }
 
@@ -157,7 +157,7 @@ pub async fn create_url(
     let base = Some(state.config.redirect_base_url.as_str());
 
     let CreateUrlRequest { url, custom_code } = payload;
-    let max_short_code_length = normalized_short_code_max_length(state.config.short_code_max_length);
+    let max_short_code_length = validated_short_code_max_length(state.config.short_code_max_length);
 
     if url.is_empty() {
         return Err((
@@ -467,19 +467,19 @@ pub async fn get_auth_mode(State(state): State<Arc<AppState>>) -> Json<AuthModeR
 
 #[cfg(test)]
 mod tests {
-    use super::{normalized_short_code_max_length, MIN_SHORT_CODE_LENGTH};
+    use super::{validated_short_code_max_length, MIN_SHORT_CODE_LENGTH};
 
     #[test]
-    fn test_normalized_short_code_max_length_uses_minimum() {
+    fn test_validated_short_code_max_length_uses_minimum() {
         assert_eq!(
-            normalized_short_code_max_length(1),
+            validated_short_code_max_length(1),
             MIN_SHORT_CODE_LENGTH
         );
     }
 
     #[test]
-    fn test_normalized_short_code_max_length_keeps_config_value() {
-        assert_eq!(normalized_short_code_max_length(50), 50);
+    fn test_validated_short_code_max_length_keeps_config_value() {
+        assert_eq!(validated_short_code_max_length(50), 50);
     }
 }
 
