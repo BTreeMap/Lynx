@@ -78,6 +78,10 @@ pub struct Config {
     pub frontend: FrontendConfig,
     pub cache: CacheConfig,
     pub pagination: PaginationConfig,
+    /// Maximum length for custom short codes.
+    /// Defaults to 50 to allow readable custom codes while staying URL-friendly.
+    #[serde(default = "Config::default_short_code_max_length")]
+    pub short_code_max_length: usize,
     #[serde(default)]
     pub analytics: AnalyticsConfig,
     #[serde(default)]
@@ -273,6 +277,10 @@ impl CloudflareConfig {
 }
 
 impl Config {
+    const fn default_short_code_max_length() -> usize {
+        50
+    }
+
     pub fn from_env() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
 
@@ -414,6 +422,11 @@ impl Config {
 
         let cursor_hmac_secret = std::env::var("CURSOR_HMAC_SECRET").ok();
 
+        let short_code_max_length = std::env::var("SHORT_CODE_MAX_LENGTH")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or_else(Config::default_short_code_max_length);
+
         // Warn if cursor HMAC secret is not set
         if cursor_hmac_secret.is_none() {
             tracing::warn!(
@@ -511,6 +524,7 @@ impl Config {
                 actor_flush_interval_ms,
             },
             pagination: PaginationConfig { cursor_hmac_secret },
+            short_code_max_length,
             analytics,
             redirect_status,
         })

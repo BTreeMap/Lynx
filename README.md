@@ -330,6 +330,7 @@ All configuration is done via environment variables. See `.env.example` for a co
 | `API_PORT` | API server port | `8080` |
 | `REDIRECT_HOST` | Redirect server bind address | `127.0.0.1` |
 | `REDIRECT_PORT` | Redirect server port | `3000` |
+| `SHORT_CODE_MAX_LENGTH` | Maximum length for custom short codes | `50` |
 | `AUTH_MODE` | Authentication mode: `none`, `oauth`, or `cloudflare` | `none` |
 
 ### Performance Tuning

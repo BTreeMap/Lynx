@@ -90,7 +90,6 @@ async fn is_user_admin(storage: &dyn Storage, claims: &Option<AuthClaims>) -> bo
 }
 
 const MIN_SHORT_CODE_LENGTH: usize = 3;
-const MAX_SHORT_CODE_LENGTH: usize = 10;
 const MIN_PROBES_BEFORE_ESCALATION: usize = 5;
 const MAX_PROBES_PER_LENGTH: usize = 64;
 /// Precomputed minimum number of successes required after each attempt
@@ -106,12 +105,18 @@ fn random_code(length: usize) -> String {
         .collect()
 }
 
+/// Ensure the configured short code max length never dips below the minimum.
+fn validated_short_code_max_length(max_length: usize) -> usize {
+    max_length.max(MIN_SHORT_CODE_LENGTH)
+}
+
 async fn create_with_random_code(
     storage: &dyn Storage,
     original_url: &str,
     created_by: Option<&str>,
+    max_length: usize,
 ) -> Result<Arc<ShortenedUrl>, StorageError> {
-    for length in MIN_SHORT_CODE_LENGTH..=MAX_SHORT_CODE_LENGTH {
+    for length in MIN_SHORT_CODE_LENGTH..=max_length {
         let mut attempts = 0usize;
         let mut failures = 0usize;
 
@@ -153,6 +158,7 @@ pub async fn create_url(
     let base = Some(state.config.redirect_base_url.as_str());
 
     let CreateUrlRequest { url, custom_code } = payload;
+    let max_short_code_length = validated_short_code_max_length(state.config.short_code_max_length);
 
     if url.is_empty() {
         return Err((
@@ -168,11 +174,14 @@ pub async fn create_url(
     let created_by_ref = created_by.as_deref();
 
     let created = if let Some(custom) = custom_code {
-        if custom.is_empty() || custom.len() > 20 {
+        if custom.is_empty() || custom.len() > max_short_code_length {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
-                    error: "Custom code must be 1-20 characters".to_string(),
+                    error: format!(
+                        "Custom code must be 1-{} characters",
+                        max_short_code_length
+                    ),
                 }),
             ));
         }
@@ -200,7 +209,14 @@ pub async fn create_url(
             )),
         }
     } else {
-        match create_with_random_code(state.storage.as_ref(), &url, created_by_ref).await {
+        match create_with_random_code(
+            state.storage.as_ref(),
+            &url,
+            created_by_ref,
+            max_short_code_length,
+        )
+        .await
+        {
             Ok(url) => Ok((
                 StatusCode::CREATED,
                 Json(ShortenedUrlResponse::with_base(url, base)),
@@ -434,6 +450,7 @@ pub async fn get_user_info(
 #[derive(Serialize)]
 pub struct AuthModeResponse {
     pub mode: String,
+    pub short_code_max_length: usize,
 }
 
 /// Get the authentication mode configured for this instance
@@ -447,7 +464,38 @@ pub async fn get_auth_mode(State(state): State<Arc<AppState>>) -> Json<AuthModeR
 
     Json(AuthModeResponse {
         mode: mode.to_string(),
+        short_code_max_length: state.config.short_code_max_length,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validated_short_code_max_length, MIN_SHORT_CODE_LENGTH};
+
+    #[test]
+    fn test_validated_short_code_max_length_uses_minimum() {
+        assert_eq!(
+            validated_short_code_max_length(1),
+            MIN_SHORT_CODE_LENGTH
+        );
+        assert_eq!(
+            validated_short_code_max_length(0),
+            MIN_SHORT_CODE_LENGTH
+        );
+    }
+
+    #[test]
+    fn test_validated_short_code_max_length_keeps_config_value() {
+        assert_eq!(validated_short_code_max_length(50), 50);
+    }
+
+    #[test]
+    fn test_validated_short_code_max_length_allows_minimum() {
+        assert_eq!(
+            validated_short_code_max_length(MIN_SHORT_CODE_LENGTH),
+            MIN_SHORT_CODE_LENGTH
+        );
+    }
 }
 
 /// Query parameters for search endpoint

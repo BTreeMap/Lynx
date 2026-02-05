@@ -1,13 +1,18 @@
 import React, { useState } from 'react';
+import { useAuth } from '../hooks/useAuth';
 import { apiClient } from '../api';
 import type { CreateUrlRequest } from '../types';
 import { buildShortLink } from '../utils/url';
+
+const DEFAULT_SHORT_CODE_MAX_LENGTH = 50;
 
 interface CreateUrlFormProps {
   onUrlCreated: () => void;
 }
 
 const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
+  const { shortCodeMaxLength } = useAuth();
+  const maxShortCodeLength = shortCodeMaxLength || DEFAULT_SHORT_CODE_MAX_LENGTH;
   const [url, setUrl] = useState('');
   const [customCode, setCustomCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -126,7 +131,7 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
             value={customCode}
             onChange={(e) => setCustomCode(e.target.value)}
             placeholder="my-custom-code"
-            maxLength={20}
+            maxLength={maxShortCodeLength}
             style={{
               width: '100%',
               padding: '10px 12px',
@@ -141,7 +146,7 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
             color: 'var(--color-text-tertiary)',
             fontSize: '13px'
           }}>
-            Leave empty for auto-generated code
+            Up to {maxShortCodeLength} characters. Leave empty for auto-generated code.
           </small>
         </div>
         {error && (
