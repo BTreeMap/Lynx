@@ -449,6 +449,7 @@ pub async fn get_user_info(
 #[derive(Serialize)]
 pub struct AuthModeResponse {
     pub mode: String,
+    pub short_code_max_length: usize,
 }
 
 /// Get the authentication mode configured for this instance
@@ -462,6 +463,7 @@ pub async fn get_auth_mode(State(state): State<Arc<AppState>>) -> Json<AuthModeR
 
     Json(AuthModeResponse {
         mode: mode.to_string(),
+        short_code_max_length: state.config.short_code_max_length,
     })
 }
 
@@ -480,6 +482,14 @@ mod tests {
     #[test]
     fn test_validated_short_code_max_length_keeps_config_value() {
         assert_eq!(validated_short_code_max_length(50), 50);
+    }
+
+    #[test]
+    fn test_validated_short_code_max_length_allows_minimum() {
+        assert_eq!(
+            validated_short_code_max_length(MIN_SHORT_CODE_LENGTH),
+            MIN_SHORT_CODE_LENGTH
+        );
     }
 }
 

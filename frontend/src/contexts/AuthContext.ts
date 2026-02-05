@@ -6,6 +6,7 @@ export interface AuthContextType {
   token: string | null;
   userInfo: UserInfo | null;
   isLoading: boolean;
+  shortCodeMaxLength: number;
   login: (token: string) => void;
   logout: () => void;
   refreshUserInfo: () => Promise<void>;

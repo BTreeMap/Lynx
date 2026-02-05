@@ -4,11 +4,16 @@ import { apiClient } from '../api';
 import type { UserInfo } from '../types';
 import { AuthContext } from '../contexts/AuthContext';
 
+const DEFAULT_SHORT_CODE_MAX_LENGTH = 50;
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [authMode, setAuthMode] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('auth_token'));
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [shortCodeMaxLength, setShortCodeMaxLength] = useState<number>(
+    DEFAULT_SHORT_CODE_MAX_LENGTH
+  );
 
   const refreshUserInfo = useCallback(async () => {
     if (token || authMode === 'none' || authMode === 'cloudflare') {
@@ -28,9 +33,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const response = await apiClient.getAuthMode();
         setAuthMode(response.mode);
+        setShortCodeMaxLength(response.short_code_max_length ?? DEFAULT_SHORT_CODE_MAX_LENGTH);
       } catch (error) {
         console.error('Failed to fetch auth mode:', error);
         setAuthMode('oauth'); // Default to oauth if unable to fetch
+        setShortCodeMaxLength(DEFAULT_SHORT_CODE_MAX_LENGTH);
       }
     };
     fetchAuthMode();
@@ -70,7 +77,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <AuthContext.Provider value={{ authMode, token, userInfo, isLoading, login, logout, refreshUserInfo }}>
+    <AuthContext.Provider value={{ authMode, token, userInfo, isLoading, shortCodeMaxLength, login, logout, refreshUserInfo }}>
       {children}
     </AuthContext.Provider>
   );

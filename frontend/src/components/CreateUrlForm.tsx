@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useAuth } from '../hooks/useAuth';
 import { apiClient } from '../api';
 import type { CreateUrlRequest } from '../types';
 import { buildShortLink } from '../utils/url';
@@ -8,6 +9,7 @@ interface CreateUrlFormProps {
 }
 
 const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
+  const { shortCodeMaxLength } = useAuth();
   const [url, setUrl] = useState('');
   const [customCode, setCustomCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -126,7 +128,7 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
             value={customCode}
             onChange={(e) => setCustomCode(e.target.value)}
             placeholder="my-custom-code"
-            maxLength={50}
+            maxLength={shortCodeMaxLength}
             style={{
               width: '100%',
               padding: '10px 12px',
@@ -141,7 +143,7 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
             color: 'var(--color-text-tertiary)',
             fontSize: '13px'
           }}>
-            Leave empty for auto-generated code
+            Up to {shortCodeMaxLength} characters. Leave empty for auto-generated code.
           </small>
         </div>
         {error && (
