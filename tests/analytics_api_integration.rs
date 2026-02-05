@@ -57,6 +57,7 @@ fn create_test_config() -> Arc<Config> {
         pagination: PaginationConfig {
             cursor_hmac_secret: None,
         },
+        short_code_max_length: 50,
         analytics: AnalyticsConfig {
             enabled: false,
             geoip_city_db_path: None,

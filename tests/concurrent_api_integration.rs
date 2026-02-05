@@ -12,6 +12,7 @@ use lynx::auth::AuthService;
 use lynx::config::{AuthConfig, AuthMode, Config};
 use lynx::storage::{SqliteStorage, Storage};
 use rand::Rng;
+use serde_json::Value;
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -23,7 +24,7 @@ async fn create_test_storage() -> Arc<dyn Storage> {
 }
 
 /// Helper to create test config
-fn create_test_config() -> Arc<Config> {
+fn create_test_config(short_code_max_length: usize) -> Arc<Config> {
     use lynx::config::*;
 
     Arc::new(Config {
@@ -56,6 +57,7 @@ fn create_test_config() -> Arc<Config> {
         pagination: PaginationConfig {
             cursor_hmac_secret: None,
         },
+        short_code_max_length,
         analytics: AnalyticsConfig {
             enabled: false,
             geoip_city_db_path: None,
@@ -84,7 +86,7 @@ async fn create_test_auth_service() -> Arc<AuthService> {
 async fn test_concurrent_short_code_creation() {
     // Test that concurrent short code creation handles conflicts correctly
     let storage = create_test_storage().await;
-    let config = create_test_config();
+    let config = create_test_config(50);
     let auth_service = create_test_auth_service().await;
 
     let app = api::routes::create_api_router(storage.clone(), auth_service, config.clone(), None);
@@ -140,7 +142,7 @@ async fn test_concurrent_short_code_creation() {
 async fn test_concurrent_different_short_codes() {
     // Test that concurrent creation of different short codes all succeed
     let storage = create_test_storage().await;
-    let config = create_test_config();
+    let config = create_test_config(50);
     let auth_service = create_test_auth_service().await;
 
     let app = api::routes::create_api_router(storage.clone(), auth_service, config.clone(), None);
@@ -184,6 +186,55 @@ async fn test_concurrent_different_short_codes() {
     }
 
     assert_eq!(success_count, 10, "All 10 creations should succeed");
+}
+
+#[tokio::test]
+async fn test_short_code_max_length_enforced() {
+    let storage = create_test_storage().await;
+    let config = create_test_config(5);
+    let auth_service = create_test_auth_service().await;
+
+    let app = api::routes::create_api_router(storage.clone(), auth_service, config.clone(), None);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/urls")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"url": "https://example.com", "custom_code": "toolong"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    let error = json["error"].as_str().unwrap_or_default();
+    assert!(error.contains("1-5"));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/urls")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"url": "https://example.com", "custom_code": "short"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
 }
 
 #[tokio::test]

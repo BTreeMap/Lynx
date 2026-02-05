@@ -126,7 +126,7 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
             value={customCode}
             onChange={(e) => setCustomCode(e.target.value)}
             placeholder="my-custom-code"
-            maxLength={20}
+            maxLength={50}
             style={{
               width: '100%',
               padding: '10px 12px',
