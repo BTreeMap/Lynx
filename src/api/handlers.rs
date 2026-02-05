@@ -105,6 +105,7 @@ fn random_code(length: usize) -> String {
         .collect()
 }
 
+/// Ensure the configured short code max length never dips below the minimum.
 fn validated_short_code_max_length(max_length: usize) -> usize {
     max_length.max(MIN_SHORT_CODE_LENGTH)
 }
@@ -475,6 +476,10 @@ mod tests {
     fn test_validated_short_code_max_length_uses_minimum() {
         assert_eq!(
             validated_short_code_max_length(1),
+            MIN_SHORT_CODE_LENGTH
+        );
+        assert_eq!(
+            validated_short_code_max_length(0),
             MIN_SHORT_CODE_LENGTH
         );
     }

@@ -204,7 +204,7 @@ async fn test_short_code_max_length_enforced() {
                 .uri("/api/urls")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    r#"{"url": "https://example.com", "custom_code": "toolong"}"#,
+                    r#"{"url": "https://example.com", "custom_code": "exceeds"}"#,
                 ))
                 .unwrap(),
         )

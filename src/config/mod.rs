@@ -78,6 +78,8 @@ pub struct Config {
     pub frontend: FrontendConfig,
     pub cache: CacheConfig,
     pub pagination: PaginationConfig,
+    /// Maximum length for custom short codes.
+    /// Defaults to 50 to allow readable custom codes while staying URL-friendly.
     #[serde(default = "Config::default_short_code_max_length")]
     pub short_code_max_length: usize,
     #[serde(default)]
