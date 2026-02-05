@@ -27,7 +27,7 @@ export interface UserInfo {
 
 export interface AuthModeResponse {
   mode: string;
-  short_code_max_length?: number;
+  short_code_max_length: number;
 }
 
 export interface ErrorResponse {

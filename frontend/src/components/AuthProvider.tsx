@@ -33,7 +33,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const response = await apiClient.getAuthMode();
         setAuthMode(response.mode);
-        setShortCodeMaxLength(response.short_code_max_length ?? DEFAULT_SHORT_CODE_MAX_LENGTH);
+        setShortCodeMaxLength(response.short_code_max_length);
       } catch (error) {
         console.error('Failed to fetch auth mode:', error);
         setAuthMode('oauth'); // Default to oauth if unable to fetch
