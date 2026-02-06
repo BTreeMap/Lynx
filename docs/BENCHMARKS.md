@@ -98,7 +98,7 @@ docker run -d \
   -e POSTGRES_PASSWORD=lynx_pass \
   -e POSTGRES_DB=lynx \
   -p 5432:5432 \
-  postgres:16-alpine
+  postgres:17-alpine
 
 # Start Lynx with host network (bypasses userland proxy)
 docker run -d \

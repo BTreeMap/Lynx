@@ -129,7 +129,7 @@ Automatically runs performance benchmarks to validate caching optimizations:
 - Manual workflow dispatch (with configurable duration)
 
 **Configuration:**
-- Database: PostgreSQL 16
+- Database: PostgreSQL 17
 - Network: `--network host` (bypasses userland proxy for max performance)
 - Cache: 500k entries, 5s flush interval, 100ms actor flush
 - Connections: 50 database connections

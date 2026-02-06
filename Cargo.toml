@@ -50,7 +50,7 @@ dotenvy = "0.15"
 
 # Authentication
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 
 # Cursor pagination
@@ -67,7 +67,7 @@ clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 
 # Analytics - GeoIP
-maxminddb = { version = "0.26", features = ["mmap", "simdutf8"] }
+maxminddb = { version = "0.27", features = ["mmap", "simdutf8"] }
 
 # IP address and CIDR manipulation
 ipnet = "2"
@@ -82,4 +82,3 @@ debug = true
 [dev-dependencies]
 # Use same version as main dependency to avoid conflicts
 # reqwest is already a dependency with json and rustls-tls features
-

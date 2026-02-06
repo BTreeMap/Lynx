@@ -1,5 +1,5 @@
 # Use the official Rust image as the builder stage
-FROM rust:1-slim AS builder
+FROM rust:1.93-slim AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -17,7 +17,7 @@ COPY . .
 RUN cargo build --release
 
 # Use a minimal image for the final stage
-FROM debian:stable-slim
+FROM debian:trixie-slim
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
