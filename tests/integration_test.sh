@@ -254,7 +254,7 @@ fi
 
 # Make 10 redirects
 for i in {1..10}; do
-    curl -s -o /dev/null -L "$REDIRECT_URL/$unique_code"
+    curl -s -o /dev/null "$REDIRECT_URL/$unique_code"
 done
 sleep 5  # Wait for flush
 # Check stats

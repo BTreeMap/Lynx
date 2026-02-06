@@ -27,7 +27,7 @@ impl GeoIpService {
     /// A new GeoIpService instance with memory-mapped databases
     pub fn new(city_path: Option<&str>, asn_path: Option<&str>) -> Result<Self> {
         let city_reader = if let Some(path) = city_path {
-            let reader = Reader::open_mmap(path)
+            let reader = unsafe { Reader::open_mmap(path) }
                 .with_context(|| format!("Failed to open GeoIP City database at {}", path))?;
             Some(Arc::new(reader))
         } else {
@@ -35,7 +35,7 @@ impl GeoIpService {
         };
 
         let asn_reader = if let Some(path) = asn_path {
-            let reader = Reader::open_mmap(path)
+            let reader = unsafe { Reader::open_mmap(path) }
                 .with_context(|| format!("Failed to open GeoIP ASN database at {}", path))?;
             Some(Arc::new(reader))
         } else {
@@ -71,27 +71,31 @@ impl GeoIpService {
             let mut extracted = false;
 
             // First try City lookup (includes country, region, city)
-            if let Ok(Some(city)) = reader.lookup::<geoip2::City>(ip) {
-                self.extract_from_city(&city, &mut geo_location);
-                extracted = true;
-            }
+            if let Ok(result) = reader.lookup(ip) {
+                if let Ok(Some(city)) = result.decode::<geoip2::City>() {
+                    self.extract_from_city(&city, &mut geo_location);
+                    extracted = true;
+                }
 
-            // Fallback to Country lookup if City data wasn't available.
-            // This works because the City database is a superset of Country data,
-            // and geoip2::Country extracts just the country fields from any GeoIP2 database.
-            // This handles both Ok(None) from City lookup and lookup errors.
-            if !extracted {
-                if let Ok(Some(country)) = reader.lookup::<geoip2::Country>(ip) {
-                    self.extract_from_country(&country, &mut geo_location);
+                // Fallback to Country lookup if City data wasn't available.
+                // This works because the City database is a superset of Country data,
+                // and geoip2::Country extracts just the country fields from any GeoIP2 database.
+                if !extracted {
+                    if let Ok(Some(country)) = result.decode::<geoip2::Country>() {
+                        self.extract_from_country(&country, &mut geo_location);
+                    }
                 }
             }
         }
 
         // Lookup ASN information
         if let Some(ref reader) = self.asn_reader {
-            if let Ok(Some(asn)) = reader.lookup::<geoip2::Asn>(ip) {
-                geo_location.asn = asn.autonomous_system_number;
-                geo_location.asn_org = asn.autonomous_system_organization.map(|s| s.to_string());
+            if let Ok(result) = reader.lookup(ip) {
+                if let Ok(Some(asn)) = result.decode::<geoip2::Asn>() {
+                    geo_location.asn = asn.autonomous_system_number;
+                    geo_location.asn_org =
+                        asn.autonomous_system_organization.map(|s| s.to_string());
+                }
             }
         }
 
@@ -100,44 +104,20 @@ impl GeoIpService {
 
     /// Extract location from City data
     fn extract_from_city(&self, city: &geoip2::City, geo_location: &mut GeoLocation) {
-        if let Some(ref country) = city.country {
-            geo_location.country_code = country.iso_code.map(|s| s.to_string());
-            geo_location.country_name = country
-                .names
-                .as_ref()
-                .and_then(|names| names.get("en"))
-                .map(|s| s.to_string());
+        geo_location.country_code = city.country.iso_code.map(|s| s.to_string());
+        geo_location.country_name = city.country.names.english.map(|s| s.to_string());
+
+        if let Some(subdivision) = city.subdivisions.first() {
+            geo_location.region = subdivision.names.english.map(|s| s.to_string());
         }
 
-        if let Some(ref subdivisions) = city.subdivisions {
-            if let Some(subdivision) = subdivisions.first() {
-                geo_location.region = subdivision
-                    .names
-                    .as_ref()
-                    .and_then(|names| names.get("en"))
-                    .map(|s| s.to_string());
-            }
-        }
-
-        if let Some(ref city_data) = city.city {
-            geo_location.city = city_data
-                .names
-                .as_ref()
-                .and_then(|names| names.get("en"))
-                .map(|s| s.to_string());
-        }
+        geo_location.city = city.city.names.english.map(|s| s.to_string());
     }
 
     /// Extract location from Country data (when City is not available)
     fn extract_from_country(&self, country: &geoip2::Country, geo_location: &mut GeoLocation) {
-        if let Some(ref country_data) = country.country {
-            geo_location.country_code = country_data.iso_code.map(|s| s.to_string());
-            geo_location.country_name = country_data
-                .names
-                .as_ref()
-                .and_then(|names| names.get("en"))
-                .map(|s| s.to_string());
-        }
+        geo_location.country_code = country.country.iso_code.map(|s| s.to_string());
+        geo_location.country_name = country.country.names.english.map(|s| s.to_string());
     }
 }
 

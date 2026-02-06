@@ -142,7 +142,7 @@ chmod +x lynx-linux-amd64
 
 ### Building from Source
 
-Requires Rust 1.70+ and Node.js 20+ for frontend compilation:
+Requires Rust 1.93+ and Node.js 24+ for frontend compilation:
 
 ```bash
 git clone https://github.com/BTreeMap/Lynx.git
@@ -233,7 +233,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_USER: lynx
       POSTGRES_PASSWORD: secure_password

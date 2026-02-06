@@ -1,0 +1,66 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "customManagers:dockerfileVersions"],
+  "rebaseWhen": "behind-base-branch",
+  "dependencyDashboard": true,
+  "labels": ["dependencies", "no-stale"],
+  "commitMessagePrefix": "⬆️",
+  "commitMessageTopic": "{{depName}}",
+  "packageRules": [
+    {
+      "groupName": "Docker Images",
+      "matchDatasources": ["docker"]
+    },
+    {
+      "groupName": "Docker Images",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "groupName": "GitHub Releases",
+      "matchDatasources": ["github-releases"]
+    },
+    {
+      "groupName": "GitHub Releases",
+      "matchDatasources": ["github-releases"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "groupName": "Repology",
+      "matchDatasources": ["repology"],
+      "automerge": true
+    },
+    {
+      "groupName": "GitHub Actions",
+      "matchManagers": ["github-actions"]
+    },
+    {
+      "groupName": "GitHub Actions",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "groupName": "Rust Crates",
+      "matchManagers": ["cargo"]
+    },
+    {
+      "groupName": "Rust Crates",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "groupName": "Node Dependencies",
+      "matchManagers": ["npm"]
+    },
+    {
+      "groupName": "Node Dependencies",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    }
+  ]
+}
