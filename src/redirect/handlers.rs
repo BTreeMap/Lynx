@@ -92,7 +92,7 @@ pub async fn redirect_url(
                             );
                             // Use a generic error message to avoid information disclosure
                             return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                                .into_response()
+                                .into_response();
                         }
                     };
 

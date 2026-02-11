@@ -1,5 +1,7 @@
 use crate::models::ShortenedUrl;
-use crate::storage::{LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageResult};
+use crate::storage::{
+    LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageResult,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use dashmap::DashMap;

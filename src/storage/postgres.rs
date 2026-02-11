@@ -39,9 +39,8 @@ impl PostgresStorage {
         fetch_limit: i64,
     ) -> Result<Vec<ShortenedUrl>> {
         match (created_from, created_to, is_active) {
-            (Some(from), Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            (Some(from), Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -52,22 +51,20 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $8
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(from)
-                .bind(to)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(from)
+            .bind(to)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -77,21 +74,19 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $7
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(from)
-                .bind(to)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(from)
+            .bind(to)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -102,21 +97,19 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $7
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(from)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(from)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -126,20 +119,18 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $6
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(from)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(from)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -150,21 +141,19 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $7
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(to)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(to)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -174,20 +163,18 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $6
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(to)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(to)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -197,20 +184,18 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $6
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -219,16 +204,15 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
         }
     }
 
@@ -243,9 +227,8 @@ impl PostgresStorage {
         fetch_limit: i64,
     ) -> Result<Vec<ShortenedUrl>> {
         match (created_from, created_to, is_active) {
-            (Some(from), Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            (Some(from), Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -255,21 +238,19 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $7
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(to)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(to)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -278,20 +259,18 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $6
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(to)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(to)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -301,20 +280,18 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $6
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -323,19 +300,17 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -345,20 +320,18 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $6
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(to)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(to)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -367,19 +340,17 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(to)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(to)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -388,19 +359,17 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -408,15 +377,14 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $4
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
+            )
+            .bind(like_pattern)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
         }
     }
 
@@ -431,9 +399,8 @@ impl PostgresStorage {
         fetch_limit: i64,
     ) -> Result<Vec<ShortenedUrl>> {
         match (created_from, created_to, is_active) {
-            (Some(from), Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            (Some(from), Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -444,21 +411,19 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $7
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(to)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(to)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -468,20 +433,18 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $6
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(to)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(to)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -492,20 +455,18 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $6
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -515,19 +476,17 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -538,20 +497,18 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $6
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(to)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(to)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -561,19 +518,17 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(to)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(to)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -583,19 +538,17 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(active)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(active)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -604,15 +557,14 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $4
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(cursor_created_at)
-                .bind(cursor_id)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
+            )
+            .bind(like_pattern)
+            .bind(cursor_created_at)
+            .bind(cursor_id)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
         }
     }
 
@@ -625,9 +577,8 @@ impl PostgresStorage {
         fetch_limit: i64,
     ) -> Result<Vec<ShortenedUrl>> {
         match (created_from, created_to, is_active) {
-            (Some(from), Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            (Some(from), Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -637,19 +588,17 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(to)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(to)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -658,18 +607,16 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $4
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(to)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(to)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -679,18 +626,16 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $4
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -699,17 +644,15 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $3
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -719,18 +662,16 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $4
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(to)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(to)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -739,17 +680,15 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $3
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(to)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(to)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -758,17 +697,15 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $3
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -776,13 +713,12 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $2
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
+            )
+            .bind(like_pattern)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
         }
     }
 
@@ -796,9 +732,8 @@ impl PostgresStorage {
         fetch_limit: i64,
     ) -> Result<Vec<ShortenedUrl>> {
         match (created_from, created_to, is_active) {
-            (Some(from), Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            (Some(from), Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -808,20 +743,18 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $6
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(from)
-                .bind(to)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(from)
+            .bind(to)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -830,19 +763,17 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(from)
-                .bind(to)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(from)
+            .bind(to)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -852,19 +783,17 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(from)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(from)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -873,18 +802,16 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $4
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(from)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(from)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -894,19 +821,17 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(to)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(to)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -915,18 +840,16 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $4
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(to)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(to)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -935,18 +858,16 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $4
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -954,14 +875,13 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $3
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(created_by)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
+            )
+            .bind(like_pattern)
+            .bind(created_by)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
         }
     }
 
@@ -974,9 +894,8 @@ impl PostgresStorage {
         fetch_limit: i64,
     ) -> Result<Vec<ShortenedUrl>> {
         match (created_from, created_to, is_active) {
-            (Some(from), Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            (Some(from), Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -985,19 +904,17 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $5
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(to)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(to)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -1005,18 +922,16 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $4
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(to)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(to)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -1025,18 +940,16 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $4
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (Some(from), None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (Some(from), None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -1044,17 +957,15 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $3
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(from)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(from)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -1063,18 +974,16 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $4
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(to)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, Some(to), None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(to)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, Some(to), None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -1082,17 +991,15 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $3
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(to)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, Some(active)) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(to)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, Some(active)) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
@@ -1100,30 +1007,27 @@ impl PostgresStorage {
                     ORDER BY created_at DESC, id DESC
                     LIMIT $3
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(active)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
-            (None, None, None) => {
-                sqlx::query_as::<_, ShortenedUrl>(
-                    r#"
+            )
+            .bind(like_pattern)
+            .bind(active)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
+            (None, None, None) => sqlx::query_as::<_, ShortenedUrl>(
+                r#"
                     SELECT id, short_code, original_url, created_at, created_by, clicks, is_active
                     FROM urls
                     WHERE (short_code LIKE $1 OR lower(original_url) LIKE lower($1))
                     ORDER BY created_at DESC, id DESC
                     LIMIT $2
                     "#,
-                )
-                .bind(like_pattern)
-                .bind(fetch_limit)
-                .fetch_all(self.pool.as_ref())
-                .await
-                .map_err(Into::into)
-            }
+            )
+            .bind(like_pattern)
+            .bind(fetch_limit)
+            .fetch_all(self.pool.as_ref())
+            .await
+            .map_err(Into::into),
         }
     }
 }

@@ -386,11 +386,11 @@ async fn test_configurable_redirect_status_codes() {
 
     // Test with different status codes
     let test_cases = vec![
-        (StatusCode::MOVED_PERMANENTLY, "301"),      // 301
-        (StatusCode::FOUND, "302"),                  // 302
-        (StatusCode::SEE_OTHER, "303"),              // 303
-        (StatusCode::TEMPORARY_REDIRECT, "307"),     // 307
-        (StatusCode::PERMANENT_REDIRECT, "308"),     // 308
+        (StatusCode::MOVED_PERMANENTLY, "301"),  // 301
+        (StatusCode::FOUND, "302"),              // 302
+        (StatusCode::SEE_OTHER, "303"),          // 303
+        (StatusCode::TEMPORARY_REDIRECT, "307"), // 307
+        (StatusCode::PERMANENT_REDIRECT, "308"), // 308
     ];
 
     for (status_code, description) in test_cases {

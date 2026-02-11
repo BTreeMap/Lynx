@@ -178,10 +178,7 @@ pub async fn create_url(
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
-                    error: format!(
-                        "Custom code must be 1-{} characters",
-                        max_short_code_length
-                    ),
+                    error: format!("Custom code must be 1-{} characters", max_short_code_length),
                 }),
             ));
         }
@@ -474,14 +471,8 @@ mod tests {
 
     #[test]
     fn test_validated_short_code_max_length_uses_minimum() {
-        assert_eq!(
-            validated_short_code_max_length(1),
-            MIN_SHORT_CODE_LENGTH
-        );
-        assert_eq!(
-            validated_short_code_max_length(0),
-            MIN_SHORT_CODE_LENGTH
-        );
+        assert_eq!(validated_short_code_max_length(1), MIN_SHORT_CODE_LENGTH);
+        assert_eq!(validated_short_code_max_length(0), MIN_SHORT_CODE_LENGTH);
     }
 
     #[test]

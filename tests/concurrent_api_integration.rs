@@ -101,7 +101,10 @@ async fn test_concurrent_short_code_creation() {
                 .method("POST")
                 .uri("/api/urls")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"url": "https://example.com", "custom_code": "concurrent_test"}"#.to_string()))
+                .body(Body::from(
+                    r#"{"url": "https://example.com", "custom_code": "concurrent_test"}"#
+                        .to_string(),
+                ))
                 .unwrap();
 
             app_clone.oneshot(request).await.unwrap()

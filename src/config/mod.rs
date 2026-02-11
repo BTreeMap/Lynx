@@ -51,16 +51,15 @@ impl TryFrom<u16> for RedirectMode {
     }
 }
 
-
 // Zero-cost conversion back to StatusCode for the response
 impl From<RedirectMode> for StatusCode {
     fn from(mode: RedirectMode) -> Self {
         match mode {
-            RedirectMode::Permanent => StatusCode::PERMANENT_REDIRECT,        // 308
-            RedirectMode::Temporary => StatusCode::TEMPORARY_REDIRECT,        // 307
-            RedirectMode::SeeOther => StatusCode::SEE_OTHER,                  // 303
-            RedirectMode::MovedPermanently => StatusCode::MOVED_PERMANENTLY,  // 301
-            RedirectMode::Found => StatusCode::FOUND,                         // 302
+            RedirectMode::Permanent => StatusCode::PERMANENT_REDIRECT, // 308
+            RedirectMode::Temporary => StatusCode::TEMPORARY_REDIRECT, // 307
+            RedirectMode::SeeOther => StatusCode::SEE_OTHER,           // 303
+            RedirectMode::MovedPermanently => StatusCode::MOVED_PERMANENTLY, // 301
+            RedirectMode::Found => StatusCode::FOUND,                  // 302
         }
     }
 }
@@ -235,7 +234,6 @@ pub enum TrustedProxyMode {
     /// Trust Cloudflare-specific header (CF-Connecting-IP)
     Cloudflare,
 }
-
 
 impl Default for AnalyticsConfig {
     fn default() -> Self {

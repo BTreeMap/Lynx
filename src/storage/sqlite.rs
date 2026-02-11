@@ -3696,14 +3696,8 @@ mod tests {
 
         let result = storage.search(&params, true, None).await.unwrap();
         assert_eq!(result.items.len(), 2);
-        assert!(result
-            .items
-            .iter()
-            .any(|u| u.short_code == "abc123"));
-        assert!(result
-            .items
-            .iter()
-            .any(|u| u.short_code == "abc456"));
+        assert!(result.items.iter().any(|u| u.short_code == "abc123"));
+        assert!(result.items.iter().any(|u| u.short_code == "abc456"));
     }
 
     #[tokio::test]
@@ -3765,10 +3759,7 @@ mod tests {
         };
 
         // Non-admin user1 should only see user1link
-        let result = storage
-            .search(&params, false, Some("user1"))
-            .await
-            .unwrap();
+        let result = storage.search(&params, false, Some("user1")).await.unwrap();
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.items[0].short_code, "user1link");
 
