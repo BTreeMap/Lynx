@@ -42,7 +42,7 @@ thiserror = "2"
 async-trait = "0.1"
 
 # URL shortening
-rand = "0.10"
+rand = { version = "0.10", features = ["thread_rng"] }
 statrs = "0.18"
 
 # Environment variables

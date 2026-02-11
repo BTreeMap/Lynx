@@ -11,7 +11,7 @@ use lynx::api;
 use lynx::auth::AuthService;
 use lynx::config::{AuthConfig, AuthMode, Config};
 use lynx::storage::{SqliteStorage, Storage};
-use rand::Rng;
+use rand::RngExt;
 use serde_json::Value;
 use std::sync::Arc;
 use tower::ServiceExt;

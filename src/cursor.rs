@@ -14,9 +14,9 @@ pub fn init_cursor_hmac_key(secret: Option<&str>) {
     let key = if let Some(s) = secret {
         s.as_bytes().to_vec()
     } else {
-        use rand::Rng;
-        let mut rng = rand::rng();
-        (0..32).map(|_| rng.random::<u8>()).collect()
+        let mut buf = [0u8; 32];
+        rand::fill(&mut buf);
+        buf.to_vec()
     };
 
     HMAC_KEY.get_or_init(|| key);
@@ -25,9 +25,9 @@ pub fn init_cursor_hmac_key(secret: Option<&str>) {
 /// Get the HMAC key, initializing with a random key if not already set
 fn get_hmac_key() -> &'static [u8] {
     HMAC_KEY.get_or_init(|| {
-        use rand::Rng;
-        let mut rng = rand::rng();
-        (0..32).map(|_| rng.random::<u8>()).collect()
+        let mut buf = [0u8; 32];
+        rand::fill(&mut buf);
+        buf.to_vec()
     })
 }
 
