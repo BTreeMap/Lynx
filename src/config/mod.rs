@@ -7,11 +7,12 @@ use serde::{Deserialize, Serialize};
 /// This enum represents the valid redirect status codes (3xx) that can be used
 /// for URL redirection. It validates the configuration at startup to ensure
 /// only valid redirect codes are used.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 #[serde(try_from = "u16")]
 pub enum RedirectMode {
     /// HTTP 308: Permanent Redirect (Axum default).
     /// Method and body are preserved (e.g., POST stays POST).
+    #[default]
     Permanent,
 
     /// HTTP 307: Temporary Redirect.
@@ -46,12 +47,6 @@ impl TryFrom<u16> for RedirectMode {
                 other
             )),
         }
-    }
-}
-
-impl Default for RedirectMode {
-    fn default() -> Self {
-        RedirectMode::Permanent // Default to 308 as per Axum's Redirect::permanent
     }
 }
 
@@ -226,21 +221,16 @@ pub struct AnalyticsConfig {
     pub flush_interval_secs: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TrustedProxyMode {
     /// No proxy trust - use socket remote address only
+    #[default]
     None,
     /// Trust standard headers (Forwarded, X-Forwarded-For) with trust validation
     Standard,
     /// Trust Cloudflare-specific header (CF-Connecting-IP)
     Cloudflare,
-}
-
-impl Default for TrustedProxyMode {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl Default for AnalyticsConfig {

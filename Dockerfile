@@ -2,9 +2,11 @@
 FROM rust:1.93-slim AS builder
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     pkg-config \
     libssl-dev \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
@@ -20,7 +22,7 @@ RUN cargo build --release
 FROM debian:trixie-slim
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     ca-certificates \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
@@ -35,8 +37,7 @@ ENV DATABASE_BACKEND=sqlite \
     API_HOST=0.0.0.0 \
     API_PORT=8080 \
     REDIRECT_HOST=0.0.0.0 \
-    REDIRECT_PORT=3000 \
-    AUTH_MODE=none
+    REDIRECT_PORT=3000
 
 # Copy the built binary from the builder stage
 COPY --from=builder /usr/src/lynx/target/release/lynx /opt/lynx

@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use base64::prelude::*;
 use hmac::{Hmac, Mac};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::sync::OnceLock;
@@ -8,15 +9,20 @@ use std::sync::OnceLock;
 /// Global HMAC key for cursor signing
 static HMAC_KEY: OnceLock<Vec<u8>> = OnceLock::new();
 
+fn generate_random_hmac_key() -> Vec<u8> {
+    let mut key = [0u8; 32];
+    let mut rng = rand::rng();
+    rng.fill_bytes(&mut key);
+    key.to_vec()
+}
+
 /// Initialize the HMAC key for cursor signing
 /// If secret is None, generates a random key (WARNING: cursors won't survive restarts)
 pub fn init_cursor_hmac_key(secret: Option<&str>) {
     let key = if let Some(s) = secret {
         s.as_bytes().to_vec()
     } else {
-        use rand::Rng;
-        let mut rng = rand::rng();
-        (0..32).map(|_| rng.random::<u8>()).collect()
+        generate_random_hmac_key()
     };
 
     HMAC_KEY.get_or_init(|| key);
@@ -24,11 +30,7 @@ pub fn init_cursor_hmac_key(secret: Option<&str>) {
 
 /// Get the HMAC key, initializing with a random key if not already set
 fn get_hmac_key() -> &'static [u8] {
-    HMAC_KEY.get_or_init(|| {
-        use rand::Rng;
-        let mut rng = rand::rng();
-        (0..32).map(|_| rng.random::<u8>()).collect()
-    })
+    HMAC_KEY.get_or_init(generate_random_hmac_key)
 }
 
 /// Cursor data for pagination
@@ -104,10 +106,32 @@ pub fn verify_cursor(cursor: &str) -> Result<CursorData> {
 mod tests {
     use super::*;
 
+    const TEST_SECRET: &str = "test_secret_key_for_hmac_signing";
+
+    #[test]
+    fn test_cursor_hmac_key_length() {
+        let key = generate_random_hmac_key();
+        assert_eq!(key.len(), 32);
+    }
+
+    #[test]
+    fn test_cursor_hmac_key_from_secret() {
+        init_cursor_hmac_key(Some(TEST_SECRET));
+        assert_eq!(get_hmac_key(), TEST_SECRET.as_bytes());
+    }
+
+    #[test]
+    fn test_cursor_hmac_key_once_lock() {
+        init_cursor_hmac_key(Some(TEST_SECRET));
+        let initial_key = get_hmac_key().to_vec();
+        init_cursor_hmac_key(Some("another_secret"));
+        assert_eq!(get_hmac_key(), initial_key.as_slice());
+    }
+
     #[test]
     fn test_cursor_create_and_verify() {
         // Initialize with a static key for testing
-        init_cursor_hmac_key(Some("test_secret_key_for_hmac_signing"));
+        init_cursor_hmac_key(Some(TEST_SECRET));
 
         let data = CursorData {
             created_at: 1234567890,
@@ -123,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_cursor_tampering_detection() {
-        init_cursor_hmac_key(Some("test_secret_key_for_hmac_signing"));
+        init_cursor_hmac_key(Some(TEST_SECRET));
 
         let data = CursorData {
             created_at: 1234567890,

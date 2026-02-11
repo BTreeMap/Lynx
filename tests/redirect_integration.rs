@@ -222,13 +222,10 @@ async fn test_concurrent_redirects() {
     let mut success_count = 0;
 
     for handle in handles {
-        match handle.await {
-            Ok(Ok(response)) => {
-                if response.status() == StatusCode::PERMANENT_REDIRECT {
-                    success_count += 1;
-                }
+        if let Ok(Ok(response)) = handle.await {
+            if response.status() == StatusCode::PERMANENT_REDIRECT {
+                success_count += 1;
             }
-            _ => {}
         }
     }
 

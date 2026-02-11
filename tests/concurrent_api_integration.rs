@@ -11,7 +11,7 @@ use lynx::api;
 use lynx::auth::AuthService;
 use lynx::config::{AuthConfig, AuthMode, Config};
 use lynx::storage::{SqliteStorage, Storage};
-use rand::Rng;
+use rand::RngExt;
 use serde_json::Value;
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -101,9 +101,10 @@ async fn test_concurrent_short_code_creation() {
                 .method("POST")
                 .uri("/api/urls")
                 .header("content-type", "application/json")
-                .body(Body::from(format!(
-                    r#"{{"url": "https://example.com", "custom_code": "concurrent_test"}}"#
-                )))
+                .body(Body::from(
+                    r#"{"url": "https://example.com", "custom_code": "concurrent_test"}"#
+                        .to_string(),
+                ))
                 .unwrap();
 
             app_clone.oneshot(request).await.unwrap()
@@ -261,14 +262,11 @@ async fn test_concurrent_url_lookups() {
     let mut success_count = 0;
 
     for handle in handles {
-        match handle.await {
-            Ok(Ok(result)) => {
-                if result.url.is_some() {
-                    success_count += 1;
-                    assert_eq!(result.url.unwrap().short_code, "lookup_test");
-                }
+        if let Ok(Ok(result)) = handle.await {
+            if let Some(url) = result.url {
+                success_count += 1;
+                assert_eq!(url.short_code, "lookup_test");
             }
-            _ => {}
         }
     }
 
