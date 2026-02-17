@@ -39,8 +39,8 @@ npm run lint     # run ESLint
 # Formatting check
 cargo fmt --all -- --check
 
-# Linting
-cargo clippy --all-targets --all-features -- -D warnings
+# Linting (same flags as PR Quality Gate CI)
+cargo clippy --all-features -- -D warnings -A clippy::too_many_arguments
 
 # Unit tests
 cargo test
