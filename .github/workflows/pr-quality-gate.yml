@@ -5,6 +5,9 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: pr-quality-gate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
