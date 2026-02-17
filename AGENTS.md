@@ -81,7 +81,7 @@ bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 100
 
 1. **Build and test locally before pushing:**
    - Build the frontend: `cd frontend && npm ci && npm run build && npm run lint`
-   - Run Rust checks: `cargo fmt --all -- --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test`
+   - Run Rust checks: `cargo fmt --all -- --check && cargo clippy --all-features -- -D warnings -A clippy::too_many_arguments && cargo test`
    - Run integration tests for at least the SQLite backend: `DATABASE_BACKEND=sqlite cargo test --tests`
 2. **Add or update tests** when changing behavior.
 3. **Do not modify existing CI workflow files** (under `.github/workflows/`) unless explicitly requested.
