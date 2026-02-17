@@ -207,7 +207,7 @@ jobs:
         run: docker save lynx-pr:${{ github.sha }} -o /tmp/lynx-pr-image.tar
 
       - name: Upload Docker image artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: lynx-pr-image
           path: /tmp/lynx-pr-image.tar
@@ -222,7 +222,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download Docker image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: lynx-pr-image
           path: /tmp
@@ -374,7 +374,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download Docker image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: lynx-pr-image
           path: /tmp
