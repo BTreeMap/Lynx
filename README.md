@@ -338,6 +338,8 @@ All configuration is done via environment variables. See `.env.example` for a co
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CACHE_MAX_ENTRIES` | Maximum entries in read cache | `500000` (~100MB) |
+| `REDIRECT_STATUS_CODE` | HTTP status code for redirects: `301`, `302`, `303`, `307`, `308` | `308` |
+| `ENABLE_TIMING_HEADERS` | Include diagnostic timing headers in redirect responses | `false` |
 
 ### Frontend
 
@@ -366,30 +368,49 @@ For custom frontend deployment or development, see the [Frontend README](fronten
 
 The API server exposes RESTful endpoints at `/api/*`. Authentication is required unless `AUTH_MODE=none`.
 
+### Public Endpoints (no auth required)
+
+```bash
+GET  /api/health              # Health check
+GET  /api/auth/mode           # Returns the configured authentication mode
+```
+
+### Protected Endpoints (auth required unless AUTH_MODE=none)
+
+```bash
+POST /api/urls                # Create short URL
+GET  /api/urls                # List URLs (cursor-based pagination)
+GET  /api/urls/search         # Search URLs by query string
+GET  /api/urls/{code}         # Get URL details
+PUT  /api/urls/{code}/deactivate   # Deactivate URL (admin only)
+PUT  /api/urls/{code}/reactivate   # Reactivate URL (admin only)
+GET  /api/user/info           # Get current user info
+GET  /api/analytics/{code}           # Get analytics for a URL (admin only)
+GET  /api/analytics/{code}/aggregate # Get aggregated analytics (admin only)
+```
+
 ### Quick Examples
 
 ```bash
-# Health check
-GET /api/health
-
 # Create short URL
-POST /api/urls
-{
-  "url": "https://example.com/very/long/url",
-  "custom_code": "mycode"  // optional
-}
+curl -X POST http://localhost:8080/api/urls \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/very/long/url", "custom_code": "mycode"}'
+
+# List URLs (cursor-based pagination, default limit=50)
+curl http://localhost:8080/api/urls?limit=20
+
+# Paginate using the next_cursor from the previous response
+curl http://localhost:8080/api/urls?limit=20&cursor=<next_cursor>
 
 # Get URL details
-GET /api/urls/:code
+curl http://localhost:8080/api/urls/mycode
 
-# List URLs (paginated)
-GET /api/urls?limit=50&offset=0
+# Deactivate URL (admin only)
+curl -X PUT http://localhost:8080/api/urls/mycode/deactivate
 
-# Deactivate URL
-PUT /api/urls/:code/deactivate
-
-# Reactivate URL
-PUT /api/urls/:code/reactivate
+# Reactivate URL (admin only)
+curl -X PUT http://localhost:8080/api/urls/mycode/reactivate
 ```
 
 ### Redirect Server
@@ -397,21 +418,19 @@ PUT /api/urls/:code/reactivate
 The redirect server handles public-facing redirects:
 
 ```bash
-# Redirect to original URL
-GET /:code
-→ 301 Redirect to original URL
+GET /{code}
+→ 308 Permanent Redirect to original URL (configurable via REDIRECT_STATUS_CODE)
 
 # Returns 410 Gone for deactivated URLs
 # Returns 404 Not Found for non-existent codes
 ```
 
-The redirect endpoint includes performance tracing headers:
+When `ENABLE_TIMING_HEADERS=true`, the redirect endpoint includes performance tracing headers:
 - `X-Lynx-Cache-Hit`: Whether served from cache (`true`/`false`)
 - `X-Lynx-Timing-Total-Ms`: Total request time in milliseconds
 - `X-Lynx-Timing-Cache-Ms`: Cache lookup time
 - `X-Lynx-Timing-Db-Ms`: Database lookup time (0 if cache hit)
-
-For complete API documentation, see the API section in the [old README](README.old.md) or explore the OpenAPI schema (if available).
+- `X-Lynx-Timing-Handler-Ms`: Handler processing time
 
 ## Admin Management
 
