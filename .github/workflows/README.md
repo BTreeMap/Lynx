@@ -103,7 +103,7 @@ The Docker images support the following environment variables (see `.env.example
 - `API_PORT` - API server port (default: `8080`)
 - `REDIRECT_HOST` - Redirect server host (default: `0.0.0.0`)
 - `REDIRECT_PORT` - Redirect server port (default: `3000`)
-- `AUTH_MODE` - Authentication mode (`none` or `oauth`)
+- `AUTH_MODE` - Authentication mode (`none`, `oauth`, or `cloudflare`)
 
 ## Development
 
