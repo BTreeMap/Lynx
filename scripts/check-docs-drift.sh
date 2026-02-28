@@ -31,17 +31,15 @@ for rf in "${ROUTE_FILES[@]}"; do
   fi
   # Match .route("/path", ...) and extract the path
   while IFS= read -r route_path; do
-    # Normalize {param} to a pattern we can search for
-    search_path="$route_path"
-    if ! grep -qF "$search_path" "$README"; then
-      # Try also with :param style (some docs use :code instead of {code})
-      alt_path=$(echo "$search_path" | sed 's/{[^}]*}/:[^/]*/g')
+    if ! grep -qF "$route_path" "$README"; then
+      # Try with {param} converted to a grep-compatible regex
+      alt_path=$(echo "$route_path" | sed 's/{[^}]*}/[^/]*/g')
       if ! grep -qP "$alt_path" "$README" 2>/dev/null; then
         echo "DRIFT: Route '$route_path' (from $(basename "$rf")) not found in README.md"
         DRIFT=1
       fi
     fi
-  done < <(grep -oP '\.route\(\s*"([^"]+)"' "$rf" | sed 's/\.route("//' | sed 's/"//')
+  done < <(grep -oP '\.route\(\s*"\K[^"]+(?=")' "$rf")
 done
 
 # ── 2. Environment variable coverage ────────────────────────────────
@@ -60,7 +58,7 @@ for src in "${ENV_SOURCES[@]}"; do
   if [[ ! -f "$src" ]]; then continue; fi
   while IFS= read -r var; do
     KNOWN_VARS+=("$var")
-  done < <(grep -oP 'std::env::var\(\s*"([^"]+)"' "$src" | sed 's/std::env::var("//' | sed 's/"//')
+  done < <(grep -oP 'std::env::var\(\s*"\K[^"]+(?=")' "$src")
 done
 
 # De-duplicate
