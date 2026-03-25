@@ -6,6 +6,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -38,6 +39,14 @@ fn default_limit() -> i64 {
     100
 }
 
+fn decode_code_path_param(code: &str) -> Result<String, (StatusCode, &'static str)> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(code)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid encoded short code"))?;
+
+    String::from_utf8(bytes).map_err(|_| (StatusCode::BAD_REQUEST, "Invalid encoded short code"))
+}
+
 #[derive(Debug, Serialize)]
 pub struct AnalyticsResponse {
     pub entries: Vec<AnalyticsEntry>,
@@ -55,9 +64,14 @@ pub struct AnalyticsAggregateResponse {
 /// Get analytics for a specific short code
 pub async fn get_analytics(
     State(state): State<Arc<AnalyticsState>>,
-    Path(short_code): Path<String>,
+    Path(encoded_code): Path<String>,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> impl IntoResponse {
+    let short_code = match decode_code_path_param(&encoded_code) {
+        Ok(value) => value,
+        Err(err) => return err.into_response(),
+    };
+
     let limit = params.limit.clamp(1, 1000);
 
     // Get click count first
@@ -94,9 +108,14 @@ pub async fn get_analytics(
 /// Get aggregated analytics for a specific short code
 pub async fn get_analytics_aggregate(
     State(state): State<Arc<AnalyticsState>>,
-    Path(short_code): Path<String>,
+    Path(encoded_code): Path<String>,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> impl IntoResponse {
+    let short_code = match decode_code_path_param(&encoded_code) {
+        Ok(value) => value,
+        Err(err) => return err.into_response(),
+    };
+
     let limit = params.limit.clamp(1, 1000);
     let group_by = params.group_by.as_deref().unwrap_or("country");
 

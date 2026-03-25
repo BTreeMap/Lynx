@@ -28,7 +28,7 @@ pub fn create_redirect_router(
 
     Router::new()
         .route("/", get(health_check))
-        .route("/{code}", get(redirect_url))
+        .route("/{*code}", get(redirect_url))
         .layer(middleware::from_fn(record_request_start))
         .with_state(state)
 }

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use rand::distr::{Alphanumeric, Distribution};
 
 use crate::auth::AuthClaims;
@@ -66,6 +67,26 @@ pub struct ListQuery {
 
 fn default_limit() -> i64 {
     50
+}
+
+fn decode_code_path_param(code: &str) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+    let bytes = URL_SAFE_NO_PAD.decode(code).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Invalid encoded short code".to_string(),
+            }),
+        )
+    })?;
+
+    String::from_utf8(bytes).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Invalid encoded short code".to_string(),
+            }),
+        )
+    })
 }
 
 /// Helper to check if user is admin (combines JWT claims and manual promotion)
@@ -242,8 +263,10 @@ pub async fn create_url(
 /// Get a shortened URL by code
 pub async fn get_url(
     State(state): State<Arc<AppState>>,
-    Path(code): Path<String>,
+    Path(encoded_code): Path<String>,
 ) -> Result<Json<ShortenedUrlResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
+
     match state.storage.get_authoritative(&code).await {
         Ok(Some(url)) => Ok(Json(ShortenedUrlResponse::with_base(
             url,
@@ -268,9 +291,10 @@ pub async fn get_url(
 pub async fn deactivate_url(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
-    Path(code): Path<String>,
+    Path(encoded_code): Path<String>,
     Json(_payload): Json<DeactivateUrlRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
     // Check if user is admin
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     if !is_admin {
@@ -305,8 +329,9 @@ pub async fn deactivate_url(
 pub async fn reactivate_url(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
-    Path(code): Path<String>,
+    Path(encoded_code): Path<String>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
     // Check if user is admin
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     if !is_admin {
