@@ -307,6 +307,26 @@ else
     print_result 1 "Some URLs missing (found $count/3)"
 fi
 
+# Test 21: Search URLs by query
+echo ""
+echo "Test 21: Search URLs endpoint"
+response=$(curl -s "$API_URL/api/urls/search?q=rapid")
+if echo "$response" | grep -q "\"items\"" && echo "$response" | grep -q "rapid-1"; then
+    print_result 0 "Search URLs returns matching results"
+else
+    print_result 1 "Search URLs failed or missing expected result"
+fi
+
+# Test 22: Search URLs rejects empty query
+echo ""
+echo "Test 22: Search URLs empty query validation"
+search_status=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/urls/search?q=%20%20")
+if [ "$search_status" = "400" ]; then
+    print_result 0 "Search URLs rejects empty query"
+else
+    print_result 1 "Search URLs empty query should return 400 (got HTTP $search_status)"
+fi
+
 echo ""
 echo -e "${GREEN}=========================================="
 echo "All Integration Tests Passed!"
