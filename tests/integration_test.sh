@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+encode_short_code() {
+    printf %s "$1" | base64 | tr -d "\n" | tr "+/" "-_" | tr -d "="
+}
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -84,7 +88,7 @@ print_result $? "Create URL with auto-generated code (code: $auto_code)"
 # Test 5: Get URL details
 echo ""
 echo "Test 5: Get URL details"
-response=$(curl -s "$API_URL/api/urls/lynx-test")
+response=$(curl -s "$API_URL/api/urls/$(encode_short_code "lynx-test")")
 check_json_field "$response" "short_code" "lynx-test"
 check_json_field "$response" "original_url"
 print_result $? "Get URL details"
@@ -103,7 +107,7 @@ fi
 echo ""
 echo "Test 7: Verify click count"
 sleep 1  # Wait for click to be flushed
-response=$(curl -s "$API_URL/api/urls/lynx-test")
+response=$(curl -s "$API_URL/api/urls/$(encode_short_code "lynx-test")")
 clicks=$(echo "$response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
 if [ "$clicks" -ge 1 ]; then
     print_result 0 "Click count increased (clicks: $clicks)"
@@ -124,7 +128,7 @@ fi
 # Test 9: Deactivate URL
 echo ""
 echo "Test 9: Deactivate URL"
-response=$(curl -s -X PUT "$API_URL/api/urls/lynx-test/deactivate" \
+response=$(curl -s -X PUT "$API_URL/api/urls/$(encode_short_code "lynx-test")/deactivate" \
     -H "Content-Type: application/json" \
     -d '{}')
 check_json_field "$response" "message"
@@ -143,7 +147,7 @@ fi
 # Test 11: Reactivate URL
 echo ""
 echo "Test 11: Reactivate URL"
-response=$(curl -s -X PUT "$API_URL/api/urls/lynx-test/reactivate")
+response=$(curl -s -X PUT "$API_URL/api/urls/$(encode_short_code "lynx-test")/reactivate")
 check_json_field "$response" "message"
 print_result $? "Reactivate URL"
 
@@ -184,7 +188,7 @@ done
 wait
 sleep 2  # Wait for clicks to be flushed
 
-response=$(curl -s "$API_URL/api/urls/rapid-1")
+response=$(curl -s "$API_URL/api/urls/$(encode_short_code "rapid-1")")
 clicks=$(echo "$response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
 if [ "$clicks" -ge 20 ]; then
     print_result 0 "Concurrent redirects counted correctly (clicks: $clicks)"
@@ -214,7 +218,7 @@ fi
 # Test 17: Test invalid code (should return 404)
 echo ""
 echo "Test 17: Test non-existent URL"
-response=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/urls/non-existent-code")
+response=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/urls/$(encode_short_code "non-existent-code")")
 if [ "$response" = "404" ]; then
     print_result 0 "Non-existent URL returns 404"
 else
@@ -258,7 +262,7 @@ for i in {1..10}; do
 done
 sleep 5  # Wait for flush
 # Check stats
-response=$(curl -s "$API_URL/api/urls/$unique_code")
+response=$(curl -s "$API_URL/api/urls/$(encode_short_code "$unique_code")")
 clicks=$(echo "$response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
 if [ -n "$clicks" ] && [ "$clicks" -ge 10 ]; then
     print_result 0 "Statistics accurate (clicks: $clicks)"

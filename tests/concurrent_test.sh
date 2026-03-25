@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+encode_short_code() {
+    printf %s "$1" | base64 | tr -d "\n" | tr "+/" "-_" | tr -d "="
+}
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -76,7 +80,7 @@ curl -s -X POST "$API_URL/api/urls" \
 sleep 1
 
 # Get initial click count
-initial_response=$(curl -s "$API_URL/api/urls/load-test")
+initial_response=$(curl -s "$API_URL/api/urls/$(encode_short_code "load-test")")
 initial_clicks=$(echo "$initial_response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
 echo "Initial clicks: $initial_clicks"
 
@@ -91,7 +95,7 @@ wait
 sleep 3
 
 # Get final click count
-final_response=$(curl -s "$API_URL/api/urls/load-test")
+final_response=$(curl -s "$API_URL/api/urls/$(encode_short_code "load-test")")
 final_clicks=$(echo "$final_response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
 echo "Final clicks: $final_clicks"
 
@@ -128,7 +132,7 @@ for i in $(seq 1 $((CONCURRENCY / 3))); do
     operations=$((operations + 1))
     
     # Get operations
-    curl -s "$API_URL/api/urls/mixed-test" > /dev/null &
+    curl -s "$API_URL/api/urls/$(encode_short_code "mixed-test")" > /dev/null &
     pids+=($!)
     operations=$((operations + 1))
     
@@ -162,17 +166,17 @@ done
 
 # Rapidly change state
 for i in {1..5}; do
-    curl -s -X PUT "$API_URL/api/urls/state-test/deactivate" \
+    curl -s -X PUT "$API_URL/api/urls/$(encode_short_code "state-test")/deactivate" \
         -H "Content-Type: application/json" -d '{}' > /dev/null
     sleep 0.1
-    curl -s -X PUT "$API_URL/api/urls/state-test/reactivate" > /dev/null
+    curl -s -X PUT "$API_URL/api/urls/$(encode_short_code "state-test")/reactivate" > /dev/null
     sleep 0.1
 done
 
 wait
 
 # Verify final state
-final_response=$(curl -s "$API_URL/api/urls/state-test")
+final_response=$(curl -s "$API_URL/api/urls/$(encode_short_code "state-test")")
 if echo "$final_response" | grep -q "\"is_active\":true"; then
     print_result 0 "State changes under load handled correctly"
 else
@@ -191,7 +195,7 @@ curl -s -X POST "$API_URL/api/urls" \
 sleep 1
 
 # Get initial count
-initial_response=$(curl -s "$API_URL/api/urls/stats-high")
+initial_response=$(curl -s "$API_URL/api/urls/$(encode_short_code "stats-high")")
 initial_clicks=$(echo "$initial_response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
 
 # Make many rapid redirects
@@ -209,7 +213,7 @@ wait
 sleep 6
 
 # Verify count
-final_response=$(curl -s "$API_URL/api/urls/stats-high")
+final_response=$(curl -s "$API_URL/api/urls/$(encode_short_code "stats-high")")
 final_clicks=$(echo "$final_response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
 diff_clicks=$((final_clicks - initial_clicks))
 
