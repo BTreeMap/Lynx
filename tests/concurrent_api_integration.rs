@@ -349,14 +349,9 @@ async fn test_concurrent_deactivate_and_lookup() {
     // or after deactivation. The test should only require correctness, not a
     // specific interleaving.
     let mut successful_lookups = 0;
-    let mut found_inactive = false;
-
     for handle in lookup_handles {
-        if let Ok(Ok(Some(url))) = handle.await {
+        if let Ok(Ok(Some(_))) = handle.await {
             successful_lookups += 1;
-            if !url.is_active {
-                found_inactive = true;
-            }
         }
     }
 
@@ -372,8 +367,4 @@ async fn test_concurrent_deactivate_and_lookup() {
         .unwrap()
         .unwrap();
     assert!(!final_url.is_active, "Final state should be inactive");
-    assert!(
-        found_inactive || !final_url.is_active,
-        "Should observe an inactive state either during or after concurrent lookups"
-    );
 }
