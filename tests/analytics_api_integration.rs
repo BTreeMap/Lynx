@@ -74,6 +74,7 @@ fn create_test_config() -> Arc<Config> {
 }
 
 
+/// Encode a short code as Base64url (no padding) for path-safe API requests.
 fn encoded_code(code: &str) -> String {
     URL_SAFE_NO_PAD.encode(code.as_bytes())
 }

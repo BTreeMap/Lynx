@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+# Encode short codes as Base64url (RFC 4648 §5) without padding for API path params.
 encode_short_code() {
     printf %s "$1" | base64 | tr -d "\n" | tr "+/" "-_" | tr -d "="
 }
