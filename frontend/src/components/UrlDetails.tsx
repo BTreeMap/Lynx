@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { apiClient } from '../api';
 import type { ShortenedUrl, AnalyticsEntry, AnalyticsAggregate } from '../types';
-import { buildShortLink } from '../utils/url';
+import { buildShortLink, decodeShortCodeFromApi } from '../utils/url';
 
 type AggregateDimension = 'country' | 'region' | 'city' | 'asn' | 'hour' | 'day';
 
@@ -29,10 +29,22 @@ const UrlDetails: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const decodedShortCode = useMemo(() => {
+    if (!shortCode) {
+      return null;
+    }
+
+    try {
+      return decodeShortCodeFromApi(shortCode);
+    } catch {
+      return null;
+    }
+  }, [shortCode]);
+
   // Load URL details
   useEffect(() => {
     const loadUrlData = async () => {
-      if (!shortCode) {
+      if (!shortCode || !decodedShortCode) {
         navigate('/');
         return;
       }
@@ -41,7 +53,7 @@ const UrlDetails: React.FC = () => {
       setError(null);
 
       try {
-        const urlData = await apiClient.getUrl(shortCode);
+        const urlData = await apiClient.getUrl(decodedShortCode);
         setUrl(urlData);
       } catch (err: unknown) {
         const error = err as { response?: { data?: { error?: string } } };
@@ -52,16 +64,16 @@ const UrlDetails: React.FC = () => {
     };
 
     loadUrlData();
-  }, [shortCode, navigate]);
+  }, [shortCode, decodedShortCode, navigate]);
 
   // Load analytics data
   useEffect(() => {
     const loadAnalytics = async () => {
-      if (!shortCode) return;
+      if (!decodedShortCode) return;
 
       setIsLoadingAnalytics(true);
       try {
-        const analyticsData = await apiClient.getAnalytics(shortCode, undefined, undefined, 50);
+        const analyticsData = await apiClient.getAnalytics(decodedShortCode, undefined, undefined, 50);
         setAnalytics(analyticsData.entries);
         setTotalClicks(analyticsData.clicks);
       } catch (analyticsError) {
@@ -74,16 +86,16 @@ const UrlDetails: React.FC = () => {
     };
 
     loadAnalytics();
-  }, [shortCode]);
+  }, [decodedShortCode]);
 
   // Load aggregate data based on selected dimension
   useEffect(() => {
     const loadAggregate = async () => {
-      if (!shortCode) return;
+      if (!decodedShortCode) return;
 
       setIsLoadingAggregate(true);
       try {
-        const aggregateData = await apiClient.getAnalyticsAggregate(shortCode, selectedDimension, undefined, undefined, 20);
+        const aggregateData = await apiClient.getAnalyticsAggregate(decodedShortCode, selectedDimension, undefined, undefined, 20);
         setAggregateStats(aggregateData.aggregates);
         setTotalClicks(aggregateData.clicks);
       } catch (aggregateError) {
@@ -95,7 +107,7 @@ const UrlDetails: React.FC = () => {
     };
 
     loadAggregate();
-  }, [shortCode, selectedDimension]);
+  }, [decodedShortCode, selectedDimension]);
 
   // Calculate aggregates with "Other" category for unaccounted clicks
   const aggregatesWithOther = useMemo(() => {
@@ -194,7 +206,7 @@ const UrlDetails: React.FC = () => {
           border: '1px solid var(--color-error)',
           fontSize: '14px'
         }}>
-          {error || 'URL not found'}
+          {error || (decodedShortCode ? `URL not found: ${decodedShortCode}` : 'Invalid short code')}
         </div>
         <button
           onClick={() => navigate('/')}
