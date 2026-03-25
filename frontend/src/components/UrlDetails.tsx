@@ -44,8 +44,14 @@ const UrlDetails: React.FC = () => {
   // Load URL details
   useEffect(() => {
     const loadUrlData = async () => {
-      if (!shortCode || !decodedShortCode) {
+      if (!shortCode) {
         navigate('/');
+        return;
+      }
+
+      if (!decodedShortCode) {
+        setError('Invalid short code');
+        setIsLoadingUrl(false);
         return;
       }
 

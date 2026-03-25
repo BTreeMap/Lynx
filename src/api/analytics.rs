@@ -6,11 +6,12 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::analytics::{AnalyticsAggregate, AnalyticsAggregator, AnalyticsEntry};
+
+use super::code_param::decode_code_path_param;
 use crate::storage::Storage;
 
 /// State for analytics handlers
@@ -37,14 +38,6 @@ pub struct AnalyticsQueryParams {
 
 fn default_limit() -> i64 {
     100
-}
-
-fn decode_code_path_param(code: &str) -> Result<String, (StatusCode, &'static str)> {
-    let bytes = URL_SAFE_NO_PAD
-        .decode(code)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid encoded short code"))?;
-
-    String::from_utf8(bytes).map_err(|_| (StatusCode::BAD_REQUEST, "Invalid encoded short code"))
 }
 
 #[derive(Debug, Serialize)]

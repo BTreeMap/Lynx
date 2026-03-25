@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use rand::distr::{Alphanumeric, Distribution};
 
+use crate::api::code_param::decode_code_path_param;
 use crate::auth::AuthClaims;
 use crate::config::Config;
 use crate::models::{CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl};
@@ -67,26 +67,6 @@ pub struct ListQuery {
 
 fn default_limit() -> i64 {
     50
-}
-
-fn decode_code_path_param(code: &str) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
-    let bytes = URL_SAFE_NO_PAD.decode(code).map_err(|_| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "Invalid encoded short code".to_string(),
-            }),
-        )
-    })?;
-
-    String::from_utf8(bytes).map_err(|_| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "Invalid encoded short code".to_string(),
-            }),
-        )
-    })
 }
 
 /// Helper to check if user is admin (combines JWT claims and manual promotion)
