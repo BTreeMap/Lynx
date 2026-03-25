@@ -327,6 +327,16 @@ else
     print_result 1 "Search URLs empty query should return 400 (got HTTP $search_status)"
 fi
 
+# Test 23: Search URLs rejects missing query text
+echo ""
+echo "Test 23: Search URLs missing query validation"
+missing_query_status=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/urls/search?q=")
+if [ "$missing_query_status" = "400" ]; then
+    print_result 0 "Search URLs rejects missing query text"
+else
+    print_result 1 "Search URLs missing query text should return 400 (got HTTP $missing_query_status)"
+fi
+
 echo ""
 echo -e "${GREEN}=========================================="
 echo "All Integration Tests Passed!"
