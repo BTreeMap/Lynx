@@ -9,6 +9,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use rand::distr::{Alphanumeric, Distribution};
 
+use crate::api::code_param::decode_code_path_param;
 use crate::auth::AuthClaims;
 use crate::config::Config;
 use crate::models::{CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl};
@@ -242,8 +243,10 @@ pub async fn create_url(
 /// Get a shortened URL by code
 pub async fn get_url(
     State(state): State<Arc<AppState>>,
-    Path(code): Path<String>,
+    Path(encoded_code): Path<String>,
 ) -> Result<Json<ShortenedUrlResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
+
     match state.storage.get_authoritative(&code).await {
         Ok(Some(url)) => Ok(Json(ShortenedUrlResponse::with_base(
             url,
@@ -268,9 +271,10 @@ pub async fn get_url(
 pub async fn deactivate_url(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
-    Path(code): Path<String>,
+    Path(encoded_code): Path<String>,
     Json(_payload): Json<DeactivateUrlRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
     // Check if user is admin
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     if !is_admin {
@@ -305,8 +309,9 @@ pub async fn deactivate_url(
 pub async fn reactivate_url(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
-    Path(code): Path<String>,
+    Path(encoded_code): Path<String>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
     // Check if user is admin
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     if !is_admin {

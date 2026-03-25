@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+# Encode short codes as Base64url (RFC 4648 §5) without padding for API path params.
+encode_short_code() {
+    printf %s "$1" | base64 | tr -d "\n" | tr "+/" "-_" | tr -d "="
+}
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -48,6 +53,31 @@ check_json_field() {
     fi
 }
 
+wait_for_clicks_at_least() {
+    local code="$1"
+    local expected="$2"
+    local max_attempts="${3:-20}"
+    local sleep_secs="${4:-0.5}"
+    local attempt=1
+
+    while [ "$attempt" -le "$max_attempts" ]; do
+        local response
+        response=$(curl -s "$API_URL/api/urls/$(encode_short_code "$code")")
+        local clicks
+        clicks=$(echo "$response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
+
+        if [ -n "$clicks" ] && [ "$clicks" -ge "$expected" ]; then
+            echo "$clicks"
+            return 0
+        fi
+
+        sleep "$sleep_secs"
+        attempt=$((attempt + 1))
+    done
+
+    return 1
+}
+
 # Test 1: Health Check
 echo ""
 echo "Test 1: Health Check"
@@ -84,7 +114,7 @@ print_result $? "Create URL with auto-generated code (code: $auto_code)"
 # Test 5: Get URL details
 echo ""
 echo "Test 5: Get URL details"
-response=$(curl -s "$API_URL/api/urls/lynx-test")
+response=$(curl -s "$API_URL/api/urls/$(encode_short_code "lynx-test")")
 check_json_field "$response" "short_code" "lynx-test"
 check_json_field "$response" "original_url"
 print_result $? "Get URL details"
@@ -102,10 +132,8 @@ fi
 # Test 7: Verify click count increased
 echo ""
 echo "Test 7: Verify click count"
-sleep 1  # Wait for click to be flushed
-response=$(curl -s "$API_URL/api/urls/lynx-test")
-clicks=$(echo "$response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
-if [ "$clicks" -ge 1 ]; then
+clicks=$(wait_for_clicks_at_least "lynx-test" 1 20 0.5 || true)
+if [ -n "$clicks" ] && [ "$clicks" -ge 1 ]; then
     print_result 0 "Click count increased (clicks: $clicks)"
 else
     print_result 1 "Click count not increased"
@@ -124,7 +152,7 @@ fi
 # Test 9: Deactivate URL
 echo ""
 echo "Test 9: Deactivate URL"
-response=$(curl -s -X PUT "$API_URL/api/urls/lynx-test/deactivate" \
+response=$(curl -s -X PUT "$API_URL/api/urls/$(encode_short_code "lynx-test")/deactivate" \
     -H "Content-Type: application/json" \
     -d '{}')
 check_json_field "$response" "message"
@@ -143,7 +171,7 @@ fi
 # Test 11: Reactivate URL
 echo ""
 echo "Test 11: Reactivate URL"
-response=$(curl -s -X PUT "$API_URL/api/urls/lynx-test/reactivate")
+response=$(curl -s -X PUT "$API_URL/api/urls/$(encode_short_code "lynx-test")/reactivate")
 check_json_field "$response" "message"
 print_result $? "Reactivate URL"
 
@@ -182,11 +210,8 @@ for i in {1..20}; do
     curl -s -o /dev/null -L "$REDIRECT_URL/rapid-1" &
 done
 wait
-sleep 2  # Wait for clicks to be flushed
-
-response=$(curl -s "$API_URL/api/urls/rapid-1")
-clicks=$(echo "$response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
-if [ "$clicks" -ge 20 ]; then
+clicks=$(wait_for_clicks_at_least "rapid-1" 20 30 0.5 || true)
+if [ -n "$clicks" ] && [ "$clicks" -ge 20 ]; then
     print_result 0 "Concurrent redirects counted correctly (clicks: $clicks)"
 else
     print_result 1 "Concurrent redirects not counted correctly (expected >=20, got $clicks)"
@@ -214,7 +239,7 @@ fi
 # Test 17: Test invalid code (should return 404)
 echo ""
 echo "Test 17: Test non-existent URL"
-response=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/urls/non-existent-code")
+response=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/api/urls/$(encode_short_code "non-existent-code")")
 if [ "$response" = "404" ]; then
     print_result 0 "Non-existent URL returns 404"
 else
@@ -256,13 +281,11 @@ fi
 for i in {1..10}; do
     curl -s -o /dev/null "$REDIRECT_URL/$unique_code"
 done
-sleep 5  # Wait for flush
-# Check stats
-response=$(curl -s "$API_URL/api/urls/$unique_code")
-clicks=$(echo "$response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
+clicks=$(wait_for_clicks_at_least "$unique_code" 10 40 0.5 || true)
 if [ -n "$clicks" ] && [ "$clicks" -ge 10 ]; then
     print_result 0 "Statistics accurate (clicks: $clicks)"
 else
+    response=$(curl -s "$API_URL/api/urls/$(encode_short_code "$unique_code")")
     echo "Full response: $response"
     print_result 1 "Statistics inaccurate (expected >=10, got ${clicks:-0})"
 fi

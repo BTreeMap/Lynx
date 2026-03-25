@@ -309,7 +309,10 @@ async fn test_concurrent_click_increments() {
 
 #[tokio::test]
 async fn test_concurrent_deactivate_and_lookup() {
-    // Test race condition between deactivation and lookups
+    // Test race condition between deactivation and lookups.
+    // The important guarantees are:
+    // 1) concurrent lookups do not fail while state changes are happening
+    // 2) deactivation is applied and visible afterwards
     let storage = create_test_storage().await;
 
     // Create a test URL
@@ -342,25 +345,20 @@ async fn test_concurrent_deactivate_and_lookup() {
     // Wait for deactivation
     deactivate_handle.await.unwrap().unwrap();
 
-    // Check lookups - some may see active, some inactive, but all should succeed
-    let mut found_active = false;
-    let mut found_inactive = false;
-
+    // Check lookups - depending on scheduler timing, lookups may all run before
+    // or after deactivation. The test should only require correctness, not a
+    // specific interleaving.
+    let mut successful_lookups = 0;
     for handle in lookup_handles {
-        if let Ok(Ok(Some(url))) = handle.await {
-            if url.is_active {
-                found_active = true;
-            } else {
-                found_inactive = true;
-            }
+        if let Ok(Ok(Some(_))) = handle.await {
+            successful_lookups += 1;
         }
     }
 
-    // Should have found at least the active state before deactivation completed
-    assert!(found_active, "Should have found active state");
-
-    // Should have found at least the inactive state after deactivation completed
-    assert!(found_inactive, "Should have found inactive state");
+    assert_eq!(
+        successful_lookups, 1000,
+        "All concurrent lookups should complete successfully"
+    );
 
     // Final state should be inactive
     let final_url = storage

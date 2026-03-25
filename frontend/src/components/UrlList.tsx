@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiClient } from '../api';
 import type { ShortenedUrl } from '../types';
-import { buildShortLink } from '../utils/url';
+import { buildShortLink, encodeShortCodeForApi } from '../utils/url';
 
 interface UrlListProps {
   urls: ShortenedUrl[];
@@ -228,7 +228,7 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
                   >
                     <td style={{ padding: '14px 16px' }}>
                       <Link
-                        to={`/url/${url.short_code}`}
+                        to={`/url/${encodeShortCodeForApi(url.short_code)}`}
                         style={{ 
                           color: 'var(--color-text-primary)',
                           fontWeight: 500,

@@ -44,3 +44,18 @@ export const normalizeOriginalUrl = (value: string): string => {
         return trimmed;
     }
 };
+
+
+export const encodeShortCodeForApi = (value: string): string => {
+    const bytes = new TextEncoder().encode(value);
+    return bytes.toBase64({ alphabet: 'base64url', omitPadding: true });
+};
+
+export const decodeShortCodeFromApi = (value: string): string => {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+    const paddingLength = (4 - (normalized.length % 4)) % 4;
+    const padded = normalized + '='.repeat(paddingLength);
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+};
