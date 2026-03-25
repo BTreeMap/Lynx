@@ -7,6 +7,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use lynx::api;
 use lynx::auth::AuthService;
 use lynx::config::{AuthConfig, AuthMode, Config};
@@ -80,6 +81,10 @@ async fn create_test_auth_service() -> Arc<AuthService> {
         cloudflare: None,
     };
     Arc::new(AuthService::new(config).await.unwrap())
+}
+
+fn encode_short_code(code: &str) -> String {
+    URL_SAFE_NO_PAD.encode(code.as_bytes())
 }
 
 #[tokio::test]
@@ -367,4 +372,66 @@ async fn test_concurrent_deactivate_and_lookup() {
         .unwrap()
         .unwrap();
     assert!(!final_url.is_active, "Final state should be inactive");
+}
+
+#[tokio::test]
+async fn test_get_nonexistent_url_returns_not_found() {
+    let storage = create_test_storage().await;
+    let config = create_test_config(50);
+    let auth_service = create_test_auth_service().await;
+    let app = api::routes::create_api_router(storage, auth_service, config, None);
+
+    let encoded_code = encode_short_code("missing-code");
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/urls/{encoded_code}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_duplicate_short_code_returns_conflict() {
+    let storage = create_test_storage().await;
+    let config = create_test_config(50);
+    let auth_service = create_test_auth_service().await;
+    let app = api::routes::create_api_router(storage, auth_service, config, None);
+
+    let create_body = r#"{"url":"https://example.com/first","custom_code":"dup-code"}"#;
+
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/urls")
+                .header("content-type", "application/json")
+                .body(Body::from(create_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::CREATED);
+
+    let second = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/urls")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"url":"https://example.com/second","custom_code":"dup-code"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(second.status(), StatusCode::CONFLICT);
 }
