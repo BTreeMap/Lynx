@@ -73,7 +73,6 @@ fn create_test_config() -> Arc<Config> {
     })
 }
 
-
 /// Encode a short code as Base64url (no padding) for path-safe API requests.
 fn encoded_code(code: &str) -> String {
     URL_SAFE_NO_PAD.encode(code.as_bytes())
@@ -208,7 +207,10 @@ async fn test_analytics_aggregate_api_endpoint() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(format!("/api/analytics/{}/aggregate?group_by=country", encoded_code("multi")))
+                .uri(format!(
+                    "/api/analytics/{}/aggregate?group_by=country",
+                    encoded_code("multi")
+                ))
                 .header(header::AUTHORIZATION, "Bearer test-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -300,7 +302,10 @@ async fn test_analytics_aggregate_with_aggregator_realtime() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(format!("/api/analytics/{}/aggregate?group_by=country", encoded_code("realtime")))
+                .uri(format!(
+                    "/api/analytics/{}/aggregate?group_by=country",
+                    encoded_code("realtime")
+                ))
                 .header(header::AUTHORIZATION, "Bearer test-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -388,7 +393,10 @@ async fn test_analytics_aggregate_with_unknown_pending_events() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(format!("/api/analytics/{}/aggregate?group_by=country", encoded_code("pending")))
+                .uri(format!(
+                    "/api/analytics/{}/aggregate?group_by=country",
+                    encoded_code("pending")
+                ))
                 .header(header::AUTHORIZATION, "Bearer test-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -468,7 +476,10 @@ async fn test_analytics_aggregate_with_time_range() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(format!("/api/analytics/{}/aggregate?group_by=country&start_time=1500&end_time=2500", encoded_code("timed")))
+                .uri(format!(
+                    "/api/analytics/{}/aggregate?group_by=country&start_time=1500&end_time=2500",
+                    encoded_code("timed")
+                ))
                 .header(header::AUTHORIZATION, "Bearer test-token")
                 .body(Body::empty())
                 .unwrap(),
@@ -546,7 +557,10 @@ async fn test_analytics_aggregate_group_by_region() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri(format!("/api/analytics/{}/aggregate?group_by=region", encoded_code("regions")))
+                .uri(format!(
+                    "/api/analytics/{}/aggregate?group_by=region",
+                    encoded_code("regions")
+                ))
                 .header(header::AUTHORIZATION, "Bearer test-token")
                 .body(Body::empty())
                 .unwrap(),
