@@ -33,6 +33,35 @@ print_result() {
     fi
 }
 
+wait_for_clicks_delta_at_least() {
+    local code="$1"
+    local initial_clicks="$2"
+    local expected_delta="$3"
+    local max_attempts="${4:-30}"
+    local sleep_secs="${5:-0.5}"
+    local attempt=1
+
+    while [ "$attempt" -le "$max_attempts" ]; do
+        local response
+        response=$(curl -s "$API_URL/api/urls/$(encode_short_code "$code")")
+        local current_clicks
+        current_clicks=$(echo "$response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
+
+        if [ -n "$current_clicks" ]; then
+            local delta=$((current_clicks - initial_clicks))
+            if [ "$delta" -ge "$expected_delta" ]; then
+                echo "$current_clicks"
+                return 0
+            fi
+        fi
+
+        sleep "$sleep_secs"
+        attempt=$((attempt + 1))
+    done
+
+    return 1
+}
+
 # Test 1: Concurrent URL creation
 echo ""
 echo "Test 1: Concurrent URL creation ($CONCURRENCY parallel requests)"
@@ -50,8 +79,10 @@ for i in $(seq 1 $CONCURRENCY); do
         
         if echo "$response" | grep -q "\"short_code\".*\"conc-$i\""; then
             echo "SUCCESS: conc-$i"
+            exit 0
         else
             echo "FAILED: conc-$i - $response" >&2
+            exit 1
         fi
     ) &
     pids+=($!)
@@ -92,12 +123,12 @@ for i in $(seq 1 $CONCURRENCY); do
 done
 wait
 
-# Wait for writes to be flushed
-sleep 3
-
-# Get final click count
-final_response=$(curl -s "$API_URL/api/urls/$(encode_short_code "load-test")")
-final_clicks=$(echo "$final_response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
+# Get final click count with bounded polling
+final_clicks=$(wait_for_clicks_delta_at_least "load-test" "$initial_clicks" "$CONCURRENCY" 40 0.5 || true)
+if [ -z "$final_clicks" ]; then
+    final_response=$(curl -s "$API_URL/api/urls/$(encode_short_code "load-test")")
+    final_clicks=$(echo "$final_response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
+fi
 echo "Final clicks: $final_clicks"
 
 # Calculate difference
@@ -211,11 +242,11 @@ done
 wait
 
 # Wait for all flushes to complete
-sleep 6
-
-# Verify count
-final_response=$(curl -s "$API_URL/api/urls/$(encode_short_code "stats-high")")
-final_clicks=$(echo "$final_response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
+final_clicks=$(wait_for_clicks_delta_at_least "stats-high" "$initial_clicks" "$redirect_count" 60 0.5 || true)
+if [ -z "$final_clicks" ]; then
+    final_response=$(curl -s "$API_URL/api/urls/$(encode_short_code "stats-high")")
+    final_clicks=$(echo "$final_response" | grep -o '"clicks":[0-9]*' | cut -d':' -f2)
+fi
 diff_clicks=$((final_clicks - initial_clicks))
 
 echo "Clicks added: ${diff_clicks}/${redirect_count}"
