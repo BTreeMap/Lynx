@@ -15,7 +15,7 @@ if (!Uint8Array.prototype.toBase64) {
       for (let i = 0; i < len; i += CHUNK_SIZE) {
         binary += String.fromCharCode.apply(
           null,
-          Array.from(this.subarray(i, Math.min(i + CHUNK_SIZE, len))),
+          this.subarray(i, i + CHUNK_SIZE),
         );
       }
 
