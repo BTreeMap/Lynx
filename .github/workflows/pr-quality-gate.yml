@@ -293,7 +293,8 @@ jobs:
 
           # Check that data was persisted
           for i in {1..10}; do
-            response=$(curl -s http://localhost:8080/api/urls/sigterm-$i)
+            encoded_code=$(printf %s "sigterm-$i" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
+            response=$(curl -s http://localhost:8080/api/urls/$encoded_code)
             echo "Checking sigterm-$i: $response"
             if echo "$response" | grep -q "sigterm-$i"; then
               echo "✓ Data persisted for sigterm-$i"
@@ -331,7 +332,8 @@ jobs:
 
           # Check that data was persisted
           for i in {1..10}; do
-            response=$(curl -s http://localhost:8080/api/urls/sigint-$i)
+            encoded_code=$(printf %s "sigint-$i" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
+            response=$(curl -s http://localhost:8080/api/urls/$encoded_code)
             echo "Checking sigint-$i: $response"
             if echo "$response" | grep -q "sigint-$i"; then
               echo "✓ Data persisted for sigint-$i"
@@ -444,7 +446,8 @@ jobs:
 
           # Check that data was persisted
           for i in {1..10}; do
-            response=$(curl -s http://localhost:8080/api/urls/pg-sigterm-$i)
+            encoded_code=$(printf %s "pg-sigterm-$i" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
+            response=$(curl -s http://localhost:8080/api/urls/$encoded_code)
             echo "Checking pg-sigterm-$i: $response"
             if echo "$response" | grep -q "pg-sigterm-$i"; then
               echo "✓ Data persisted for pg-sigterm-$i"
@@ -482,7 +485,8 @@ jobs:
 
           # Check that data was persisted
           for i in {1..10}; do
-            response=$(curl -s http://localhost:8080/api/urls/pg-sigint-$i)
+            encoded_code=$(printf %s "pg-sigint-$i" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
+            response=$(curl -s http://localhost:8080/api/urls/$encoded_code)
             echo "Checking pg-sigint-$i: $response"
             if echo "$response" | grep -q "pg-sigint-$i"; then
               echo "✓ Data persisted for pg-sigint-$i"
