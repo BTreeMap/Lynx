@@ -12,8 +12,8 @@ use crate::storage::Storage;
 
 use super::analytics::{get_analytics, get_analytics_aggregate, AnalyticsState};
 use super::handlers::{
-    create_url, deactivate_url, get_auth_mode, get_url, get_url_history, get_user_info, health_check,
-    list_urls, reactivate_url, restore_url, search_urls, update_url, AppState,
+    create_url, deactivate_url, get_auth_mode, get_url, get_url_history, get_user_info,
+    health_check, list_urls, reactivate_url, restore_url, search_urls, update_url, AppState,
 };
 use super::static_files::serve_static;
 

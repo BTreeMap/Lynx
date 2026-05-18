@@ -366,18 +366,14 @@ pub async fn update_url(
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     let user_id = claims.as_ref().and_then(|c| c.user_id());
 
-    let existing = state
-        .storage
-        .get_authoritative(&code)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to get URL: {}", e),
-                }),
-            )
-        })?;
+    let existing = state.storage.get_authoritative(&code).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to get URL: {}", e),
+            }),
+        )
+    })?;
 
     let existing = match existing {
         Some(url) => url,
@@ -430,18 +426,14 @@ pub async fn get_url_history(
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     let user_id = claims.as_ref().and_then(|c| c.user_id());
 
-    let existing = state
-        .storage
-        .get_authoritative(&code)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to get URL: {}", e),
-                }),
-            )
-        })?;
+    let existing = state.storage.get_authoritative(&code).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to get URL: {}", e),
+            }),
+        )
+    })?;
 
     let existing = match existing {
         Some(url) => url,
@@ -464,18 +456,14 @@ pub async fn get_url_history(
         ));
     }
 
-    let history = state
-        .storage
-        .get_url_history(&code)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to get URL history: {}", e),
-                }),
-            )
-        })?;
+    let history = state.storage.get_url_history(&code).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to get URL history: {}", e),
+            }),
+        )
+    })?;
 
     Ok(Json(history))
 }
@@ -492,18 +480,14 @@ pub async fn restore_url(
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     let user_id = claims.as_ref().and_then(|c| c.user_id());
 
-    let existing = state
-        .storage
-        .get_authoritative(&code)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to get URL: {}", e),
-                }),
-            )
-        })?;
+    let existing = state.storage.get_authoritative(&code).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to get URL: {}", e),
+            }),
+        )
+    })?;
 
     let existing = match existing {
         Some(url) => url,
