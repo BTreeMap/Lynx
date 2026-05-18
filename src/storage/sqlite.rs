@@ -1,5 +1,5 @@
 use crate::analytics::{DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER};
-use crate::models::ShortenedUrl;
+use crate::models::{ShortenedUrl, UrlHistoryEntry};
 use crate::storage::{
     LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageError, StorageResult,
 };
@@ -1230,6 +1230,26 @@ impl Storage for SqliteStorage {
             .execute(self.pool.as_ref())
             .await?;
 
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS url_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                short_code TEXT NOT NULL,
+                historic_url TEXT NOT NULL,
+                changed_at INTEGER NOT NULL,
+                changed_by TEXT
+            )
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_url_history_short_code ON url_history(short_code, changed_at DESC)",
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
         // Index for cursor-based pagination (created_at DESC, id DESC)
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_urls_created_at_id ON urls(created_at DESC, id DESC)",
@@ -1501,6 +1521,147 @@ impl Storage for SqliteStorage {
         .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn update_url(
+        &self,
+        short_code: &str,
+        new_url: &str,
+        updated_by: Option<&str>,
+    ) -> Result<Arc<ShortenedUrl>> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+
+        let mut tx = self.pool.begin().await?;
+
+        let old_url = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT original_url
+            FROM urls
+            WHERE short_code = ?
+            "#,
+        )
+        .bind(short_code)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| StorageError::Other(anyhow!("URL not found")))?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO url_history (short_code, historic_url, changed_at, changed_by)
+            VALUES (?, ?, ?, ?)
+            "#,
+        )
+        .bind(short_code)
+        .bind(&old_url)
+        .bind(now)
+        .bind(updated_by)
+        .execute(&mut *tx)
+        .await?;
+
+        let updated = sqlx::query_as::<_, ShortenedUrl>(
+            r#"
+            UPDATE urls
+            SET original_url = ?
+            WHERE short_code = ?
+            RETURNING id, short_code, original_url, created_at, created_by, clicks, is_active
+            "#,
+        )
+        .bind(new_url)
+        .bind(short_code)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| StorageError::Other(anyhow!("URL not found")))?;
+
+        tx.commit().await?;
+
+        Ok(Arc::new(updated))
+    }
+
+    async fn get_url_history(&self, short_code: &str) -> Result<Vec<UrlHistoryEntry>> {
+        let entries = sqlx::query_as::<_, UrlHistoryEntry>(
+            r#"
+            SELECT id, short_code, historic_url, changed_at, changed_by
+            FROM url_history
+            WHERE short_code = ?
+            ORDER BY changed_at DESC
+            "#,
+        )
+        .bind(short_code)
+        .fetch_all(self.pool.as_ref())
+        .await?;
+
+        Ok(entries)
+    }
+
+    async fn restore_url(
+        &self,
+        short_code: &str,
+        history_id: i64,
+        restored_by: Option<&str>,
+    ) -> Result<Arc<ShortenedUrl>> {
+        let mut tx = self.pool.begin().await?;
+
+        let historic_url = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT historic_url
+            FROM url_history
+            WHERE id = ? AND short_code = ?
+            "#,
+        )
+        .bind(history_id)
+        .bind(short_code)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| StorageError::Other(anyhow!("History entry not found")))?;
+
+        let current_url = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT original_url
+            FROM urls
+            WHERE short_code = ?
+            "#,
+        )
+        .bind(short_code)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| StorageError::Other(anyhow!("URL not found")))?;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs() as i64;
+
+        sqlx::query(
+            r#"
+            INSERT INTO url_history (short_code, historic_url, changed_at, changed_by)
+            VALUES (?, ?, ?, ?)
+            "#,
+        )
+        .bind(short_code)
+        .bind(&current_url)
+        .bind(now)
+        .bind(restored_by)
+        .execute(&mut *tx)
+        .await?;
+
+        let updated = sqlx::query_as::<_, ShortenedUrl>(
+            r#"
+            UPDATE urls
+            SET original_url = ?
+            WHERE short_code = ?
+            RETURNING id, short_code, original_url, created_at, created_by, clicks, is_active
+            "#,
+        )
+        .bind(&historic_url)
+        .bind(short_code)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| StorageError::Other(anyhow!("URL not found")))?;
+
+        tx.commit().await?;
+
+        Ok(Arc::new(updated))
     }
 
     async fn increment_clicks(&self, short_code: &str, amount: u64) -> Result<()> {

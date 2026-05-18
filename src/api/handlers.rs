@@ -12,7 +12,10 @@ use rand::distr::{Alphanumeric, Distribution};
 use crate::api::code_param::decode_code_path_param;
 use crate::auth::AuthClaims;
 use crate::config::Config;
-use crate::models::{CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl};
+use crate::models::{
+    CreateUrlRequest, DeactivateUrlRequest, RestoreUrlRequest, ShortenedUrl, UpdateUrlRequest,
+    UrlHistoryEntry,
+};
 use crate::storage::{SearchParams, Storage, StorageError};
 
 pub struct AppState {
@@ -340,6 +343,206 @@ pub async fn reactivate_url(
             }),
         )),
     }
+}
+
+/// Update a shortened URL destination
+pub async fn update_url(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
+    Path(encoded_code): Path<String>,
+    Json(payload): Json<UpdateUrlRequest>,
+) -> Result<Json<ShortenedUrlResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
+
+    if payload.url.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "URL cannot be empty".to_string(),
+            }),
+        ));
+    }
+
+    let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
+    let user_id = claims.as_ref().and_then(|c| c.user_id());
+
+    let existing = state
+        .storage
+        .get_authoritative(&code)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to get URL: {}", e),
+                }),
+            )
+        })?;
+
+    let existing = match existing {
+        Some(url) => url,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "URL not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    if !is_admin && existing.created_by.as_deref() != user_id.as_deref() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Only the URL owner or administrators can update URLs".to_string(),
+            }),
+        ));
+    }
+
+    let updated = state
+        .storage
+        .update_url(&code, &payload.url, user_id.as_deref())
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to update URL: {}", e),
+                }),
+            )
+        })?;
+
+    Ok(Json(ShortenedUrlResponse::with_base(
+        updated,
+        Some(state.config.redirect_base_url.as_str()),
+    )))
+}
+
+/// Get the history of URL destinations for a short code
+pub async fn get_url_history(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
+    Path(encoded_code): Path<String>,
+) -> Result<Json<Vec<UrlHistoryEntry>>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
+
+    let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
+    let user_id = claims.as_ref().and_then(|c| c.user_id());
+
+    let existing = state
+        .storage
+        .get_authoritative(&code)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to get URL: {}", e),
+                }),
+            )
+        })?;
+
+    let existing = match existing {
+        Some(url) => url,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "URL not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    if !is_admin && existing.created_by.as_deref() != user_id.as_deref() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Only the URL owner or administrators can view URL history".to_string(),
+            }),
+        ));
+    }
+
+    let history = state
+        .storage
+        .get_url_history(&code)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to get URL history: {}", e),
+                }),
+            )
+        })?;
+
+    Ok(Json(history))
+}
+
+/// Restore a shortened URL destination from history
+pub async fn restore_url(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
+    Path(encoded_code): Path<String>,
+    Json(payload): Json<RestoreUrlRequest>,
+) -> Result<Json<ShortenedUrlResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
+
+    let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
+    let user_id = claims.as_ref().and_then(|c| c.user_id());
+
+    let existing = state
+        .storage
+        .get_authoritative(&code)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to get URL: {}", e),
+                }),
+            )
+        })?;
+
+    let existing = match existing {
+        Some(url) => url,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "URL not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    if !is_admin && existing.created_by.as_deref() != user_id.as_deref() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "Only the URL owner or administrators can restore URLs".to_string(),
+            }),
+        ));
+    }
+
+    let restored = state
+        .storage
+        .restore_url(&code, payload.history_id, user_id.as_deref())
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to restore URL: {}", e),
+                }),
+            )
+        })?;
+
+    Ok(Json(ShortenedUrlResponse::with_base(
+        restored,
+        Some(state.config.redirect_base_url.as_str()),
+    )))
 }
 
 /// List all shortened URLs

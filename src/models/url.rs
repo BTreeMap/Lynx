@@ -22,3 +22,22 @@ pub struct CreateUrlRequest {
 pub struct DeactivateUrlRequest {
     pub reason: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct UrlHistoryEntry {
+    pub id: i64,
+    pub short_code: String,
+    pub historic_url: String,
+    pub changed_at: i64,
+    pub changed_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateUrlRequest {
+    pub url: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RestoreUrlRequest {
+    pub history_id: i64,
+}

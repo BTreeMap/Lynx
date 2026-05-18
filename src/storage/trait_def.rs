@@ -1,4 +1,4 @@
-use crate::models::ShortenedUrl;
+use crate::models::{ShortenedUrl, UrlHistoryEntry};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -92,6 +92,25 @@ pub trait Storage: Send + Sync {
 
     /// Reactivate a shortened URL
     async fn reactivate(&self, short_code: &str) -> Result<bool>;
+
+    /// Update the destination of an existing shortened URL
+    async fn update_url(
+        &self,
+        short_code: &str,
+        new_url: &str,
+        updated_by: Option<&str>,
+    ) -> Result<Arc<ShortenedUrl>>;
+
+    /// Get the history of destinations for a short code, ordered by changed_at DESC
+    async fn get_url_history(&self, short_code: &str) -> Result<Vec<UrlHistoryEntry>>;
+
+    /// Restore a URL to a historical destination
+    async fn restore_url(
+        &self,
+        short_code: &str,
+        history_id: i64,
+        restored_by: Option<&str>,
+    ) -> Result<Arc<ShortenedUrl>>;
 
     /// Increment click count by the provided amount
     async fn increment_clicks(&self, short_code: &str, amount: u64) -> Result<()>;

@@ -12,8 +12,8 @@ use crate::storage::Storage;
 
 use super::analytics::{get_analytics, get_analytics_aggregate, AnalyticsState};
 use super::handlers::{
-    create_url, deactivate_url, get_auth_mode, get_url, get_user_info, health_check, list_urls,
-    reactivate_url, search_urls, AppState,
+    create_url, deactivate_url, get_auth_mode, get_url, get_url_history, get_user_info, health_check,
+    list_urls, reactivate_url, restore_url, search_urls, update_url, AppState,
 };
 use super::static_files::serve_static;
 
@@ -41,8 +41,11 @@ pub fn create_api_router(
         .route("/urls", get(list_urls))
         .route("/urls/search", get(search_urls))
         .route("/urls/{code}", get(get_url))
+        .route("/urls/{code}", put(update_url))
+        .route("/urls/{code}/history", get(get_url_history))
         .route("/urls/{code}/deactivate", put(deactivate_url))
         .route("/urls/{code}/reactivate", put(reactivate_url))
+        .route("/urls/{code}/restore", put(restore_url))
         .route("/user/info", get(get_user_info))
         .route_layer(middleware::from_fn(move |headers, req, next| {
             let auth = Arc::clone(&auth_service_clone1);
