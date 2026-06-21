@@ -1,104 +1,79 @@
 # AGENTS.md
 
-## Project Overview
+Lynx is a high-performance URL shortener: a Rust/Axum backend with a React
+(Vite + TypeScript) frontend embedded into the binary via `rust-embed`. It runs
+a dual-server setup (API on 8080, redirects on 3000) over SQLite **or**
+PostgreSQL.
 
-Lynx is a high-performance URL shortener built with a Rust backend (Axum) and a React (Vite + TypeScript) frontend that is bundled directly into the binary via `rust-embed`. It features a dual-server architecture: an API server (default port 8080) for management endpoints and a redirect server (default port 3000) for fast URL redirects. Lynx supports both SQLite and PostgreSQL as storage backends.
+This file is the always-on operating manual for coding agents. It is
+intentionally short; load the linked domain docs just-in-time for deeper work.
 
-## Repo Layout
+## Tooling & Commands
 
-| Path | Description |
-|---|---|
-| `src/` | Rust backend source (API, redirect, storage, auth, analytics, config) |
-| `frontend/` | React + TypeScript frontend (Vite build) |
-| `tests/` | Integration and load test scripts (shell scripts and Rust integration tests) |
-| `docs/` | Project documentation (analytics, benchmarks, profiling, etc.) |
-| `Dockerfile` | Multi-stage Docker build (Rust builder → Debian slim runtime) |
-| `build.rs` | Rust build script; also builds frontend via npm if available |
-| `.github/workflows/` | CI/CD workflow files |
-
-## Prerequisites
-
-- **Rust** stable toolchain (with `rustfmt` and `clippy` components)
-- **Node.js 24** for building the frontend
-- **Docker** for end-to-end tests and PostgreSQL backend testing
-
-## Key Commands
-
-### Frontend
+- Backend: `cargo` (stable, with `rustfmt` + `clippy`). Frontend: `npm`
+  (Node 24). Docker is needed for PostgreSQL and E2E tests.
+- Build frontend before backend — `build.rs` embeds `frontend/dist/`.
 
 ```bash
-cd frontend
-npm ci           # install deps (use npm install if no package-lock.json)
-npm run build    # build frontend → frontend/dist/
-npm run lint     # run ESLint
-```
+# Frontend
+cd frontend && npm ci && npm run build && npm run lint
 
-### Rust
-
-```bash
-# Formatting check
+# Backend quality gate (matches CI)
 cargo fmt --all -- --check
-
-# Linting (same flags as PR Quality Gate CI)
 cargo clippy --all-features -- -D warnings -A clippy::too_many_arguments
-
-# Unit tests
 cargo test
-
-# Integration tests — SQLite
 DATABASE_BACKEND=sqlite cargo test --tests
-
-# Integration tests — PostgreSQL (requires a running postgres instance)
-DATABASE_BACKEND=postgres \
-DATABASE_URL=postgresql://lynx:lynx_password@localhost:5432/lynx \
-cargo test --tests
 ```
 
-### End-to-End Tests
+Full test/E2E/PostgreSQL commands → [docs/agents/testing.md](docs/agents/testing.md).
 
-Start a Lynx instance (via Docker or cargo run), then:
+## Boundaries & Constraints
 
-```bash
-# Comprehensive API tests
-bash tests/integration_test.sh http://localhost:8080 http://localhost:3000
+- **Never delete URL records.** The `urls` table is delete-protected by design;
+  deactivate instead. Keep the `prevent_urls_delete` trigger intact.
+- **Never break the database to refactor code.** You may rewrite/rename/delete
+  Rust interfaces freely, but every schema-affecting change MUST ship a correct,
+  idempotent, data-preserving migration applied to **both** SQLite and Postgres.
+  → [docs/agents/database.md](docs/agents/database.md).
+- **Never edit CI workflows** under `.github/workflows/` unless explicitly asked.
+- **Never use `AUTH_MODE=none` outside tests**, and never print `DATABASE_URL`
+  or other secrets to logs/CI.
+- **Frontend: don't call `fetch`/`axios` directly.** Use the shared `apiClient`
+  from `frontend/src/api.ts`. → [docs/agents/frontend.md](docs/agents/frontend.md).
+- **Reach for the right backend abstraction**, not escape hatches: persistence
+  goes through the `Storage` trait (`src/storage/`); don't open ad-hoc DB
+  connections in handlers.
 
-# Concurrent load test (100 concurrent requests)
-bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 100
-```
+## Definition of Done
 
-## CI Workflows
+Work is complete only when the quality-gate commands above pass, schema changes
+are validated on both backends, and tests are added/updated for changed
+behavior. The **PR Quality Gate** workflow must be green before review.
 
-| Workflow | File | Purpose |
-|---|---|---|
-| **PR Quality Gate** | `pr-quality-gate.yml` | Runs on every PR to main: frontend build + lint, cargo fmt/clippy/test, integration tests (SQLite & PostgreSQL), Docker build, and full E2E suite with graceful shutdown persistence tests. **Must be green before declaring work complete.** |
-| **Build and Publish Docker image** | `docker-publish.yml` | Builds multi-platform Docker images on push to main and publishes to GHCR. |
-| **Integration and Data Consistency Tests** | `integration-tests.yml` | Post-publish E2E tests against the published Docker image (SQLite & PostgreSQL). |
-| **Build and Publish Binaries** | `build-binaries.yml` | Builds native binaries for Linux, macOS, and Windows on push to main. |
-| **Release** | `release.yml` | Builds release binaries and Docker images on GitHub release events. |
-| **Performance Benchmarks** | `performance-benchmark.yml` | Performance characterization (not part of PR gating). |
+## Agent Operating Contract
 
-## PR Instructions
+Every session follows the standards in
+[docs/agents/engineering-standards.md](docs/agents/engineering-standards.md).
+Key always-on rules:
 
-1. **Build and test locally before pushing:**
-   - Build the frontend: `cd frontend && npm ci && npm run build && npm run lint`
-   - Run Rust checks: `cargo fmt --all -- --check && cargo clippy --all-features -- -D warnings -A clippy::too_many_arguments && cargo test`
-   - Run integration tests for at least the SQLite backend: `DATABASE_BACKEND=sqlite cargo test --tests`
-2. **Add or update tests** when changing behavior.
-3. **Do not modify existing CI workflow files** (under `.github/workflows/`) unless explicitly requested.
-4. Ensure the **PR Quality Gate** workflow passes on your pull request before requesting review.
+- **Operate autonomously.** Make the most reasonable assumption on ambiguity,
+  document it, and proceed; only pause for destructive/irreversible actions.
+  Announce explicit completion — do not stop silently.
+- **Make invalid states unrepresentable**; push invariants into the type system.
+- **Refactor ruthlessly** (no internal backward-compat duty) and prune dead
+  code — except the database, where data integrity is non-negotiable.
+- **Keep files ≤ ~500 lines**; split into cohesive submodules as they grow.
+- **Handle errors idiomatically** (`Result`/`Option`, `?`, `thiserror`,
+  `anyhow`); never swallow them.
+- **Avoid reflexive `.clone()`/`Rc`/`Arc`/`Box<dyn _>`** to appease the borrow
+  checker — redesign data flow instead. Justified shared ownership (e.g.
+  `Arc<Pool>`) and the deliberate `Storage` trait object remain fine.
 
-## Security Considerations
+## Domain Documentation (load on demand)
 
-- **AUTH_MODE**: Lynx supports different authentication modes. Tests use `AUTH_MODE=none` for simplicity. Never use `AUTH_MODE=none` in production.
-- **Credentials in logs**: Avoid printing `DATABASE_URL` or other secrets in CI output. The PR quality gate workflow does not use repository secrets.
-- **PR CI safety**: The PR workflow uses `pull_request` (not `pull_request_target`), does not perform `docker login`, and does not push images. This prevents untrusted PR code from accessing secrets or publishing artifacts.
-
-## Troubleshooting
-
-| Problem | Solution |
+| When working on… | Read |
 |---|---|
-| `frontend/dist` directory missing | Run `cd frontend && npm ci && npm run build` before `cargo build` or `cargo test`. The `build.rs` script attempts this automatically if npm is available. |
-| PostgreSQL not ready | Ensure the PostgreSQL container is healthy before running tests. Use `pg_isready -U lynx -d lynx` or the readiness loop pattern from CI. |
-| Ports already in use (8080, 3000, 5432) | Stop conflicting services or containers. Check with `lsof -i :8080` or `docker ps`. |
-| Docker network issues in local E2E | Create a dedicated Docker network (`docker network create lynx-ci`) and attach both postgres and lynx containers to it, using the container name as the hostname in `DATABASE_URL`. |
-| Cargo build fails with missing frontend | The build script (`build.rs`) expects `frontend/dist/` to exist. Build the frontend first or ensure Node.js is installed. |
+| Persistence, models, schema, migrations | [docs/agents/database.md](docs/agents/database.md) |
+| Tests, CI gate, E2E, drift checks | [docs/agents/testing.md](docs/agents/testing.md) |
+| React/TypeScript frontend | [docs/agents/frontend.md](docs/agents/frontend.md) |
+| Full engineering standards & output contract | [docs/agents/engineering-standards.md](docs/agents/engineering-standards.md) |
