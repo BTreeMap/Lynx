@@ -67,14 +67,16 @@ pub async fn redirect_url(
                         tracing::warn!(short_code = %code, error = %err, "failed to buffer click increment");
                     }
 
-                    // Record analytics if enabled
-                    if let (Some(config), Some(geoip), Some(aggregator)) = (
+                    // Record analytics if enabled.
+                    // GeoIP presence gates recording; the lookup itself is deferred to
+                    // flush time, so `record_analytics` does not need the service.
+                    if let (Some(config), Some(_), Some(aggregator)) = (
                         &state.analytics_config,
                         &state.geoip_service,
                         &state.analytics_aggregator,
                     ) {
                         if config.enabled {
-                            record_analytics(&code, &headers, addr.ip(), config, geoip, aggregator);
+                            record_analytics(&code, &headers, addr.ip(), config, aggregator);
                         }
                     }
 
@@ -144,7 +146,6 @@ fn record_analytics(
     headers: &HeaderMap,
     socket_ip: std::net::IpAddr,
     config: &AnalyticsConfig,
-    _geoip: &GeoIpService,
     aggregator: &AnalyticsAggregator,
 ) {
     use crate::analytics::ip_extractor::{anonymize_ip, extract_client_ip};

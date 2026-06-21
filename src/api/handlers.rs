@@ -12,9 +12,7 @@ use rand::distr::{Alphanumeric, Distribution};
 use crate::api::code_param::decode_code_path_param;
 use crate::auth::AuthClaims;
 use crate::config::Config;
-use crate::models::{
-    CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl, UpdateUrlRequest, UrlHistoryEntry,
-};
+use crate::models::{CreateUrlRequest, ShortenedUrl, UpdateUrlRequest, UrlHistoryEntry};
 use crate::storage::{SearchParams, Storage, StorageError};
 
 pub struct AppState {
@@ -274,7 +272,6 @@ pub async fn deactivate_url(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
     Path(encoded_code): Path<String>,
-    Json(_payload): Json<DeactivateUrlRequest>,
 ) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
     let code = decode_code_path_param(&encoded_code)?;
     // Check if user is admin

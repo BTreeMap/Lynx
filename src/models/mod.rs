@@ -1,5 +1,3 @@
 pub mod url;
 
-pub use url::{
-    CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl, UpdateUrlRequest, UrlHistoryEntry,
-};
+pub use url::{CreateUrlRequest, ShortenedUrl, UpdateUrlRequest, UrlHistoryEntry};

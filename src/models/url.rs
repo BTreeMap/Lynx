@@ -18,11 +18,6 @@ pub struct CreateUrlRequest {
     pub custom_code: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct DeactivateUrlRequest {
-    pub reason: Option<String>,
-}
-
 /// A historical destination for a shortened URL, recorded each time the
 /// destination changes.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
