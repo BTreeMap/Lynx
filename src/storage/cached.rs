@@ -14,8 +14,8 @@ use tokio::time;
 
 /// Message types for the ClickCounterActor
 enum ActorMessage {
-    /// Increment click count for a short code
-    IncrementClick(String),
+    /// Increment a short code's click count by the given amount
+    BatchIncrement(String, u64),
     /// Shutdown signal - flush all data
     Shutdown,
 }
@@ -50,9 +50,9 @@ impl ClickCounterActor {
                 // Handle incoming click events
                 Some(msg) = self.receiver.recv() => {
                     match msg {
-                        ActorMessage::IncrementClick(short_code) => {
+                        ActorMessage::BatchIncrement(short_code, count) => {
                             // Fast local increment in Layer 1 (no locks!)
-                            *self.buffer.entry(short_code).or_insert(0) += 1;
+                            *self.buffer.entry(short_code).or_insert(0) += count;
                         }
                         ActorMessage::Shutdown => {
                             tracing::info!("Actor received shutdown signal, flushing all data...");
@@ -378,19 +378,16 @@ impl Storage for CachedStorage {
             return Ok(());
         }
 
-        // Send click events to actor with blocking send for accuracy
-        // Using blocking send provides backpressure instead of dropping messages
-        for _ in 0..amount {
-            // Clone the sender to avoid holding a reference
-            let tx = self.actor_tx.clone();
-            let short_code = short_code.to_string();
-
-            // Use blocking send to ensure no data loss
-            // This applies backpressure if the actor buffer is full
-            if let Err(e) = tx.send(ActorMessage::IncrementClick(short_code)).await {
-                tracing::error!("Failed to send click to actor (channel closed): {}", e);
-                return Err(anyhow::anyhow!("Actor channel closed"));
-            }
+        // Buffer the whole increment as a single message; the actor folds it into
+        // its lock-free Layer 1 buffer. Blocking send applies backpressure instead
+        // of dropping clicks when the actor channel is full.
+        if let Err(e) = self
+            .actor_tx
+            .send(ActorMessage::BatchIncrement(short_code.to_string(), amount))
+            .await
+        {
+            tracing::error!("Failed to send click to actor (channel closed): {}", e);
+            return Err(anyhow::anyhow!("Actor channel closed"));
         }
 
         Ok(())

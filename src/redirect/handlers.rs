@@ -107,23 +107,19 @@ pub async fn redirect_url(
                         response_headers.insert(LOCATION, location_val);
                         response_headers.insert(
                             "x-lynx-cache-hit",
-                            if cache_hit { "true" } else { "false" }.parse().unwrap(),
+                            HeaderValue::from_static(if cache_hit { "true" } else { "false" }),
                         );
                         response_headers.insert(
                             "x-lynx-timing-total-ms",
-                            total_time.as_millis().to_string().parse().unwrap(),
+                            HeaderValue::from(total_time.as_millis() as u64),
                         );
-                        response_headers.insert(
-                            "x-lynx-timing-cache-ms",
-                            cache_time_ms.to_string().parse().unwrap(),
-                        );
-                        response_headers.insert(
-                            "x-lynx-timing-db-ms",
-                            db_time_ms.to_string().parse().unwrap(),
-                        );
+                        response_headers
+                            .insert("x-lynx-timing-cache-ms", HeaderValue::from(cache_time_ms));
+                        response_headers
+                            .insert("x-lynx-timing-db-ms", HeaderValue::from(db_time_ms));
                         response_headers.insert(
                             "x-lynx-timing-handler-ms",
-                            handler_time.as_millis().to_string().parse().unwrap(),
+                            HeaderValue::from(handler_time.as_millis() as u64),
                         );
 
                         // Use the configured status code and the populated HeaderMap

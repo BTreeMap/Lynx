@@ -92,11 +92,15 @@ impl AnalyticsActor {
             return;
         }
 
-        for (short_code, events) in self.buffer.drain() {
-            self.shared_buffer
-                .entry(short_code)
-                .and_modify(|existing| existing.extend(events.clone()))
-                .or_insert(events);
+        for (short_code, mut events) in self.buffer.drain() {
+            use dashmap::mapref::entry::Entry;
+            match self.shared_buffer.entry(short_code) {
+                // Move the buffered events into the existing vec without cloning.
+                Entry::Occupied(mut existing) => existing.get_mut().append(&mut events),
+                Entry::Vacant(slot) => {
+                    slot.insert(events);
+                }
+            }
         }
     }
 }
