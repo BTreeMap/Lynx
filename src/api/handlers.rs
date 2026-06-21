@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
+    response::{IntoResponse, Response},
     Extension, Json,
 };
 use serde::{Deserialize, Serialize};
@@ -25,6 +26,44 @@ use crate::cursor::{create_cursor, verify_cursor, CursorData};
 #[derive(Serialize)]
 pub struct ErrorResponse {
     pub error: String,
+}
+
+/// An API error that renders as a JSON [`ErrorResponse`] with the matching
+/// HTTP status code. Handlers return `Result<_, ApiError>` and rely on the
+/// [`IntoResponse`] implementation to serialize the failure.
+#[derive(Debug)]
+pub enum ApiError {
+    BadRequest(String),
+    Forbidden(String),
+    NotFound(String),
+    Conflict(String),
+    Internal(String),
+}
+
+impl ApiError {
+    /// The HTTP status code this error maps to.
+    pub fn status_code(&self) -> StatusCode {
+        match self {
+            ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            ApiError::Forbidden(_) => StatusCode::FORBIDDEN,
+            ApiError::NotFound(_) => StatusCode::NOT_FOUND,
+            ApiError::Conflict(_) => StatusCode::CONFLICT,
+            ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let (status, error) = match self {
+            ApiError::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
+            ApiError::Forbidden(m) => (StatusCode::FORBIDDEN, m),
+            ApiError::NotFound(m) => (StatusCode::NOT_FOUND, m),
+            ApiError::Conflict(m) => (StatusCode::CONFLICT, m),
+            ApiError::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m),
+        };
+        (status, Json(ErrorResponse { error })).into_response()
+    }
 }
 
 #[derive(Serialize)]
@@ -155,19 +194,14 @@ pub async fn create_url(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
     Json(payload): Json<CreateUrlRequest>,
-) -> Result<(StatusCode, Json<ShortenedUrlResponse>), (StatusCode, Json<ErrorResponse>)> {
+) -> Result<(StatusCode, Json<ShortenedUrlResponse>), ApiError> {
     let base = Some(state.config.redirect_base_url.as_str());
 
     let CreateUrlRequest { url, custom_code } = payload;
     let max_short_code_length = validated_short_code_max_length(state.config.short_code_max_length);
 
     if url.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "URL cannot be empty".to_string(),
-            }),
-        ));
+        return Err(ApiError::BadRequest("URL cannot be empty".to_string()));
     }
 
     // Extract user ID from claims
@@ -176,12 +210,10 @@ pub async fn create_url(
 
     let created = if let Some(custom) = custom_code {
         if custom.is_empty() || custom.len() > max_short_code_length {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: format!("Custom code must be 1-{} characters", max_short_code_length),
-                }),
-            ));
+            return Err(ApiError::BadRequest(format!(
+                "Custom code must be 1-{} characters",
+                max_short_code_length
+            )));
         }
 
         match state
@@ -193,18 +225,13 @@ pub async fn create_url(
                 StatusCode::CREATED,
                 Json(ShortenedUrlResponse::with_base(url, base)),
             )),
-            Err(StorageError::Conflict) => Err((
-                StatusCode::CONFLICT,
-                Json(ErrorResponse {
-                    error: "Short code already exists".to_string(),
-                }),
-            )),
-            Err(StorageError::Other(e)) => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to create URL with custom code: {}", e),
-                }),
-            )),
+            Err(StorageError::Conflict) => {
+                Err(ApiError::Conflict("Short code already exists".to_string()))
+            }
+            Err(StorageError::Other(e)) => Err(ApiError::Internal(format!(
+                "Failed to create URL with custom code: {}",
+                e
+            ))),
         }
     } else {
         match create_with_random_code(
@@ -220,19 +247,12 @@ pub async fn create_url(
                 Json(ShortenedUrlResponse::with_base(url, base)),
             )),
             Err(e) => match e {
-                StorageError::Conflict => Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: "Failed to generate unique short code after multiple attempts"
-                            .to_string(),
-                    }),
+                StorageError::Conflict => Err(ApiError::Internal(
+                    "Failed to generate unique short code after multiple attempts".to_string(),
                 )),
-                StorageError::Other(err) => Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: format!("Failed to create URL: {}", err),
-                    }),
-                )),
+                StorageError::Other(err) => {
+                    Err(ApiError::Internal(format!("Failed to create URL: {}", err)))
+                }
             },
         }
     };
@@ -244,7 +264,7 @@ pub async fn create_url(
 pub async fn get_url(
     State(state): State<Arc<AppState>>,
     Path(encoded_code): Path<String>,
-) -> Result<Json<ShortenedUrlResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<ShortenedUrlResponse>, ApiError> {
     let code = decode_code_path_param(&encoded_code)?;
 
     match state.storage.get_authoritative(&code).await {
@@ -252,18 +272,8 @@ pub async fn get_url(
             url,
             Some(state.config.redirect_base_url.as_str()),
         ))),
-        Ok(None) => Err((
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "URL not found".to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("Failed to get URL: {}", e),
-            }),
-        )),
+        Ok(None) => Err(ApiError::NotFound("URL not found".to_string())),
+        Err(e) => Err(ApiError::Internal(format!("Failed to get URL: {}", e))),
     }
 }
 
@@ -272,16 +282,13 @@ pub async fn deactivate_url(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
     Path(encoded_code): Path<String>,
-) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<SuccessResponse>, ApiError> {
     let code = decode_code_path_param(&encoded_code)?;
     // Check if user is admin
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     if !is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Only administrators can deactivate URLs".to_string(),
-            }),
+        return Err(ApiError::Forbidden(
+            "Only administrators can deactivate URLs".to_string(),
         ));
     }
 
@@ -289,18 +296,11 @@ pub async fn deactivate_url(
         Ok(true) => Ok(Json(SuccessResponse {
             message: "URL deactivated successfully".to_string(),
         })),
-        Ok(false) => Err((
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "URL not found".to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("Failed to deactivate URL: {}", e),
-            }),
-        )),
+        Ok(false) => Err(ApiError::NotFound("URL not found".to_string())),
+        Err(e) => Err(ApiError::Internal(format!(
+            "Failed to deactivate URL: {}",
+            e
+        ))),
     }
 }
 
@@ -309,16 +309,13 @@ pub async fn reactivate_url(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
     Path(encoded_code): Path<String>,
-) -> Result<Json<SuccessResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<SuccessResponse>, ApiError> {
     let code = decode_code_path_param(&encoded_code)?;
     // Check if user is admin
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     if !is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "Only administrators can reactivate URLs".to_string(),
-            }),
+        return Err(ApiError::Forbidden(
+            "Only administrators can reactivate URLs".to_string(),
         ));
     }
 
@@ -326,18 +323,11 @@ pub async fn reactivate_url(
         Ok(true) => Ok(Json(SuccessResponse {
             message: "URL reactivated successfully".to_string(),
         })),
-        Ok(false) => Err((
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "URL not found".to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("Failed to reactivate URL: {}", e),
-            }),
-        )),
+        Ok(false) => Err(ApiError::NotFound("URL not found".to_string())),
+        Err(e) => Err(ApiError::Internal(format!(
+            "Failed to reactivate URL: {}",
+            e
+        ))),
     }
 }
 
@@ -347,24 +337,14 @@ async fn authorize_url_mutation(
     storage: &dyn Storage,
     claims: &Option<AuthClaims>,
     code: &str,
-) -> Result<Arc<ShortenedUrl>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Arc<ShortenedUrl>, ApiError> {
     let url = match storage.get_authoritative(code).await {
         Ok(Some(url)) => url,
         Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(ErrorResponse {
-                    error: "URL not found".to_string(),
-                }),
-            ));
+            return Err(ApiError::NotFound("URL not found".to_string()));
         }
         Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to load URL: {}", e),
-                }),
-            ));
+            return Err(ApiError::Internal(format!("Failed to load URL: {}", e)));
         }
     };
 
@@ -379,11 +359,8 @@ async fn authorize_url_mutation(
         }
     }
 
-    Err((
-        StatusCode::FORBIDDEN,
-        Json(ErrorResponse {
-            error: "You do not have permission to modify this URL".to_string(),
-        }),
+    Err(ApiError::Forbidden(
+        "You do not have permission to modify this URL".to_string(),
     ))
 }
 
@@ -394,17 +371,12 @@ pub async fn update_url(
     Extension(claims): Extension<Option<AuthClaims>>,
     Path(encoded_code): Path<String>,
     Json(payload): Json<UpdateUrlRequest>,
-) -> Result<Json<ShortenedUrlResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<ShortenedUrlResponse>, ApiError> {
     let code = decode_code_path_param(&encoded_code)?;
 
     let new_url = payload.url.trim();
     if new_url.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "URL cannot be empty".to_string(),
-            }),
-        ));
+        return Err(ApiError::BadRequest("URL cannot be empty".to_string()));
     }
 
     authorize_url_mutation(state.storage.as_ref(), &claims, &code).await?;
@@ -420,18 +392,8 @@ pub async fn update_url(
             url,
             Some(state.config.redirect_base_url.as_str()),
         ))),
-        Ok(None) => Err((
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "URL not found".to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("Failed to update URL: {}", e),
-            }),
-        )),
+        Ok(None) => Err(ApiError::NotFound("URL not found".to_string())),
+        Err(e) => Err(ApiError::Internal(format!("Failed to update URL: {}", e))),
     }
 }
 
@@ -440,19 +402,17 @@ pub async fn get_url_history(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
     Path(encoded_code): Path<String>,
-) -> Result<Json<Vec<UrlHistoryEntry>>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<Vec<UrlHistoryEntry>>, ApiError> {
     let code = decode_code_path_param(&encoded_code)?;
 
     authorize_url_mutation(state.storage.as_ref(), &claims, &code).await?;
 
     match state.storage.get_url_history(&code).await {
         Ok(history) => Ok(Json(history)),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("Failed to load URL history: {}", e),
-            }),
-        )),
+        Err(e) => Err(ApiError::Internal(format!(
+            "Failed to load URL history: {}",
+            e
+        ))),
     }
 }
 
@@ -462,7 +422,7 @@ pub async fn restore_url(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
     Path((encoded_code, history_id)): Path<(String, i64)>,
-) -> Result<Json<ShortenedUrlResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<ShortenedUrlResponse>, ApiError> {
     let code = decode_code_path_param(&encoded_code)?;
 
     authorize_url_mutation(state.storage.as_ref(), &claims, &code).await?;
@@ -478,18 +438,8 @@ pub async fn restore_url(
             url,
             Some(state.config.redirect_base_url.as_str()),
         ))),
-        Ok(None) => Err((
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "URL not found".to_string(),
-            }),
-        )),
-        Err(e) => Err((
-            StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: format!("Failed to restore URL: {}", e),
-            }),
-        )),
+        Ok(None) => Err(ApiError::NotFound("URL not found".to_string())),
+        Err(e) => Err(ApiError::NotFound(format!("Failed to restore URL: {}", e))),
     }
 }
 
@@ -498,20 +448,14 @@ pub async fn list_urls(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<PaginatedUrlsResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<PaginatedUrlsResponse>, ApiError> {
     let is_admin = is_user_admin(state.storage.as_ref(), &claims).await;
     let user_id = claims.as_ref().and_then(|c| c.user_id());
 
     // Decode cursor if provided
     let cursor = if let Some(cursor_str) = query.cursor {
-        let cursor_data = crate::cursor::verify_cursor(&cursor_str).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: format!("Invalid cursor: {}", e),
-                }),
-            )
-        })?;
+        let cursor_data = crate::cursor::verify_cursor(&cursor_str)
+            .map_err(|e| ApiError::BadRequest(format!("Invalid cursor: {}", e)))?;
         Some((cursor_data.created_at, cursor_data.id))
     } else {
         None
@@ -556,12 +500,7 @@ pub async fn list_urls(
 
             Ok(Json(response))
         }
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("Failed to list URLs: {}", e),
-            }),
-        )),
+        Err(e) => Err(ApiError::Internal(format!("Failed to list URLs: {}", e))),
     }
 }
 
@@ -691,7 +630,7 @@ mod authorization_tests {
         let err = authorize_url_mutation(storage.as_ref(), &claims("intruder", false), "authz")
             .await
             .unwrap_err();
-        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert_eq!(err.status_code(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
@@ -700,7 +639,7 @@ mod authorization_tests {
         let err = authorize_url_mutation(storage.as_ref(), &None, "authz")
             .await
             .unwrap_err();
-        assert_eq!(err.0, StatusCode::FORBIDDEN);
+        assert_eq!(err.status_code(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
@@ -709,7 +648,7 @@ mod authorization_tests {
         let err = authorize_url_mutation(storage.as_ref(), &claims("owner-1", false), "ghost")
             .await
             .unwrap_err();
-        assert_eq!(err.0, StatusCode::NOT_FOUND);
+        assert_eq!(err.status_code(), StatusCode::NOT_FOUND);
     }
 }
 
@@ -751,15 +690,12 @@ pub async fn search_urls(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Option<AuthClaims>>,
     Query(query): Query<SearchQuery>,
-) -> Result<Json<SearchResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<SearchResponse>, ApiError> {
     // Validate query
     let q = query.q.trim();
     if q.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "Search query 'q' cannot be empty".to_string(),
-            }),
+        return Err(ApiError::BadRequest(
+            "Search query 'q' cannot be empty".to_string(),
         ));
     }
 
@@ -768,14 +704,8 @@ pub async fn search_urls(
 
     // Parse cursor if provided
     let cursor = if let Some(cursor_str) = query.cursor {
-        let cursor_data = verify_cursor(&cursor_str).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: format!("Invalid cursor: {}", e),
-                }),
-            )
-        })?;
+        let cursor_data = verify_cursor(&cursor_str)
+            .map_err(|e| ApiError::BadRequest(format!("Invalid cursor: {}", e)))?;
         Some((cursor_data.created_at, cursor_data.id))
     } else {
         None
@@ -801,14 +731,7 @@ pub async fn search_urls(
         .storage
         .search(&params, is_admin, user_id.as_deref())
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Search failed: {}", e),
-                }),
-            )
-        })?;
+        .map_err(|e| ApiError::Internal(format!("Search failed: {}", e)))?;
 
     // Build response
     let base = Some(state.config.redirect_base_url.as_str());
