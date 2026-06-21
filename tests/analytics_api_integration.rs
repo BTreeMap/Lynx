@@ -9,13 +9,36 @@ use axum::{
     http::{header, Request, StatusCode},
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use lynx::analytics::AnalyticsAggregator;
+use lynx::analytics::{AnalyticsAggregator, AnalyticsGroupBy, AnalyticsRollup, IpVersion};
 use lynx::auth::AuthService;
 use lynx::config::{AuthConfig, AuthMode, Config};
 use lynx::storage::{SqliteStorage, Storage};
 use serde_json::Value;
 use std::sync::Arc;
 use tower::ServiceExt;
+
+/// Build an analytics rollup row for tests. `ip_version` is fixed to IPv4,
+/// which is what every fixture below exercises.
+fn rollup(
+    short_code: &str,
+    time_bucket: i64,
+    country_code: Option<&str>,
+    region: Option<&str>,
+    city: Option<&str>,
+    asn: Option<i64>,
+    visit_count: i64,
+) -> AnalyticsRollup {
+    AnalyticsRollup {
+        short_code: short_code.to_string(),
+        time_bucket,
+        country_code: country_code.map(str::to_string),
+        region: region.map(str::to_string),
+        city: city.map(str::to_string),
+        asn,
+        ip_version: IpVersion::V4,
+        visit_count,
+    }
+}
 
 /// Helper to create test storage
 async fn create_test_storage() -> Arc<dyn Storage> {
@@ -103,24 +126,22 @@ async fn test_analytics_api_endpoint_basic() {
     // Insert some analytics data
     let time_bucket = 1698768000;
     let records = vec![
-        (
-            "test123".to_string(),
+        rollup(
+            "test123",
             time_bucket,
-            Some("US".to_string()),
-            Some("CA".to_string()),
-            Some("San Francisco".to_string()),
+            Some("US"),
+            Some("CA"),
+            Some("San Francisco"),
             Some(15169),
-            4,
             5,
         ),
-        (
-            "test123".to_string(),
+        rollup(
+            "test123",
             time_bucket,
-            Some("GB".to_string()),
-            Some("England".to_string()),
-            Some("London".to_string()),
+            Some("GB"),
+            Some("England"),
+            Some("London"),
             Some(16509),
-            4,
             3,
         ),
     ];
@@ -167,34 +188,31 @@ async fn test_analytics_aggregate_api_endpoint() {
     // Insert analytics from multiple countries
     let time_bucket = 1698768000;
     let records = vec![
-        (
-            "multi".to_string(),
+        rollup(
+            "multi",
             time_bucket,
-            Some("US".to_string()),
-            Some("CA".to_string()),
-            Some("SF".to_string()),
+            Some("US"),
+            Some("CA"),
+            Some("SF"),
             Some(15169),
-            4,
             10,
         ),
-        (
-            "multi".to_string(),
+        rollup(
+            "multi",
             time_bucket,
-            Some("GB".to_string()),
-            Some("England".to_string()),
-            Some("London".to_string()),
+            Some("GB"),
+            Some("England"),
+            Some("London"),
             Some(16509),
-            4,
             5,
         ),
-        (
-            "multi".to_string(),
+        rollup(
+            "multi",
             time_bucket,
-            Some("US".to_string()),
-            Some("NY".to_string()),
-            Some("NYC".to_string()),
+            Some("US"),
+            Some("NY"),
+            Some("NYC"),
             Some(15169),
-            4,
             3,
         ),
     ];
@@ -253,14 +271,13 @@ async fn test_analytics_aggregate_with_aggregator_realtime() {
 
     // Insert some data in database
     let time_bucket = 1698768000;
-    let records = vec![(
-        "realtime".to_string(),
+    let records = vec![rollup(
+        "realtime",
         time_bucket,
-        Some("US".to_string()),
-        Some("CA".to_string()),
-        Some("SF".to_string()),
+        Some("US"),
+        Some("CA"),
+        Some("SF"),
         Some(15169),
-        4,
         10,
     )];
     storage.upsert_analytics_batch(records).await.unwrap();
@@ -370,7 +387,7 @@ async fn test_analytics_aggregate_with_unknown_pending_events() {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Check if events have been flushed to shared buffer
-        let in_memory = aggregator.get_in_memory_aggregate("pending", "country");
+        let in_memory = aggregator.get_in_memory_aggregate("pending", AnalyticsGroupBy::Country);
         if !in_memory.is_empty() {
             break;
         }
@@ -436,36 +453,9 @@ async fn test_analytics_aggregate_with_time_range() {
 
     // Insert records with different time buckets
     let records = vec![
-        (
-            "timed".to_string(),
-            1000,
-            Some("US".to_string()),
-            Some("CA".to_string()),
-            None,
-            None,
-            4,
-            5,
-        ),
-        (
-            "timed".to_string(),
-            2000,
-            Some("GB".to_string()),
-            Some("England".to_string()),
-            None,
-            None,
-            4,
-            3,
-        ),
-        (
-            "timed".to_string(),
-            3000,
-            Some("US".to_string()),
-            Some("NY".to_string()),
-            None,
-            None,
-            4,
-            7,
-        ),
+        rollup("timed", 1000, Some("US"), Some("CA"), None, None, 5),
+        rollup("timed", 2000, Some("GB"), Some("England"), None, None, 3),
+        rollup("timed", 3000, Some("US"), Some("NY"), None, None, 7),
     ];
     storage.upsert_analytics_batch(records).await.unwrap();
 
@@ -517,34 +507,31 @@ async fn test_analytics_aggregate_group_by_region() {
     // Insert analytics with different regions
     let time_bucket = 1698768000;
     let records = vec![
-        (
-            "regions".to_string(),
+        rollup(
+            "regions",
             time_bucket,
-            Some("US".to_string()),
-            Some("CA".to_string()),
-            Some("LA".to_string()),
+            Some("US"),
+            Some("CA"),
+            Some("LA"),
             None,
-            4,
             7,
         ),
-        (
-            "regions".to_string(),
+        rollup(
+            "regions",
             time_bucket,
-            Some("US".to_string()),
-            Some("NY".to_string()),
-            Some("NYC".to_string()),
+            Some("US"),
+            Some("NY"),
+            Some("NYC"),
             None,
-            4,
             4,
         ),
-        (
-            "regions".to_string(),
+        rollup(
+            "regions",
             time_bucket,
-            Some("US".to_string()),
-            Some("CA".to_string()),
-            Some("SF".to_string()),
+            Some("US"),
+            Some("CA"),
+            Some("SF"),
             None,
-            4,
             2,
         ),
     ];

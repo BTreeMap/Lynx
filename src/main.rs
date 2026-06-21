@@ -7,18 +7,6 @@ use lynx::auth::AuthService;
 use lynx::config::{AuthMode, Config, DatabaseBackend};
 use lynx::storage::{CachedStorage, PostgresStorage, SqliteStorage, Storage};
 
-// Type alias for analytics record tuple to reduce complexity
-type AnalyticsRecord = (
-    String,
-    i64,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<i64>,
-    i32,
-    i64,
-);
-
 #[derive(Parser)]
 #[command(name = "lynx")]
 #[command(about = "Lynx URL Shortener", long_about = None)]
@@ -584,7 +572,7 @@ async fn run_server() -> Result<()> {
 
     // Initialize analytics if enabled
     let (analytics_config, geoip_service, analytics_aggregator) = if config.analytics.enabled {
-        use lynx::analytics::{AnalyticsAggregator, GeoIpService};
+        use lynx::analytics::{AnalyticsAggregator, AnalyticsRollup, GeoIpService};
 
         info!("📊 Analytics enabled");
 
@@ -628,20 +616,9 @@ async fn run_server() -> Result<()> {
                         }
 
                         // Convert entries to storage format
-                        let records: Vec<AnalyticsRecord> = entries
+                        let records: Vec<AnalyticsRollup> = entries
                             .into_iter()
-                            .map(|(key, value)| {
-                                (
-                                    key.short_code,
-                                    key.time_bucket,
-                                    key.country_code,
-                                    key.region,
-                                    key.city,
-                                    key.asn.map(|a| a as i64),
-                                    key.ip_version as i32,
-                                    value.count as i64,
-                                )
-                            })
+                            .map(|(key, value)| AnalyticsRollup::from_aggregate(key, value))
                             .collect();
 
                         // Batch insert to storage
@@ -665,20 +642,9 @@ async fn run_server() -> Result<()> {
                         }
 
                         // Convert entries to storage format
-                        let records: Vec<AnalyticsRecord> = entries
+                        let records: Vec<AnalyticsRollup> = entries
                             .into_iter()
-                            .map(|(key, value)| {
-                                (
-                                    key.short_code,
-                                    key.time_bucket,
-                                    key.country_code,
-                                    key.region,
-                                    key.city,
-                                    key.asn.map(|a| a as i64),
-                                    key.ip_version as i32,
-                                    value.count as i64,
-                                )
-                            })
+                            .map(|(key, value)| AnalyticsRollup::from_aggregate(key, value))
                             .collect();
 
                         // Batch insert to storage

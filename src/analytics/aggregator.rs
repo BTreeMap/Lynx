@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info, warn};
 
 use crate::analytics::models::{AnalyticsEvent, AnalyticsKey, AnalyticsRecord, AnalyticsValue};
+use crate::analytics::AnalyticsGroupBy;
 use crate::analytics::DROPPED_DIMENSION_MARKER;
 
 /// Message types for the AnalyticsActor
@@ -376,7 +377,11 @@ impl AnalyticsAggregator {
     /// Get aggregated analytics from in-memory data for a specific short code
     /// This is used for near real-time analytics display
     /// Returns aggregates grouped by the specified dimension
-    pub fn get_in_memory_aggregate(&self, short_code: &str, group_by: &str) -> Vec<(String, i64)> {
+    pub fn get_in_memory_aggregate(
+        &self,
+        short_code: &str,
+        group_by: AnalyticsGroupBy,
+    ) -> Vec<(String, i64)> {
         use std::collections::HashMap;
 
         let mut grouped: HashMap<String, i64> = HashMap::new();
@@ -391,11 +396,11 @@ impl AnalyticsAggregator {
             }
 
             let dimension = match group_by {
-                "country" => key
+                AnalyticsGroupBy::Country => key
                     .country_code
                     .clone()
                     .unwrap_or_else(|| "Unknown".to_string()),
-                "region" => {
+                AnalyticsGroupBy::Region => {
                     // Check if region is dropped marker
                     if let Some(region) = &key.region {
                         if region == DROPPED_DIMENSION_MARKER {
@@ -415,7 +420,7 @@ impl AnalyticsAggregator {
                         }
                     }
                 }
-                "city" => {
+                AnalyticsGroupBy::City => {
                     // Check if city is dropped marker
                     if let Some(city) = &key.city {
                         if city == DROPPED_DIMENSION_MARKER {
@@ -443,19 +448,15 @@ impl AnalyticsAggregator {
                         }
                     }
                 }
-                "asn" => key
+                AnalyticsGroupBy::Asn => key
                     .asn
                     .map(|a| a.to_string())
                     .unwrap_or_else(|| "Unknown".to_string()),
-                "hour" => key.time_bucket.to_string(),
-                "day" => ((key.time_bucket / 86400) * 86400).to_string(),
-                _ => key
-                    .country_code
-                    .clone()
-                    .unwrap_or_else(|| "Unknown".to_string()),
+                AnalyticsGroupBy::Hour => key.time_bucket.to_string(),
+                AnalyticsGroupBy::Day => ((key.time_bucket / 86400) * 86400).to_string(),
             };
 
-            *grouped.entry(dimension).or_insert(0) += entry.value().count as i64;
+            *grouped.entry(dimension).or_insert(0) += entry.value().count;
         }
 
         // Process from shared buffer (Layer 2) - events pending GeoIP lookup

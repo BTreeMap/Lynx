@@ -9,7 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::analytics::{AnalyticsAggregate, AnalyticsAggregator, AnalyticsEntry};
+use crate::analytics::{AnalyticsAggregate, AnalyticsAggregator, AnalyticsEntry, AnalyticsGroupBy};
 
 use super::code_param::decode_code_path_param;
 use crate::storage::Storage;
@@ -29,7 +29,7 @@ pub struct AnalyticsQueryParams {
     pub end_time: Option<i64>,
 
     /// Group by dimension
-    pub group_by: Option<String>,
+    pub group_by: Option<AnalyticsGroupBy>,
 
     /// Limit results (default: 100, max: 1000)
     #[serde(default = "default_limit")]
@@ -110,7 +110,7 @@ pub async fn get_analytics_aggregate(
     };
 
     let limit = params.limit.clamp(1, 1000);
-    let group_by = params.group_by.as_deref().unwrap_or("country");
+    let group_by = params.group_by.unwrap_or(AnalyticsGroupBy::Country);
 
     // Get aggregates from database
     let db_aggregates = match state

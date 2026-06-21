@@ -4,10 +4,36 @@
 //! under various challenging conditions including concurrent operations, rapid flush cycles,
 //! and edge cases.
 
-use lynx::analytics::{AnalyticsAggregator, AnalyticsEvent, AnalyticsRecord, GeoLocation};
+use lynx::analytics::{
+    AnalyticsAggregator, AnalyticsEvent, AnalyticsGroupBy, AnalyticsRecord, AnalyticsRollup,
+    GeoLocation, IpVersion,
+};
 use lynx::storage::{SqliteStorage, Storage};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
+
+/// Build an analytics rollup row for tests. `ip_version` is fixed to IPv4,
+/// which is what every fixture below exercises.
+fn rollup(
+    short_code: &str,
+    time_bucket: i64,
+    country_code: Option<String>,
+    region: Option<String>,
+    city: Option<String>,
+    asn: Option<i64>,
+    visit_count: i64,
+) -> AnalyticsRollup {
+    AnalyticsRollup {
+        short_code: short_code.to_string(),
+        time_bucket,
+        country_code,
+        region,
+        city,
+        asn,
+        ip_version: IpVersion::V4,
+        visit_count,
+    }
+}
 
 /// Helper to create test storage
 async fn create_test_storage() -> Arc<dyn Storage> {
@@ -82,18 +108,7 @@ async fn test_rapid_flush_cycles() {
         let entries = agg.drain();
         let records: Vec<_> = entries
             .into_iter()
-            .map(|(k, v)| {
-                (
-                    k.short_code,
-                    k.time_bucket,
-                    k.country_code,
-                    k.region,
-                    k.city,
-                    k.asn.map(|a| a as i64),
-                    k.ip_version as i32,
-                    v.count as i64,
-                )
-            })
+            .map(|(k, v)| AnalyticsRollup::from_aggregate(k, v))
             .collect();
 
         if !records.is_empty() {
@@ -125,18 +140,7 @@ async fn test_rapid_flush_cycles() {
     if !entries.is_empty() {
         let records: Vec<_> = entries
             .into_iter()
-            .map(|(k, v)| {
-                (
-                    k.short_code,
-                    k.time_bucket,
-                    k.country_code,
-                    k.region,
-                    k.city,
-                    k.asn.map(|a| a as i64),
-                    k.ip_version as i32,
-                    v.count as i64,
-                )
-            })
+            .map(|(k, v)| AnalyticsRollup::from_aggregate(k, v))
             .collect();
         storage.upsert_analytics_batch(records).await.unwrap();
     }
@@ -171,14 +175,13 @@ async fn test_prune_preserves_data_consistency() {
 
     // Create 100 entries with different dimensions
     for i in 0..100 {
-        records.push((
-            "prune_test".to_string(),
+        records.push(rollup(
+            "prune_test",
             old_time + (i * 3600),           // Different hours
             Some(format!("C{}", i % 5)),     // 5 different countries
             Some(format!("R{}", i % 10)),    // 10 different regions
             Some(format!("City{}", i % 20)), // 20 different cities
             Some(15169 + (i % 3)),           // 3 different ASNs
-            4,
             1,
         ));
     }
@@ -231,40 +234,37 @@ async fn test_aggregation_consistency_with_multiple_upserts() {
     let time_bucket = 1698768000;
 
     // First batch
-    let records1 = vec![(
-        "multi_upsert".to_string(),
+    let records1 = vec![rollup(
+        "multi_upsert",
         time_bucket,
         Some("US".to_string()),
         Some("CA".to_string()),
         Some("SF".to_string()),
         Some(15169),
-        4,
         10,
     )];
     storage.upsert_analytics_batch(records1).await.unwrap();
 
     // Second batch (same key, should increment)
-    let records2 = vec![(
-        "multi_upsert".to_string(),
+    let records2 = vec![rollup(
+        "multi_upsert",
         time_bucket,
         Some("US".to_string()),
         Some("CA".to_string()),
         Some("SF".to_string()),
         Some(15169),
-        4,
         5,
     )];
     storage.upsert_analytics_batch(records2).await.unwrap();
 
     // Third batch (same key, should increment again)
-    let records3 = vec![(
-        "multi_upsert".to_string(),
+    let records3 = vec![rollup(
+        "multi_upsert",
         time_bucket,
         Some("US".to_string()),
         Some("CA".to_string()),
         Some("SF".to_string()),
         Some(15169),
-        4,
         3,
     )];
     storage.upsert_analytics_batch(records3).await.unwrap();
@@ -291,34 +291,31 @@ async fn test_time_range_filtering_edge_cases() {
 
     // Insert records at specific timestamps
     let records = vec![
-        (
-            "time_test".to_string(),
+        rollup(
+            "time_test",
             1000,
             Some("US".to_string()),
             None,
             None,
             None,
-            4,
             1,
         ),
-        (
-            "time_test".to_string(),
+        rollup(
+            "time_test",
             2000,
             Some("US".to_string()),
             None,
             None,
             None,
-            4,
             2,
         ),
-        (
-            "time_test".to_string(),
+        rollup(
+            "time_test",
             3000,
             Some("US".to_string()),
             None,
             None,
             None,
-            4,
             3,
         ),
     ];
@@ -362,36 +359,33 @@ async fn test_aggregation_with_null_dimensions() {
     let time_bucket = 1698768000;
     let records = vec![
         // Entry with all dimensions
-        (
-            "null_test".to_string(),
+        rollup(
+            "null_test",
             time_bucket,
             Some("US".to_string()),
             Some("CA".to_string()),
             Some("SF".to_string()),
             Some(15169),
-            4,
             5,
         ),
         // Entry with NULL region and city
-        (
-            "null_test".to_string(),
+        rollup(
+            "null_test",
             time_bucket,
             Some("US".to_string()),
             None,
             None,
             Some(15169),
-            4,
             3,
         ),
         // Entry with NULL ASN
-        (
-            "null_test".to_string(),
+        rollup(
+            "null_test",
             time_bucket,
             Some("US".to_string()),
             Some("CA".to_string()),
             Some("LA".to_string()),
             None,
-            4,
             2,
         ),
     ];
@@ -400,7 +394,7 @@ async fn test_aggregation_with_null_dimensions() {
 
     // Aggregate by country (should combine all)
     let country_agg = storage
-        .get_analytics_aggregate("null_test", None, None, "country", 10)
+        .get_analytics_aggregate("null_test", None, None, AnalyticsGroupBy::Country, 10)
         .await
         .unwrap();
     assert_eq!(country_agg.len(), 1);
@@ -408,7 +402,7 @@ async fn test_aggregation_with_null_dimensions() {
 
     // Aggregate by region (should handle NULLs correctly)
     let region_agg = storage
-        .get_analytics_aggregate("null_test", None, None, "region", 10)
+        .get_analytics_aggregate("null_test", None, None, AnalyticsGroupBy::Region, 10)
         .await
         .unwrap();
     assert!(
@@ -418,7 +412,7 @@ async fn test_aggregation_with_null_dimensions() {
 
     // Aggregate by ASN (should handle NULLs)
     let asn_agg = storage
-        .get_analytics_aggregate("null_test", None, None, "asn", 10)
+        .get_analytics_aggregate("null_test", None, None, AnalyticsGroupBy::Asn, 10)
         .await
         .unwrap();
     assert!(!asn_agg.is_empty(), "Should have at least 1 ASN entry");

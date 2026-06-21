@@ -488,16 +488,7 @@ impl Storage for CachedStorage {
 
     async fn upsert_analytics_batch(
         &self,
-        records: Vec<(
-            String,
-            i64,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<i64>,
-            i32,
-            i64,
-        )>,
+        records: Vec<crate::analytics::AnalyticsRollup>,
     ) -> Result<()> {
         // Analytics are not cached, pass through to storage
         self.inner.upsert_analytics_batch(records).await
@@ -521,7 +512,7 @@ impl Storage for CachedStorage {
         short_code: &str,
         start_time: Option<i64>,
         end_time: Option<i64>,
-        group_by: &str,
+        group_by: crate::analytics::AnalyticsGroupBy,
         limit: i64,
     ) -> Result<Vec<crate::analytics::AnalyticsAggregate>> {
         // Analytics aggregates are not cached, pass through to storage

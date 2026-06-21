@@ -1,4 +1,6 @@
-use crate::analytics::{DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER};
+use crate::analytics::{
+    AnalyticsGroupBy, AnalyticsRollup, DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER,
+};
 use crate::models::{ShortenedUrl, UrlHistoryEntry};
 use crate::storage::{
     LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageError, StorageResult,
@@ -1998,26 +2000,13 @@ impl Storage for SqliteStorage {
         Ok(result.rows_affected() as i64)
     }
 
-    async fn upsert_analytics_batch(
-        &self,
-        records: Vec<(
-            String,
-            i64,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<i64>,
-            i32,
-            i64,
-        )>,
-    ) -> Result<()> {
+    async fn upsert_analytics_batch(&self, records: Vec<AnalyticsRollup>) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| anyhow!(e))?
             .as_secs() as i64;
 
-        for (short_code, time_bucket, country_code, region, city, asn, ip_version, count) in records
-        {
+        for record in records {
             sqlx::query(
                 r#"
                 INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
@@ -2026,17 +2015,17 @@ impl Storage for SqliteStorage {
                 DO UPDATE SET visit_count = visit_count + ?, updated_at = ?
                 "#,
             )
-            .bind(&short_code)
-            .bind(time_bucket)
-            .bind(&country_code)
-            .bind(&region)
-            .bind(&city)
-            .bind(asn)
-            .bind(ip_version)
-            .bind(count)
+            .bind(&record.short_code)
+            .bind(record.time_bucket)
+            .bind(&record.country_code)
+            .bind(&record.region)
+            .bind(&record.city)
+            .bind(record.asn)
+            .bind(record.ip_version.as_i32())
+            .bind(record.visit_count)
             .bind(now)
             .bind(now)
-            .bind(count)
+            .bind(record.visit_count)
             .bind(now)
             .execute(self.pool.as_ref())
             .await?;
@@ -2099,23 +2088,22 @@ impl Storage for SqliteStorage {
         short_code: &str,
         start_time: Option<i64>,
         end_time: Option<i64>,
-        group_by: &str,
+        group_by: AnalyticsGroupBy,
         limit: i64,
     ) -> Result<Vec<crate::analytics::AnalyticsAggregate>> {
         let group_field = match group_by {
-            "country" => "country_code",
-            "region" => {
+            AnalyticsGroupBy::Country => "country_code",
+            AnalyticsGroupBy::Region => {
                 // Don't format if region is <dropped>
                 "CASE WHEN region = '<dropped>' THEN region ELSE COALESCE(region, 'Unknown') || ', ' || COALESCE(country_code, 'Unknown') END"
             }
-            "city" => {
+            AnalyticsGroupBy::City => {
                 // Don't format if city is <dropped>
                 "CASE WHEN city = '<dropped>' THEN city ELSE COALESCE(city, 'Unknown') || ', ' || COALESCE(region, 'Unknown') || ', ' || COALESCE(country_code, 'Unknown') END"
             }
-            "asn" => "CAST(asn AS TEXT)",
-            "hour" => "CAST(time_bucket AS TEXT)",
-            "day" => "CAST((time_bucket / 86400) * 86400 AS TEXT)",
-            _ => "country_code",
+            AnalyticsGroupBy::Asn => "CAST(asn AS TEXT)",
+            AnalyticsGroupBy::Hour => "CAST(time_bucket AS TEXT)",
+            AnalyticsGroupBy::Day => "CAST((time_bucket / 86400) * 86400 AS TEXT)",
         };
 
         let query_str = if let (Some(_start), Some(_end)) = (start_time, end_time) {
@@ -2625,6 +2613,30 @@ impl Storage for SqliteStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analytics::IpVersion;
+
+    /// Build an analytics rollup row for tests. `ip_version` is fixed to IPv4,
+    /// which is what every fixture below exercises.
+    fn rollup(
+        short_code: &str,
+        time_bucket: i64,
+        country_code: Option<&str>,
+        region: Option<&str>,
+        city: Option<&str>,
+        asn: Option<i64>,
+        visit_count: i64,
+    ) -> AnalyticsRollup {
+        AnalyticsRollup {
+            short_code: short_code.to_string(),
+            time_bucket,
+            country_code: country_code.map(str::to_string),
+            region: region.map(str::to_string),
+            city: city.map(str::to_string),
+            asn,
+            ip_version: IpVersion::V4,
+            visit_count,
+        }
+    }
 
     async fn setup_sqlite() -> Arc<dyn Storage> {
         let storage = SqliteStorage::new("sqlite::memory:", 5).await.unwrap();
@@ -3033,24 +3045,22 @@ mod tests {
         // Insert analytics records
         let time_bucket = 1698768000; // Some timestamp
         let records = vec![
-            (
-                "test123".to_string(),
+            rollup(
+                "test123",
                 time_bucket,
-                Some("US".to_string()),
-                Some("CA".to_string()),
-                Some("San Francisco".to_string()),
+                Some("US"),
+                Some("CA"),
+                Some("San Francisco"),
                 Some(15169),
-                4,
                 5,
             ),
-            (
-                "test123".to_string(),
+            rollup(
+                "test123",
                 time_bucket,
-                Some("GB".to_string()),
-                Some("England".to_string()),
-                Some("London".to_string()),
+                Some("GB"),
+                Some("England"),
+                Some("London"),
                 Some(16509),
-                4,
                 3,
             ),
         ];
@@ -3083,34 +3093,31 @@ mod tests {
         // Insert analytics from multiple countries
         let time_bucket = 1698768000;
         let records = vec![
-            (
-                "multi".to_string(),
+            rollup(
+                "multi",
                 time_bucket,
-                Some("US".to_string()),
-                Some("CA".to_string()),
-                Some("SF".to_string()),
+                Some("US"),
+                Some("CA"),
+                Some("SF"),
                 Some(15169),
-                4,
                 10,
             ),
-            (
-                "multi".to_string(),
+            rollup(
+                "multi",
                 time_bucket,
-                Some("GB".to_string()),
-                Some("England".to_string()),
-                Some("London".to_string()),
+                Some("GB"),
+                Some("England"),
+                Some("London"),
                 Some(16509),
-                4,
                 5,
             ),
-            (
-                "multi".to_string(),
+            rollup(
+                "multi",
                 time_bucket,
-                Some("US".to_string()),
-                Some("NY".to_string()),
-                Some("NYC".to_string()),
+                Some("US"),
+                Some("NY"),
+                Some("NYC"),
                 Some(15169),
-                4,
                 3,
             ),
         ];
@@ -3119,7 +3126,7 @@ mod tests {
 
         // Aggregate by country
         let aggregates = storage
-            .get_analytics_aggregate("multi", None, None, "country", 10)
+            .get_analytics_aggregate("multi", None, None, AnalyticsGroupBy::Country, 10)
             .await
             .unwrap();
 
@@ -3149,34 +3156,31 @@ mod tests {
 
         let time_bucket = 1698768000;
         let records = vec![
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("US".to_string()),
-                Some("CA".to_string()),
-                Some("LA".to_string()),
+                Some("US"),
+                Some("CA"),
+                Some("LA"),
                 None,
-                4,
                 7,
             ),
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("US".to_string()),
-                Some("NY".to_string()),
-                Some("NYC".to_string()),
+                Some("US"),
+                Some("NY"),
+                Some("NYC"),
                 None,
-                4,
                 4,
             ),
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("US".to_string()),
-                Some("CA".to_string()),
-                Some("SF".to_string()),
+                Some("US"),
+                Some("CA"),
+                Some("SF"),
                 None,
-                4,
                 2,
             ),
         ];
@@ -3185,7 +3189,7 @@ mod tests {
 
         // Aggregate by region
         let aggregates = storage
-            .get_analytics_aggregate("test", None, None, "region", 10)
+            .get_analytics_aggregate("test", None, None, AnalyticsGroupBy::Region, 10)
             .await
             .unwrap();
 
@@ -3210,43 +3214,16 @@ mod tests {
 
         let time_bucket = 1698768000;
         let records = vec![
-            (
-                "test".to_string(),
-                time_bucket,
-                Some("US".to_string()),
-                None,
-                None,
-                Some(15169),
-                4,
-                8,
-            ),
-            (
-                "test".to_string(),
-                time_bucket,
-                Some("US".to_string()),
-                None,
-                None,
-                Some(16509),
-                4,
-                3,
-            ),
-            (
-                "test".to_string(),
-                time_bucket,
-                Some("GB".to_string()),
-                None,
-                None,
-                Some(15169),
-                4,
-                2,
-            ),
+            rollup("test", time_bucket, Some("US"), None, None, Some(15169), 8),
+            rollup("test", time_bucket, Some("US"), None, None, Some(16509), 3),
+            rollup("test", time_bucket, Some("GB"), None, None, Some(15169), 2),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
 
         // Aggregate by ASN
         let aggregates = storage
-            .get_analytics_aggregate("test", None, None, "asn", 10)
+            .get_analytics_aggregate("test", None, None, AnalyticsGroupBy::Asn, 10)
             .await
             .unwrap();
 
@@ -3271,36 +3248,9 @@ mod tests {
 
         // Insert records with different time buckets
         let records = vec![
-            (
-                "test".to_string(),
-                1000,
-                Some("US".to_string()),
-                None,
-                None,
-                None,
-                4,
-                5,
-            ),
-            (
-                "test".to_string(),
-                2000,
-                Some("US".to_string()),
-                None,
-                None,
-                None,
-                4,
-                3,
-            ),
-            (
-                "test".to_string(),
-                3000,
-                Some("US".to_string()),
-                None,
-                None,
-                None,
-                4,
-                7,
-            ),
+            rollup("test", 1000, Some("US"), None, None, None, 5),
+            rollup("test", 2000, Some("US"), None, None, None, 3),
+            rollup("test", 3000, Some("US"), None, None, None, 7),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -3342,27 +3292,25 @@ mod tests {
         let time_bucket = 1698768000;
 
         // Insert initial record - all fields need to match for the UNIQUE constraint to trigger
-        let records = vec![(
-            "test".to_string(),
+        let records = vec![rollup(
+            "test",
             time_bucket,
-            Some("US".to_string()),
-            Some("CA".to_string()),
-            Some("SF".to_string()),
+            Some("US"),
+            Some("CA"),
+            Some("SF"),
             Some(15169),
-            4,
             5,
         )];
         storage.upsert_analytics_batch(records).await.unwrap();
 
         // Upsert same key with more visits - all fields must match
-        let records = vec![(
-            "test".to_string(),
+        let records = vec![rollup(
+            "test",
             time_bucket,
-            Some("US".to_string()),
-            Some("CA".to_string()),
-            Some("SF".to_string()),
+            Some("US"),
+            Some("CA"),
+            Some("SF"),
             Some(15169),
-            4,
             3,
         )];
         storage.upsert_analytics_batch(records).await.unwrap();
@@ -3388,43 +3336,22 @@ mod tests {
 
         // Insert records with different time buckets
         let records = vec![
-            (
-                "test".to_string(),
-                1000,
-                Some("US".to_string()),
-                None,
-                None,
-                None,
-                4,
-                5,
-            ),
-            (
-                "test".to_string(),
-                2000,
-                Some("GB".to_string()),
-                None,
-                None,
-                None,
-                4,
-                3,
-            ),
-            (
-                "test".to_string(),
-                3000,
-                Some("US".to_string()),
-                None,
-                None,
-                None,
-                4,
-                7,
-            ),
+            rollup("test", 1000, Some("US"), None, None, None, 5),
+            rollup("test", 2000, Some("GB"), None, None, None, 3),
+            rollup("test", 3000, Some("US"), None, None, None, 7),
         ];
 
         storage.upsert_analytics_batch(records).await.unwrap();
 
         // Aggregate with time range that includes only middle record
         let aggregates = storage
-            .get_analytics_aggregate("test", Some(1500), Some(2500), "country", 10)
+            .get_analytics_aggregate(
+                "test",
+                Some(1500),
+                Some(2500),
+                AnalyticsGroupBy::Country,
+                10,
+            )
             .await
             .unwrap();
 
@@ -3445,47 +3372,43 @@ mod tests {
         let time_bucket = 1698768000;
         let records = vec![
             // Full geo data: city, region, country
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("CA".to_string()),
-                Some("Ontario".to_string()),
-                Some("Toronto".to_string()),
+                Some("CA"),
+                Some("Ontario"),
+                Some("Toronto"),
                 None,
-                4,
                 5,
             ),
             // Same city, different count
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("CA".to_string()),
-                Some("Ontario".to_string()),
-                Some("Toronto".to_string()),
+                Some("CA"),
+                Some("Ontario"),
+                Some("Toronto"),
                 None,
-                4,
                 3,
             ),
             // Different city, same region and country
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("CA".to_string()),
-                Some("Ontario".to_string()),
-                Some("Ottawa".to_string()),
+                Some("CA"),
+                Some("Ontario"),
+                Some("Ottawa"),
                 None,
-                4,
                 2,
             ),
             // Missing region
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("US".to_string()),
+                Some("US"),
                 None,
-                Some("Portland".to_string()),
+                Some("Portland"),
                 None,
-                4,
                 1,
             ),
         ];
@@ -3494,7 +3417,7 @@ mod tests {
 
         // Aggregate by city
         let aggregates = storage
-            .get_analytics_aggregate("test", None, None, "city", 10)
+            .get_analytics_aggregate("test", None, None, AnalyticsGroupBy::City, 10)
             .await
             .unwrap();
 
@@ -3537,46 +3460,42 @@ mod tests {
         let time_bucket = 1698768000;
         let records = vec![
             // Full data: country and region
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("CA".to_string()),
-                Some("Ontario".to_string()),
-                Some("Toronto".to_string()),
+                Some("CA"),
+                Some("Ontario"),
+                Some("Toronto"),
                 None,
-                4,
                 5,
             ),
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("CA".to_string()),
-                Some("Ontario".to_string()),
-                Some("Ottawa".to_string()),
+                Some("CA"),
+                Some("Ontario"),
+                Some("Ottawa"),
                 None,
-                4,
                 3,
             ),
             // Different region, same country
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("CA".to_string()),
-                Some("Quebec".to_string()),
-                Some("Montreal".to_string()),
+                Some("CA"),
+                Some("Quebec"),
+                Some("Montreal"),
                 None,
-                4,
                 2,
             ),
             // Missing country (edge case)
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
                 None,
-                Some("Texas".to_string()),
-                Some("Austin".to_string()),
+                Some("Texas"),
+                Some("Austin"),
                 None,
-                4,
                 1,
             ),
         ];
@@ -3585,7 +3504,7 @@ mod tests {
 
         // Aggregate by region
         let aggregates = storage
-            .get_analytics_aggregate("test", None, None, "region", 10)
+            .get_analytics_aggregate("test", None, None, AnalyticsGroupBy::Region, 10)
             .await
             .unwrap();
 
@@ -3631,45 +3550,41 @@ mod tests {
 
         let records = vec![
             // Old records (will be pruned)
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 old_time,
-                Some("US".to_string()),
-                Some("CA".to_string()),
-                Some("SF".to_string()),
+                Some("US"),
+                Some("CA"),
+                Some("SF"),
                 Some(15169),
-                4,
                 5,
             ),
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 old_time + 3600,
-                Some("US".to_string()),
-                Some("CA".to_string()),
-                Some("LA".to_string()),
+                Some("US"),
+                Some("CA"),
+                Some("LA"),
                 Some(15169),
-                4,
                 3,
             ),
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 old_time,
-                Some("GB".to_string()),
-                Some("England".to_string()),
-                Some("London".to_string()),
+                Some("GB"),
+                Some("England"),
+                Some("London"),
                 Some(16509),
-                4,
                 2,
             ),
             // Recent records (will not be pruned)
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 recent_time,
-                Some("CA".to_string()),
-                Some("Ontario".to_string()),
-                Some("Toronto".to_string()),
+                Some("CA"),
+                Some("Ontario"),
+                Some("Toronto"),
                 None,
-                4,
                 4,
             ),
         ];
@@ -3700,34 +3615,31 @@ mod tests {
         let old_time = chrono::Utc::now().timestamp() - (40 * 86400); // 40 days ago
 
         let records = vec![
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 old_time,
-                Some("US".to_string()),
-                Some("CA".to_string()),
-                Some("SF".to_string()),
+                Some("US"),
+                Some("CA"),
+                Some("SF"),
                 None,
-                4,
                 5,
             ),
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 old_time + 3600,
-                Some("US".to_string()),
-                Some("CA".to_string()),
-                Some("SF".to_string()),
+                Some("US"),
+                Some("CA"),
+                Some("SF"),
                 None,
-                4,
                 3,
             ), // Different hour
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 old_time + 7200,
-                Some("US".to_string()),
-                Some("CA".to_string()),
-                Some("SF".to_string()),
+                Some("US"),
+                Some("CA"),
+                Some("SF"),
                 None,
-                4,
                 2,
             ), // Another hour
         ];
@@ -3769,25 +3681,23 @@ mod tests {
         let time_bucket = 1698768000;
         let records = vec![
             // Normal entry
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("US".to_string()),
-                Some("CA".to_string()),
-                Some("SF".to_string()),
+                Some("US"),
+                Some("CA"),
+                Some("SF"),
                 None,
-                4,
                 5,
             ),
             // Pruned entry with <dropped> markers
-            (
-                "test".to_string(),
+            rollup(
+                "test",
                 time_bucket,
-                Some("US".to_string()),
-                Some("<dropped>".to_string()),
-                Some("<dropped>".to_string()),
+                Some("US"),
+                Some("<dropped>"),
+                Some("<dropped>"),
                 None,
-                4,
                 3,
             ),
         ];
@@ -3796,7 +3706,7 @@ mod tests {
 
         // Aggregate by city
         let city_aggregates = storage
-            .get_analytics_aggregate("test", None, None, "city", 10)
+            .get_analytics_aggregate("test", None, None, AnalyticsGroupBy::City, 10)
             .await
             .unwrap();
 
@@ -3814,7 +3724,7 @@ mod tests {
 
         // Aggregate by region
         let region_aggregates = storage
-            .get_analytics_aggregate("test", None, None, "region", 10)
+            .get_analytics_aggregate("test", None, None, AnalyticsGroupBy::Region, 10)
             .await
             .unwrap();
 

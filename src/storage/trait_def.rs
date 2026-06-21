@@ -193,18 +193,8 @@ pub trait Storage: Send + Sync {
     /// Uses UPSERT to increment visit counts for existing records
     async fn upsert_analytics_batch(
         &self,
-        records: Vec<(
-            String,
-            i64,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<i64>,
-            i32,
-            i64,
-        )>,
+        records: Vec<crate::analytics::AnalyticsRollup>,
     ) -> Result<()>;
-    // (short_code, time_bucket, country_code, region, city, asn, ip_version, count)
 
     /// Get analytics for a specific short code
     async fn get_analytics(
@@ -221,7 +211,7 @@ pub trait Storage: Send + Sync {
         short_code: &str,
         start_time: Option<i64>,
         end_time: Option<i64>,
-        group_by: &str,
+        group_by: crate::analytics::AnalyticsGroupBy,
         limit: i64,
     ) -> Result<Vec<crate::analytics::AnalyticsAggregate>>;
 

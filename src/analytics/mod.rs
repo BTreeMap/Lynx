@@ -20,5 +20,5 @@ pub const DEFAULT_IP_VERSION: i32 = 4; // IPv4
 pub use aggregator::AnalyticsAggregator;
 pub use geoip::GeoIpService;
 pub use ip_extractor::extract_client_ip;
-pub use models::{AnalyticsEvent, AnalyticsRecord, GeoLocation};
+pub use models::{AnalyticsEvent, AnalyticsRecord, AnalyticsRollup, GeoLocation, IpVersion};
 pub use storage::{AnalyticsAggregate, AnalyticsEntry, AnalyticsGroupBy, AnalyticsQuery};

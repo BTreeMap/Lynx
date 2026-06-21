@@ -4,7 +4,7 @@
 //! when available. Tests will be skipped if databases cannot be downloaded (e.g., in
 //! restricted CI environments).
 
-use lynx::analytics::{AnalyticsAggregator, GeoIpService};
+use lynx::analytics::{AnalyticsAggregator, AnalyticsGroupBy, AnalyticsRollup, GeoIpService};
 use lynx::storage::{SqliteStorage, Storage};
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -159,18 +159,7 @@ async fn test_storage_integration() {
     let entries = agg.drain();
     let records: Vec<_> = entries
         .into_iter()
-        .map(|(k, v)| {
-            (
-                k.short_code,
-                k.time_bucket,
-                k.country_code,
-                k.region,
-                k.city,
-                k.asn.map(|a| a as i64),
-                k.ip_version as i32,
-                v.count as i64,
-            )
-        })
+        .map(|(k, v)| AnalyticsRollup::from_aggregate(k, v))
         .collect();
 
     storage.upsert_analytics_batch(records).await.unwrap();
@@ -196,7 +185,7 @@ async fn test_storage_integration() {
 
     // Test aggregation by country
     let agg_country = storage
-        .get_analytics_aggregate("test123", None, None, "country", 10)
+        .get_analytics_aggregate("test123", None, None, AnalyticsGroupBy::Country, 10)
         .await
         .unwrap();
     println!("Country aggregates: {:?}", agg_country);
@@ -243,18 +232,7 @@ async fn test_auto_flush() {
             }
             let recs: Vec<_> = entries
                 .into_iter()
-                .map(|(k, v)| {
-                    (
-                        k.short_code,
-                        k.time_bucket,
-                        k.country_code,
-                        k.region,
-                        k.city,
-                        k.asn.map(|a| a as i64),
-                        k.ip_version as i32,
-                        v.count as i64,
-                    )
-                })
+                .map(|(k, v)| AnalyticsRollup::from_aggregate(k, v))
                 .collect();
             let _ = s.upsert_analytics_batch(recs).await;
         })
@@ -353,27 +331,16 @@ async fn test_aggregation_dimensions() {
     let entries = agg.drain();
     let records: Vec<_> = entries
         .into_iter()
-        .map(|(k, v)| {
-            (
-                k.short_code,
-                k.time_bucket,
-                k.country_code,
-                k.region,
-                k.city,
-                k.asn.map(|a| a as i64),
-                k.ip_version as i32,
-                v.count as i64,
-            )
-        })
+        .map(|(k, v)| AnalyticsRollup::from_aggregate(k, v))
         .collect();
     storage.upsert_analytics_batch(records).await.unwrap();
 
     // Test different dimensions with appropriate expected values
     // The aggregate query filters out entries with NULL values for the dimension
     let dimensions = vec![
-        ("country", expected_country_count),
-        ("asn", expected_asn_count),
-        ("hour", total_visits), // time_bucket is never NULL
+        (AnalyticsGroupBy::Country, expected_country_count),
+        (AnalyticsGroupBy::Asn, expected_asn_count),
+        (AnalyticsGroupBy::Hour, total_visits), // time_bucket is never NULL
     ];
 
     for (dim, expected) in dimensions {
@@ -381,15 +348,19 @@ async fn test_aggregation_dimensions() {
             .get_analytics_aggregate("multi", None, None, dim, 10)
             .await
             .unwrap();
-        println!("Aggregated by {}: {:?}", dim, agg_result);
+        println!("Aggregated by {:?}: {:?}", dim, agg_result);
 
         // For dimensions with expected data, verify the aggregate is non-empty and totals match
         if expected > 0 {
-            assert!(!agg_result.is_empty(), "Should have aggregates for {}", dim);
+            assert!(
+                !agg_result.is_empty(),
+                "Should have aggregates for {:?}",
+                dim
+            );
             let total: i64 = agg_result.iter().map(|a| a.visit_count).sum();
             assert_eq!(
                 total, expected,
-                "Total for {} should match expected (got {}, expected {})",
+                "Total for {:?} should match expected (got {}, expected {})",
                 dim, total, expected
             );
         }

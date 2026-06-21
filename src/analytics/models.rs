@@ -134,6 +134,72 @@ impl AnalyticsKey {
 /// Aggregated analytics value
 #[derive(Debug, Clone, Default)]
 pub struct AnalyticsValue {
-    /// Count of visits
-    pub count: u64,
+    /// Count of visits.
+    ///
+    /// Stored as `i64` to match the database column and avoid lossy casts on
+    /// the flush path.
+    pub count: i64,
+}
+
+/// IP protocol version of a visitor, constrained to the only two valid values.
+///
+/// The database persists this as the integer `4` or `6`; this enum keeps
+/// invalid values (e.g. `7`) unrepresentable while data is in flight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IpVersion {
+    V4,
+    V6,
+}
+
+impl IpVersion {
+    /// Interpret a raw version number (as carried by [`GeoLocation`]). Any value
+    /// other than `6` is treated as IPv4, matching the historical default.
+    pub fn from_num(n: u8) -> Self {
+        match n {
+            6 => IpVersion::V6,
+            _ => IpVersion::V4,
+        }
+    }
+
+    /// The numeric representation persisted in the database (`4` or `6`).
+    pub fn as_i32(self) -> i32 {
+        match self {
+            IpVersion::V4 => 4,
+            IpVersion::V6 => 6,
+        }
+    }
+}
+
+/// A pre-aggregated analytics bucket ready to be upserted into storage.
+///
+/// Replaces an 8-tuple whose fields were easy to mis-order. Construction from
+/// an aggregated `(AnalyticsKey, AnalyticsValue)` pair is centralized in
+/// [`AnalyticsRollup::from_aggregate`].
+#[derive(Debug, Clone)]
+pub struct AnalyticsRollup {
+    pub short_code: String,
+    pub time_bucket: i64,
+    pub country_code: Option<String>,
+    pub region: Option<String>,
+    pub city: Option<String>,
+    pub asn: Option<i64>,
+    pub ip_version: IpVersion,
+    pub visit_count: i64,
+}
+
+impl AnalyticsRollup {
+    /// Build a rollup row from an aggregated key/value pair produced by the
+    /// in-memory aggregator.
+    pub fn from_aggregate(key: AnalyticsKey, value: AnalyticsValue) -> Self {
+        Self {
+            short_code: key.short_code,
+            time_bucket: key.time_bucket,
+            country_code: key.country_code,
+            region: key.region,
+            city: key.city,
+            asn: key.asn.map(|a| a as i64),
+            ip_version: IpVersion::from_num(key.ip_version),
+            visit_count: value.count,
+        }
+    }
 }
