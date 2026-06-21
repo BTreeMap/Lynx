@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, Link2, MousePointerClick, Search as SearchIcon, Signal } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDownToLine, Download, Link2, MousePointerClick, Search as SearchIcon, Signal } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { apiClient } from '../api';
 import type { ShortenedUrl } from '../types';
@@ -11,10 +11,15 @@ import { Button } from './ui/Button';
 import { Alert } from './ui/Alert';
 import { EmptyState } from './ui/EmptyState';
 import { Skeleton } from './ui/Skeleton';
+import { Spinner } from './ui/Spinner';
 import { StatCard } from './ui/StatCard';
 import { Badge } from './ui/Badge';
 
 const PAGE_SIZE = 50;
+const PACE_MS = 200;
+const supportsIntersectionObserver =
+    typeof window !== 'undefined' && 'IntersectionObserver' in window;
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const Dashboard: React.FC = () => {
     const { userInfo } = useAuth();
@@ -23,12 +28,14 @@ const Dashboard: React.FC = () => {
     const [urls, setUrls] = useState<ShortenedUrl[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [isLoadingAll, setIsLoadingAll] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [nextCursor, setNextCursor] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState(false);
     const [activeFilters, setActiveFilters] = useState<SearchFilters | null>(null);
+    const sentinelRef = useRef<HTMLDivElement | null>(null);
 
     const loadUrls = useCallback(async () => {
         setIsLoading(true);
@@ -49,7 +56,7 @@ const Dashboard: React.FC = () => {
     }, []);
 
     const loadMoreUrls = useCallback(async () => {
-        if (!nextCursor || isLoadingMore) return;
+        if (!nextCursor || isLoadingMore || isLoadingAll) return;
         setIsLoadingMore(true);
         setError(null);
         try {
@@ -74,7 +81,41 @@ const Dashboard: React.FC = () => {
         } finally {
             setIsLoadingMore(false);
         }
-    }, [nextCursor, isLoadingMore, activeFilters]);
+    }, [nextCursor, isLoadingMore, isLoadingAll, activeFilters]);
+
+    const loadAllRemaining = useCallback(async () => {
+        if (!nextCursor || isLoadingMore || isLoadingAll) return;
+        setIsLoadingAll(true);
+        setError(null);
+        try {
+            let cursor: string | null = nextCursor;
+            while (cursor) {
+                if (activeFilters) {
+                    const data = await apiClient.searchUrls({
+                        ...activeFilters,
+                        limit: PAGE_SIZE,
+                        cursor,
+                    });
+                    setUrls((prev) => [...prev, ...data.items]);
+                    cursor = data.next_cursor || null;
+                    setNextCursor(cursor);
+                    setHasMore(data.has_more);
+                } else {
+                    const data = await apiClient.listUrls(PAGE_SIZE, cursor);
+                    setUrls((prev) => [...prev, ...data.urls]);
+                    cursor = data.next_cursor || null;
+                    setNextCursor(cursor);
+                    setHasMore(data.has_more);
+                }
+                if (cursor) await delay(PACE_MS);
+            }
+        } catch (err: unknown) {
+            const apiError = err as { response?: { data?: { error?: string } } };
+            setError(apiError.response?.data?.error || 'Failed to load all URLs');
+        } finally {
+            setIsLoadingAll(false);
+        }
+    }, [nextCursor, isLoadingMore, isLoadingAll, activeFilters]);
 
     const handleSearch = useCallback(async (filters: SearchFilters) => {
         setIsSearching(true);
@@ -134,6 +175,22 @@ const Dashboard: React.FC = () => {
         loadUrls();
     }, [loadUrls]);
 
+    useEffect(() => {
+        if (!supportsIntersectionObserver) return;
+        const node = sentinelRef.current;
+        if (!node || !hasMore) return;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0]?.isIntersecting) {
+                    loadMoreUrls();
+                }
+            },
+            { rootMargin: '320px 0px' },
+        );
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, [hasMore, loadMoreUrls]);
+
     const stats = useMemo(() => {
         const totalClicks = urls.reduce((sum, u) => sum + u.clicks, 0);
         const active = urls.filter((u) => u.is_active).length;
@@ -176,7 +233,28 @@ const Dashboard: React.FC = () => {
                         value={stats.count.toLocaleString()}
                         icon={<Link2 className="h-5 w-5" />}
                         tone="primary"
-                        hint={hasMore ? 'More available' : undefined}
+                        hint={
+                            hasMore ? (
+                                <button
+                                    type="button"
+                                    onClick={loadAllRemaining}
+                                    disabled={isLoadingAll || isLoadingMore}
+                                    className="inline-flex items-center gap-1 rounded font-medium text-primary underline-offset-2 transition hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:no-underline disabled:opacity-70"
+                                >
+                                    {isLoadingAll ? (
+                                        <>
+                                            <Spinner className="h-3 w-3" />
+                                            Loading all… {stats.count.toLocaleString()} loaded
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ArrowDownToLine className="h-3 w-3" />
+                                            Load all
+                                        </>
+                                    )}
+                                </button>
+                            ) : undefined
+                        }
                     />
                     <StatCard
                         label="Clicks (shown)"
@@ -261,16 +339,39 @@ const Dashboard: React.FC = () => {
                     ) : (
                         <>
                             <UrlList urls={urls} isAdmin={isAdmin} onUrlsChanged={loadUrls} />
-                            {hasMore && (
-                                <div className="flex justify-center pt-2">
-                                    <Button
-                                        variant="secondary"
-                                        onClick={loadMoreUrls}
-                                        isLoading={isLoadingMore}
+                            {hasMore ? (
+                                supportsIntersectionObserver ? (
+                                    <div
+                                        ref={sentinelRef}
+                                        className="flex min-h-10 items-center justify-center pt-2"
                                     >
-                                        {isLoadingMore ? 'Loading…' : 'Load more'}
-                                    </Button>
-                                </div>
+                                        {(isLoadingMore || isLoadingAll) && (
+                                            <span className="inline-flex items-center gap-2 text-sm text-fg-muted">
+                                                <Spinner className="h-4 w-4" />
+                                                {isLoadingAll
+                                                    ? `Loading all… ${stats.count.toLocaleString()} loaded`
+                                                    : 'Loading more…'}
+                                            </span>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="flex justify-center pt-2">
+                                        <Button
+                                            variant="secondary"
+                                            onClick={loadMoreUrls}
+                                            isLoading={isLoadingMore}
+                                        >
+                                            {isLoadingMore ? 'Loading…' : 'Load more'}
+                                        </Button>
+                                    </div>
+                                )
+                            ) : (
+                                urls.length > PAGE_SIZE && (
+                                    <p className="pt-2 text-center text-xs text-fg-subtle">
+                                        You’ve reached the end · {stats.count.toLocaleString()} link
+                                        {stats.count === 1 ? '' : 's'}
+                                    </p>
+                                )
                             )}
                         </>
                     )}
