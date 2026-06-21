@@ -13,6 +13,9 @@ intentionally short; load the linked domain docs just-in-time for deeper work.
 - Backend: `cargo` (stable, with `rustfmt` + `clippy`). Frontend: `npm`
   (Node 24). Docker is needed for PostgreSQL and E2E tests.
 - Build frontend before backend — `build.rs` embeds `frontend/dist/`.
+- Agent skills live in the `.github/skills` git submodule. Clone with
+  `git clone --recurse-submodules`, or run
+  `git submodule update --init --recursive` on an existing checkout.
 
 ```bash
 # Frontend
@@ -69,6 +72,29 @@ Key always-on rules:
   checker — redesign data flow instead. Justified shared ownership (e.g.
   `Arc<Pool>`) and the deliberate `Storage` trait object remain fine.
 
+## Agent Skills
+
+Reusable, project-agnostic agent skills are vendored as a **git submodule** at
+[.github/skills](.github/skills), tracking
+[BTreeMap/SKILLs](https://github.com/BTreeMap/SKILLs). Each skill is a
+self-contained `SKILL.md` (e.g.
+[.github/skills/git-commits/SKILL.md](.github/skills/git-commits/SKILL.md)) —
+load it on demand when its description matches the task. Hand-authored commit
+messages MUST follow the
+[git-commits](.github/skills/git-commits/SKILL.md) skill.
+
+- **Don't edit skills in place.** The submodule is read-only here; skills are
+  managed centrally upstream. Propose changes in `BTreeMap/SKILLs`, then bump
+  the pointer below.
+- **Sync skills** by advancing the submodule and committing the new pointer:
+  ```bash
+  git submodule update --remote .github/skills
+  git commit -m "chore(skills): bump skills submodule"
+  ```
+- **Fresh checkouts** must init submodules (`git clone --recurse-submodules` or
+  `git submodule update --init --recursive`); CI checkouts already pass
+  `submodules: recursive`.
+
 ## Domain Documentation (load on demand)
 
 | When working on… | Read |
@@ -77,3 +103,4 @@ Key always-on rules:
 | Tests, CI gate, E2E, drift checks | [docs/agents/testing.md](docs/agents/testing.md) |
 | React/TypeScript frontend | [docs/agents/frontend.md](docs/agents/frontend.md) |
 | Full engineering standards & output contract | [docs/agents/engineering-standards.md](docs/agents/engineering-standards.md) |
+| Reusable agent skills (commit style, authoring) | [.github/skills/README.md](.github/skills/README.md) |
