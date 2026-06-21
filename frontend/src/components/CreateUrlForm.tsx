@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { apiClient } from '../api';
 import type { CreateUrlRequest, ShortenedUrl } from '../types';
 import { buildShortLink } from '../utils/url';
+import { extractErrorMessage } from '../utils/errorHandling';
 import { Button } from './ui/Button';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from './ui/Card';
 import { Field, Input } from './ui/Input';
@@ -47,8 +48,7 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
             setShowModal(true);
             onUrlCreated();
         } catch (err: unknown) {
-            const apiError = err as { response?: { data?: { error?: string } } };
-            setError(apiError.response?.data?.error || 'Failed to create URL');
+            setError(extractErrorMessage(err, 'Failed to create URL'));
         } finally {
             setIsSubmitting(false);
         }

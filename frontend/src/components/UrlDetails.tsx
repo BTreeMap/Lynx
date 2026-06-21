@@ -25,6 +25,8 @@ import {
 import { apiClient } from '../api';
 import type { AnalyticsAggregate, AnalyticsEntry, ShortenedUrl, UrlHistoryEntry } from '../types';
 import { buildShortLink, decodeShortCodeFromApi } from '../utils/url';
+import { formatDate } from '../utils/date';
+import { extractErrorMessage } from '../utils/errorHandling';
 import { useTheme } from '../hooks/useTheme';
 import { AppHeader } from './layout/AppHeader';
 import { Badge } from './ui/Badge';
@@ -51,14 +53,9 @@ const DIMENSIONS: { value: AggregateDimension; label: string }[] = [
     { value: 'day', label: 'Day' },
 ];
 
-const DIMENSION_LABELS: Record<AggregateDimension, string> = {
-    country: 'Country',
-    region: 'Region',
-    city: 'City',
-    asn: 'ASN',
-    hour: 'Hour',
-    day: 'Day',
-};
+const DIMENSION_LABELS = Object.fromEntries(
+    DIMENSIONS.map(({ value, label }) => [value, label]),
+) as Record<AggregateDimension, string>;
 
 const CHART_COLORS = [
     '#13a0ec',
@@ -73,8 +70,6 @@ const CHART_COLORS = [
     '#dd5592',
 ];
 const OTHER_COLOR = '#94a3b8';
-
-const formatDate = (timestamp: number) => new Date(timestamp * 1000).toLocaleString();
 
 const formatTimeBucket = (timestamp: number) => {
     const date = new Date(timestamp * 1000);
@@ -180,8 +175,7 @@ const UrlDetails: React.FC = () => {
                 const urlData = await apiClient.getUrl(decodedShortCode);
                 setUrl(urlData);
             } catch (err: unknown) {
-                const apiError = err as { response?: { data?: { error?: string } } };
-                setError(apiError.response?.data?.error || 'Failed to load URL details');
+                setError(extractErrorMessage(err, 'Failed to load URL details'));
             } finally {
                 setIsLoadingUrl(false);
             }
@@ -197,8 +191,7 @@ const UrlDetails: React.FC = () => {
             const data = await apiClient.getUrlHistory(decodedShortCode);
             setHistory(data);
         } catch (err: unknown) {
-            const apiError = err as { response?: { data?: { error?: string } } };
-            setHistoryError(apiError.response?.data?.error || 'Failed to load destination history');
+            setHistoryError(extractErrorMessage(err, 'Failed to load destination history'));
             setHistory([]);
         } finally {
             setIsLoadingHistory(false);
@@ -230,8 +223,7 @@ const UrlDetails: React.FC = () => {
             setIsEditOpen(false);
             await loadHistory();
         } catch (err: unknown) {
-            const apiError = err as { response?: { data?: { error?: string } } };
-            setEditError(apiError.response?.data?.error || 'Failed to update destination');
+            setEditError(extractErrorMessage(err, 'Failed to update destination'));
         } finally {
             setIsSaving(false);
         }
@@ -247,8 +239,7 @@ const UrlDetails: React.FC = () => {
             setRestoreTarget(null);
             await loadHistory();
         } catch (err: unknown) {
-            const apiError = err as { response?: { data?: { error?: string } } };
-            setRestoreError(apiError.response?.data?.error || 'Failed to restore destination');
+            setRestoreError(extractErrorMessage(err, 'Failed to restore destination'));
         } finally {
             setIsRestoring(false);
         }

@@ -5,6 +5,8 @@ import { BarChart3, ExternalLink, PowerOff, RotateCcw } from 'lucide-react';
 import { apiClient } from '../api';
 import type { ShortenedUrl } from '../types';
 import { buildShortLink, encodeShortCodeForApi } from '../utils/url';
+import { formatDate } from '../utils/date';
+import { extractErrorMessage } from '../utils/errorHandling';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { CopyButton } from './ui/CopyButton';
@@ -19,8 +21,6 @@ interface UrlListProps {
 }
 
 type PendingAction = { code: string; type: 'deactivate' | 'reactivate' } | null;
-
-const formatDate = (timestamp: number) => new Date(timestamp * 1000).toLocaleString();
 
 const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
     const [actionInProgress, setActionInProgress] = useState<string | null>(null);
@@ -60,8 +60,7 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
             }
             onUrlsChanged();
         } catch (err: unknown) {
-            const apiError = err as { response?: { data?: { error?: string } } };
-            setError(apiError.response?.data?.error || `Failed to ${type} URL`);
+            setError(extractErrorMessage(err, `Failed to ${type} URL`));
         } finally {
             setActionInProgress(null);
         }

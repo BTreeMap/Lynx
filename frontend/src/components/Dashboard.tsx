@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDownToLine, Download, Link2, MousePointerClick, Search as SearchIcon, Signal } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { apiClient } from '../api';
+import { extractErrorMessage } from '../utils/errorHandling';
 import type { ShortenedUrl } from '../types';
 import CreateUrlForm from './CreateUrlForm';
 import SearchPanel, { type SearchFilters } from './SearchPanel';
@@ -47,8 +48,7 @@ const Dashboard: React.FC = () => {
             setNextCursor(data.next_cursor || null);
             setHasMore(data.has_more);
         } catch (err: unknown) {
-            const apiError = err as { response?: { data?: { error?: string } } };
-            setError(apiError.response?.data?.error || 'Failed to load URLs');
+            setError(extractErrorMessage(err, 'Failed to load URLs'));
             setUrls([]);
         } finally {
             setIsLoading(false);
@@ -76,8 +76,7 @@ const Dashboard: React.FC = () => {
                 setHasMore(data.has_more);
             }
         } catch (err: unknown) {
-            const apiError = err as { response?: { data?: { error?: string } } };
-            setError(apiError.response?.data?.error || 'Failed to load more URLs');
+            setError(extractErrorMessage(err, 'Failed to load more URLs'));
         } finally {
             setIsLoadingMore(false);
         }
@@ -110,8 +109,7 @@ const Dashboard: React.FC = () => {
                 if (cursor) await delay(PACE_MS);
             }
         } catch (err: unknown) {
-            const apiError = err as { response?: { data?: { error?: string } } };
-            setError(apiError.response?.data?.error || 'Failed to load all URLs');
+            setError(extractErrorMessage(err, 'Failed to load all URLs'));
         } finally {
             setIsLoadingAll(false);
         }
@@ -129,8 +127,7 @@ const Dashboard: React.FC = () => {
             setNextCursor(data.next_cursor || null);
             setHasMore(data.has_more);
         } catch (err: unknown) {
-            const apiError = err as { response?: { data?: { error?: string } } };
-            setError(apiError.response?.data?.error || 'Search failed');
+            setError(extractErrorMessage(err, 'Search failed'));
         } finally {
             setIsSearching(false);
         }
@@ -164,8 +161,7 @@ const Dashboard: React.FC = () => {
             document.body.removeChild(link);
             URL.revokeObjectURL(objectUrl);
         } catch (err: unknown) {
-            const apiError = err as { response?: { data?: { error?: string } } };
-            setError(apiError.response?.data?.error || 'Failed to export URLs');
+            setError(extractErrorMessage(err, 'Failed to export URLs'));
         } finally {
             setIsExporting(false);
         }
