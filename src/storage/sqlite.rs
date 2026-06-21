@@ -1,5 +1,5 @@
 use crate::analytics::{DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER};
-use crate::models::ShortenedUrl;
+use crate::models::{ShortenedUrl, UrlHistoryEntry};
 use crate::storage::{
     LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageError, StorageResult,
 };
@@ -1315,6 +1315,27 @@ impl Storage for SqliteStorage {
         .execute(self.pool.as_ref())
         .await?;
 
+        // Create url_history table to record previous destinations on update/restore
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS url_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                short_code TEXT NOT NULL,
+                historic_url TEXT NOT NULL,
+                changed_at INTEGER NOT NULL,
+                changed_by TEXT
+            )
+            "#,
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_url_history_short_code ON url_history(short_code, changed_at DESC, id DESC)",
+        )
+        .execute(self.pool.as_ref())
+        .await?;
+
         // Security: Create trigger to prevent DELETE operations on urls table
         // This ensures URLs can only be deactivated, never deleted
         sqlx::query(
@@ -1501,6 +1522,155 @@ impl Storage for SqliteStorage {
         .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn update_url(
+        &self,
+        short_code: &str,
+        new_url: &str,
+        updated_by: Option<&str>,
+    ) -> StorageResult<Option<Arc<ShortenedUrl>>> {
+        let changed_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| StorageError::Other(e.into()))?
+            .as_secs() as i64;
+
+        let mut tx = self.pool.begin().await.map_err(|e| anyhow!(e))?;
+
+        // Read the current (soon-to-be-previous) destination.
+        let old_url: Option<String> =
+            sqlx::query_scalar("SELECT original_url FROM urls WHERE short_code = ?")
+                .bind(short_code)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| anyhow!(e))?;
+
+        let Some(old_url) = old_url else {
+            return Ok(None);
+        };
+
+        // Record the previous destination in history.
+        sqlx::query(
+            r#"
+            INSERT INTO url_history (short_code, historic_url, changed_at, changed_by)
+            VALUES (?, ?, ?, ?)
+            "#,
+        )
+        .bind(short_code)
+        .bind(&old_url)
+        .bind(changed_at)
+        .bind(updated_by)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!(e))?;
+
+        // Point the active record at the new destination.
+        // The `urls_fts_update` trigger keeps the FTS tables in sync automatically.
+        let updated = sqlx::query_as::<_, ShortenedUrl>(
+            r#"
+            UPDATE urls
+            SET original_url = ?
+            WHERE short_code = ?
+            RETURNING id, short_code, original_url, created_at, created_by, clicks, is_active
+            "#,
+        )
+        .bind(new_url)
+        .bind(short_code)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| anyhow!(e))?;
+
+        tx.commit().await.map_err(|e| anyhow!(e))?;
+
+        Ok(Some(Arc::new(updated)))
+    }
+
+    async fn get_url_history(&self, short_code: &str) -> Result<Vec<UrlHistoryEntry>> {
+        let history = sqlx::query_as::<_, UrlHistoryEntry>(
+            r#"
+            SELECT id, short_code, historic_url, changed_at, changed_by
+            FROM url_history
+            WHERE short_code = ?
+            ORDER BY changed_at DESC, id DESC
+            "#,
+        )
+        .bind(short_code)
+        .fetch_all(self.pool.as_ref())
+        .await?;
+
+        Ok(history)
+    }
+
+    async fn restore_url(
+        &self,
+        short_code: &str,
+        history_id: i64,
+        restored_by: Option<&str>,
+    ) -> StorageResult<Option<Arc<ShortenedUrl>>> {
+        let changed_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| StorageError::Other(e.into()))?
+            .as_secs() as i64;
+
+        let mut tx = self.pool.begin().await.map_err(|e| anyhow!(e))?;
+
+        // Resolve the destination to restore to.
+        let historic_url: Option<String> = sqlx::query_scalar(
+            "SELECT historic_url FROM url_history WHERE id = ? AND short_code = ?",
+        )
+        .bind(history_id)
+        .bind(short_code)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| anyhow!(e))?;
+
+        let historic_url =
+            historic_url.ok_or_else(|| StorageError::Other(anyhow!("history entry not found")))?;
+
+        // Read the current destination so it is preserved in history.
+        let old_url: Option<String> =
+            sqlx::query_scalar("SELECT original_url FROM urls WHERE short_code = ?")
+                .bind(short_code)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| anyhow!(e))?;
+
+        let Some(old_url) = old_url else {
+            return Ok(None);
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO url_history (short_code, historic_url, changed_at, changed_by)
+            VALUES (?, ?, ?, ?)
+            "#,
+        )
+        .bind(short_code)
+        .bind(&old_url)
+        .bind(changed_at)
+        .bind(restored_by)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!(e))?;
+
+        // The `urls_fts_update` trigger keeps the FTS tables in sync automatically.
+        let updated = sqlx::query_as::<_, ShortenedUrl>(
+            r#"
+            UPDATE urls
+            SET original_url = ?
+            WHERE short_code = ?
+            RETURNING id, short_code, original_url, created_at, created_by, clicks, is_active
+            "#,
+        )
+        .bind(&historic_url)
+        .bind(short_code)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| anyhow!(e))?;
+
+        tx.commit().await.map_err(|e| anyhow!(e))?;
+
+        Ok(Some(Arc::new(updated)))
     }
 
     async fn increment_clicks(&self, short_code: &str, amount: u64) -> Result<()> {

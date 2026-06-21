@@ -337,6 +337,59 @@ else
     print_result 1 "Search URLs missing query text should return 400 (got HTTP $missing_query_status)"
 fi
 
+# Test 24: Update a URL destination
+echo ""
+echo "Test 24: Update URL destination"
+curl -s -X POST "$API_URL/api/urls" \
+    -H "Content-Type: application/json" \
+    -d '{"url": "https://example.com/v1", "custom_code": "hist-e2e"}' >/dev/null
+response=$(curl -s -X PATCH "$API_URL/api/urls/$(encode_short_code "hist-e2e")" \
+    -H "Content-Type: application/json" \
+    -d '{"url": "https://example.com/v2"}')
+if check_json_field "$response" "original_url" "https://example.com/v2" >/dev/null 2>&1; then
+    print_result 0 "Update URL destination"
+else
+    print_result 1 "Update URL destination (response: $response)"
+fi
+
+# Test 25: History records the previous destination
+echo ""
+echo "Test 25: URL history records previous destination"
+history=$(curl -s "$API_URL/api/urls/$(encode_short_code "hist-e2e")/history")
+if echo "$history" | grep -q '"historic_url":"https://example.com/v1"'; then
+    print_result 0 "History records previous destination"
+else
+    print_result 1 "History missing previous destination (response: $history)"
+fi
+
+# Test 26: Restore the previous destination
+echo ""
+echo "Test 26: Restore previous destination"
+history_id=$(echo "$history" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+if [ -z "$history_id" ]; then
+    print_result 1 "Could not parse history id from: $history"
+fi
+restore_response=$(curl -s -X POST \
+    "$API_URL/api/urls/$(encode_short_code "hist-e2e")/history/$history_id/restore")
+if check_json_field "$restore_response" "original_url" "https://example.com/v1" >/dev/null 2>&1; then
+    print_result 0 "Restore previous destination"
+else
+    print_result 1 "Restore previous destination (response: $restore_response)"
+fi
+
+# Test 27: Reject empty update destination
+echo ""
+echo "Test 27: Reject empty update destination"
+empty_status=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
+    "$API_URL/api/urls/$(encode_short_code "hist-e2e")" \
+    -H "Content-Type: application/json" \
+    -d '{"url": "   "}')
+if [ "$empty_status" = "400" ]; then
+    print_result 0 "Empty update destination rejected"
+else
+    print_result 1 "Empty update destination should return 400 (got HTTP $empty_status)"
+fi
+
 echo ""
 echo -e "${GREEN}=========================================="
 echo "All Integration Tests Passed!"

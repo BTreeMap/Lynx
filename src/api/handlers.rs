@@ -12,7 +12,9 @@ use rand::distr::{Alphanumeric, Distribution};
 use crate::api::code_param::decode_code_path_param;
 use crate::auth::AuthClaims;
 use crate::config::Config;
-use crate::models::{CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl};
+use crate::models::{
+    CreateUrlRequest, DeactivateUrlRequest, ShortenedUrl, UpdateUrlRequest, UrlHistoryEntry,
+};
 use crate::storage::{SearchParams, Storage, StorageError};
 
 pub struct AppState {
@@ -342,6 +344,158 @@ pub async fn reactivate_url(
     }
 }
 
+/// Ensure the caller may mutate the given URL: they must be the owner or an admin.
+/// Returns the existing URL on success so callers can reuse it without a second fetch.
+async fn authorize_url_mutation(
+    storage: &dyn Storage,
+    claims: &Option<AuthClaims>,
+    code: &str,
+) -> Result<Arc<ShortenedUrl>, (StatusCode, Json<ErrorResponse>)> {
+    let url = match storage.get_authoritative(code).await {
+        Ok(Some(url)) => url,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: "URL not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to load URL: {}", e),
+                }),
+            ));
+        }
+    };
+
+    if is_user_admin(storage, claims).await {
+        return Ok(url);
+    }
+
+    let caller = claims.as_ref().and_then(|c| c.user_id());
+    if let (Some(caller), Some(owner)) = (caller.as_deref(), url.created_by.as_deref()) {
+        if caller == owner {
+            return Ok(url);
+        }
+    }
+
+    Err((
+        StatusCode::FORBIDDEN,
+        Json(ErrorResponse {
+            error: "You do not have permission to modify this URL".to_string(),
+        }),
+    ))
+}
+
+/// Update the destination of a shortened URL (owner or admin).
+/// The previous destination is recorded in the URL's history.
+pub async fn update_url(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
+    Path(encoded_code): Path<String>,
+    Json(payload): Json<UpdateUrlRequest>,
+) -> Result<Json<ShortenedUrlResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
+
+    let new_url = payload.url.trim();
+    if new_url.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "URL cannot be empty".to_string(),
+            }),
+        ));
+    }
+
+    authorize_url_mutation(state.storage.as_ref(), &claims, &code).await?;
+
+    let updated_by = claims.as_ref().and_then(|c| c.user_id());
+
+    match state
+        .storage
+        .update_url(&code, new_url, updated_by.as_deref())
+        .await
+    {
+        Ok(Some(url)) => Ok(Json(ShortenedUrlResponse::with_base(
+            url,
+            Some(state.config.redirect_base_url.as_str()),
+        ))),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "URL not found".to_string(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to update URL: {}", e),
+            }),
+        )),
+    }
+}
+
+/// Get the history of previous destinations for a shortened URL (owner or admin).
+pub async fn get_url_history(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
+    Path(encoded_code): Path<String>,
+) -> Result<Json<Vec<UrlHistoryEntry>>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
+
+    authorize_url_mutation(state.storage.as_ref(), &claims, &code).await?;
+
+    match state.storage.get_url_history(&code).await {
+        Ok(history) => Ok(Json(history)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Failed to load URL history: {}", e),
+            }),
+        )),
+    }
+}
+
+/// Restore a shortened URL to a previous destination (owner or admin).
+/// The current destination is recorded in the URL's history.
+pub async fn restore_url(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Option<AuthClaims>>,
+    Path((encoded_code, history_id)): Path<(String, i64)>,
+) -> Result<Json<ShortenedUrlResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let code = decode_code_path_param(&encoded_code)?;
+
+    authorize_url_mutation(state.storage.as_ref(), &claims, &code).await?;
+
+    let restored_by = claims.as_ref().and_then(|c| c.user_id());
+
+    match state
+        .storage
+        .restore_url(&code, history_id, restored_by.as_deref())
+        .await
+    {
+        Ok(Some(url)) => Ok(Json(ShortenedUrlResponse::with_base(
+            url,
+            Some(state.config.redirect_base_url.as_str()),
+        ))),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "URL not found".to_string(),
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: format!("Failed to restore URL: {}", e),
+            }),
+        )),
+    }
+}
+
 /// List all shortened URLs
 pub async fn list_urls(
     State(state): State<Arc<AppState>>,
@@ -491,6 +645,74 @@ mod tests {
             validated_short_code_max_length(MIN_SHORT_CODE_LENGTH),
             MIN_SHORT_CODE_LENGTH
         );
+    }
+}
+
+#[cfg(test)]
+mod authorization_tests {
+    use super::*;
+    use crate::storage::SqliteStorage;
+    use serde_json::json;
+
+    async fn storage_with_owned_url(owner: &str) -> Arc<dyn Storage> {
+        let storage = SqliteStorage::new("sqlite::memory:", 1).await.unwrap();
+        storage.init().await.unwrap();
+        storage
+            .create_with_code("authz", "https://example.com", Some(owner))
+            .await
+            .unwrap();
+        Arc::new(storage)
+    }
+
+    fn claims(sub: &str, is_admin: bool) -> Option<AuthClaims> {
+        Some(AuthClaims(Arc::new(json!({
+            "sub": sub,
+            "is_admin": is_admin,
+            "auth_method": "oauth",
+        }))))
+    }
+
+    #[tokio::test]
+    async fn owner_may_mutate_their_url() {
+        let storage = storage_with_owned_url("owner-1").await;
+        let result =
+            authorize_url_mutation(storage.as_ref(), &claims("owner-1", false), "authz").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn admin_may_mutate_any_url() {
+        let storage = storage_with_owned_url("owner-1").await;
+        let result =
+            authorize_url_mutation(storage.as_ref(), &claims("someone-else", true), "authz").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn non_owner_non_admin_is_forbidden() {
+        let storage = storage_with_owned_url("owner-1").await;
+        let err = authorize_url_mutation(storage.as_ref(), &claims("intruder", false), "authz")
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_caller_is_forbidden() {
+        let storage = storage_with_owned_url("owner-1").await;
+        let err = authorize_url_mutation(storage.as_ref(), &None, "authz")
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn missing_url_is_not_found() {
+        let storage = storage_with_owned_url("owner-1").await;
+        let err = authorize_url_mutation(storage.as_ref(), &claims("owner-1", false), "ghost")
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, StatusCode::NOT_FOUND);
     }
 }
 

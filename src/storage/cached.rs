@@ -1,4 +1,4 @@
-use crate::models::ShortenedUrl;
+use crate::models::{ShortenedUrl, UrlHistoryEntry};
 use crate::storage::{
     LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageResult,
 };
@@ -331,6 +331,44 @@ impl Storage for CachedStorage {
         if result {
             self.invalidate_cache(short_code).await;
         }
+
+        Ok(result)
+    }
+
+    async fn update_url(
+        &self,
+        short_code: &str,
+        new_url: &str,
+        updated_by: Option<&str>,
+    ) -> StorageResult<Option<Arc<ShortenedUrl>>> {
+        let result = self
+            .inner
+            .update_url(short_code, new_url, updated_by)
+            .await?;
+
+        // Invalidate cache so the new destination is served immediately
+        self.invalidate_cache(short_code).await;
+
+        Ok(result)
+    }
+
+    async fn get_url_history(&self, short_code: &str) -> Result<Vec<UrlHistoryEntry>> {
+        self.inner.get_url_history(short_code).await
+    }
+
+    async fn restore_url(
+        &self,
+        short_code: &str,
+        history_id: i64,
+        restored_by: Option<&str>,
+    ) -> StorageResult<Option<Arc<ShortenedUrl>>> {
+        let result = self
+            .inner
+            .restore_url(short_code, history_id, restored_by)
+            .await?;
+
+        // Invalidate cache so the restored destination is served immediately
+        self.invalidate_cache(short_code).await;
 
         Ok(result)
     }

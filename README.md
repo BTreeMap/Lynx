@@ -9,7 +9,7 @@ A high-performance URL shortener written in Rust with dual-server architecture, 
 - **Access Control**: OAuth 2.0 and Cloudflare Zero Trust authentication with pass-through mode
 - **Dual Server Architecture**: Separate API server (management) and redirect server (public-facing)
 - **Analytics**: Click tracking with optional GeoIP-based visitor analytics ([Analytics Guide](docs/ANALYTICS.md))
-- **Immutable URLs**: URLs can be deactivated/reactivated but not deleted or modified
+- **Versioned Destinations**: A link's destination can be updated in place, with every previous destination retained as restorable history; URLs are never deleted
 - **Delete Protection**: Database-level triggers prevent accidental deletion ([Delete Protection](docs/DELETE_PROTECTION.md))
 - **Multi-User Support**: User-specific link management with admin roles
 - **Web Frontend**: React-based dashboard bundled into the binary
@@ -73,6 +73,7 @@ Lynx runs two separate HTTP servers:
 - API endpoints at `/api/...`
 - Optional authentication (OAuth 2.0, Cloudflare Zero Trust, or disabled)
 - Create URLs with auto-generated or custom codes
+- Update a link's destination with full version history
 - Deactivate/reactivate URLs
 - List and search capabilities
 
@@ -382,6 +383,9 @@ POST /api/urls                # Create short URL
 GET  /api/urls                # List URLs (cursor-based pagination)
 GET  /api/urls/search         # Search URLs by query string
 GET  /api/urls/{code}         # Get URL details
+PATCH /api/urls/{code}        # Update destination, owner or admin (keeps history)
+GET  /api/urls/{code}/history # List previous destinations (owner or admin)
+POST /api/urls/{code}/history/{history_id}/restore # Restore a previous destination (owner or admin)
 PUT  /api/urls/{code}/deactivate   # Deactivate URL (admin only)
 PUT  /api/urls/{code}/reactivate   # Reactivate URL (admin only)
 GET  /api/user/info           # Get current user info
@@ -405,6 +409,17 @@ curl http://localhost:8080/api/urls?limit=20&cursor=<next_cursor>
 
 # Get URL details
 curl http://localhost:8080/api/urls/mycode
+
+# Update the destination (owner or admin) — the old destination is kept in history
+curl -X PATCH http://localhost:8080/api/urls/mycode \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/new-destination"}'
+
+# View destination history (owner or admin)
+curl http://localhost:8080/api/urls/mycode/history
+
+# Restore a previous destination by its history id (owner or admin)
+curl -X POST http://localhost:8080/api/urls/mycode/history/1/restore
 
 # Deactivate URL (admin only)
 curl -X PUT http://localhost:8080/api/urls/mycode/deactivate

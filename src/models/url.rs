@@ -22,3 +22,19 @@ pub struct CreateUrlRequest {
 pub struct DeactivateUrlRequest {
     pub reason: Option<String>,
 }
+
+/// A historical destination for a shortened URL, recorded each time the
+/// destination changes.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct UrlHistoryEntry {
+    pub id: i64,
+    pub short_code: String,
+    pub historic_url: String,
+    pub changed_at: i64,
+    pub changed_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateUrlRequest {
+    pub url: String,
+}

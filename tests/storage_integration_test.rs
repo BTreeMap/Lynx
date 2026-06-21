@@ -773,3 +773,152 @@ async fn test_postgres_concurrent_init() {
         "TRUNCATE trigger should exist exactly once"
     );
 }
+
+#[tokio::test]
+async fn test_url_update_history_and_restore_sqlite() {
+    if !should_test_backend("sqlite") {
+        return;
+    }
+
+    let storage = create_sqlite_storage().await;
+
+    // Create the initial URL.
+    storage
+        .create_with_code("hist1", "https://v1.example.com", Some("owner"))
+        .await
+        .unwrap();
+
+    // No history before any update.
+    assert!(storage.get_url_history("hist1").await.unwrap().is_empty());
+
+    // Update the destination; the previous URL is recorded in history.
+    let updated = storage
+        .update_url("hist1", "https://v2.example.com", Some("owner"))
+        .await
+        .unwrap()
+        .expect("update should return the URL");
+    assert_eq!(updated.original_url, "https://v2.example.com");
+
+    // The active record reflects the new destination (read path unchanged).
+    let active = storage
+        .get_authoritative("hist1")
+        .await
+        .unwrap()
+        .expect("URL should exist");
+    assert_eq!(active.original_url, "https://v2.example.com");
+
+    // Update again to build up history.
+    storage
+        .update_url("hist1", "https://v3.example.com", Some("owner"))
+        .await
+        .unwrap()
+        .expect("update should return the URL");
+
+    // History holds both previous destinations, newest first.
+    let history = storage.get_url_history("hist1").await.unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].historic_url, "https://v2.example.com");
+    assert_eq!(history[1].historic_url, "https://v1.example.com");
+    assert!(history[0].changed_at >= history[1].changed_at);
+
+    // Restore to the original destination using the oldest history entry.
+    let original_entry_id = history[1].id;
+    let restored = storage
+        .restore_url("hist1", original_entry_id, Some("owner"))
+        .await
+        .unwrap()
+        .expect("restore should return the URL");
+    assert_eq!(restored.original_url, "https://v1.example.com");
+
+    // The active record now serves the restored destination.
+    let active = storage
+        .get_authoritative("hist1")
+        .await
+        .unwrap()
+        .expect("URL should exist");
+    assert_eq!(active.original_url, "https://v1.example.com");
+
+    // Restoring records the destination that was active at restore time (v3).
+    let history = storage.get_url_history("hist1").await.unwrap();
+    assert_eq!(history.len(), 3);
+    assert_eq!(history[0].historic_url, "https://v3.example.com");
+
+    // Updating a non-existent code returns None.
+    assert!(storage
+        .update_url("missing", "https://nope.example.com", None)
+        .await
+        .unwrap()
+        .is_none());
+
+    // Restoring with an unknown history id errors out.
+    assert!(storage.restore_url("hist1", 999_999, None).await.is_err());
+}
+
+#[tokio::test]
+async fn test_url_update_history_and_restore_postgres() {
+    if !should_test_backend("postgres") {
+        return;
+    }
+
+    // Acquire lock to serialize all Postgres tests (shared database)
+    let lock = POSTGRES_TABLE_LOCK
+        .get_or_init(|| async { Arc::new(tokio::sync::Mutex::new(())) })
+        .await;
+    let _guard = lock.lock().await;
+
+    let storage = match create_postgres_storage().await {
+        Some(storage) => storage,
+        None => {
+            println!("SKIPPED: DATABASE_URL not set");
+            return;
+        }
+    };
+
+    // Use a unique short code to avoid collisions in the shared database.
+    let code = format!("pg_hist_{}", std::process::id());
+
+    storage
+        .create_with_code(&code, "https://v1.example.com", Some("owner"))
+        .await
+        .unwrap();
+
+    assert!(storage.get_url_history(&code).await.unwrap().is_empty());
+
+    storage
+        .update_url(&code, "https://v2.example.com", Some("owner"))
+        .await
+        .unwrap()
+        .expect("update should return the URL");
+
+    storage
+        .update_url(&code, "https://v3.example.com", Some("owner"))
+        .await
+        .unwrap()
+        .expect("update should return the URL");
+
+    let active = storage
+        .get_authoritative(&code)
+        .await
+        .unwrap()
+        .expect("URL should exist");
+    assert_eq!(active.original_url, "https://v3.example.com");
+
+    let history = storage.get_url_history(&code).await.unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].historic_url, "https://v2.example.com");
+    assert_eq!(history[1].historic_url, "https://v1.example.com");
+
+    let original_entry_id = history[1].id;
+    let restored = storage
+        .restore_url(&code, original_entry_id, Some("owner"))
+        .await
+        .unwrap()
+        .expect("restore should return the URL");
+    assert_eq!(restored.original_url, "https://v1.example.com");
+
+    let history = storage.get_url_history(&code).await.unwrap();
+    assert_eq!(history.len(), 3);
+    assert_eq!(history[0].historic_url, "https://v3.example.com");
+
+    assert!(storage.restore_url(&code, 999_999_999, None).await.is_err());
+}
