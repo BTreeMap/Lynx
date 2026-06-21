@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ShortenedUrl, CreateUrlRequest, UserInfo, SuccessResponse, AuthModeResponse, PaginatedUrlsResponse, AnalyticsResponse, AnalyticsAggregateResponse, SearchParams, SearchResponse } from './types';
+import type { ShortenedUrl, CreateUrlRequest, UserInfo, SuccessResponse, AuthModeResponse, PaginatedUrlsResponse, AnalyticsResponse, AnalyticsAggregateResponse, SearchParams, SearchResponse, UrlHistoryEntry } from './types';
 import { encodeShortCodeForApi, normalizeOriginalUrl } from './utils/url';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -41,6 +41,26 @@ export const apiClient = {
   async getUrl(code: string): Promise<ShortenedUrl> {
     const encodedCode = encodeShortCodeForApi(code);
     const { data } = await api.get<ShortenedUrl>(`/urls/${encodedCode}`);
+    return data;
+  },
+
+  async updateUrl(code: string, url: string): Promise<ShortenedUrl> {
+    const encodedCode = encodeShortCodeForApi(code);
+    const { data } = await api.patch<ShortenedUrl>(`/urls/${encodedCode}`, {
+      url: normalizeOriginalUrl(url),
+    });
+    return data;
+  },
+
+  async getUrlHistory(code: string): Promise<UrlHistoryEntry[]> {
+    const encodedCode = encodeShortCodeForApi(code);
+    const { data } = await api.get<UrlHistoryEntry[]>(`/urls/${encodedCode}/history`);
+    return data;
+  },
+
+  async restoreUrl(code: string, historyId: number): Promise<ShortenedUrl> {
+    const encodedCode = encodeShortCodeForApi(code);
+    const { data } = await api.post<ShortenedUrl>(`/urls/${encodedCode}/history/${historyId}/restore`, {});
     return data;
   },
 

@@ -1,10 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
     ArrowLeft,
     CalendarDays,
     ExternalLink,
+    History,
     MousePointerClick,
+    Pencil,
+    RotateCcw,
     Signal,
     UserRound,
 } from 'lucide-react';
@@ -20,7 +23,7 @@ import {
     YAxis,
 } from 'recharts';
 import { apiClient } from '../api';
-import type { AnalyticsAggregate, AnalyticsEntry, ShortenedUrl } from '../types';
+import type { AnalyticsAggregate, AnalyticsEntry, ShortenedUrl, UrlHistoryEntry } from '../types';
 import { buildShortLink, decodeShortCodeFromApi } from '../utils/url';
 import { useTheme } from '../hooks/useTheme';
 import { AppHeader } from './layout/AppHeader';
@@ -28,6 +31,8 @@ import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { CopyButton } from './ui/CopyButton';
 import { Alert } from './ui/Alert';
+import { Dialog } from './ui/Dialog';
+import { Field, Input } from './ui/Input';
 import { EmptyState } from './ui/EmptyState';
 import { Skeleton } from './ui/Skeleton';
 import { StatCard } from './ui/StatCard';
@@ -136,6 +141,19 @@ const UrlDetails: React.FC = () => {
     const [isLoadingAggregate, setIsLoadingAggregate] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
+    const [history, setHistory] = useState<UrlHistoryEntry[]>([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+    const [historyError, setHistoryError] = useState<string | null>(null);
+
+    const [isEditOpen, setIsEditOpen] = useState(false);
+    const [editValue, setEditValue] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+    const [editError, setEditError] = useState<string | null>(null);
+
+    const [restoreTarget, setRestoreTarget] = useState<UrlHistoryEntry | null>(null);
+    const [isRestoring, setIsRestoring] = useState(false);
+    const [restoreError, setRestoreError] = useState<string | null>(null);
+
     const decodedShortCode = useMemo(() => {
         if (!shortCode) return null;
         try {
@@ -170,6 +188,71 @@ const UrlDetails: React.FC = () => {
         };
         loadUrlData();
     }, [shortCode, decodedShortCode, navigate]);
+
+    const loadHistory = useCallback(async () => {
+        if (!decodedShortCode) return;
+        setIsLoadingHistory(true);
+        setHistoryError(null);
+        try {
+            const data = await apiClient.getUrlHistory(decodedShortCode);
+            setHistory(data);
+        } catch (err: unknown) {
+            const apiError = err as { response?: { data?: { error?: string } } };
+            setHistoryError(apiError.response?.data?.error || 'Failed to load destination history');
+            setHistory([]);
+        } finally {
+            setIsLoadingHistory(false);
+        }
+    }, [decodedShortCode]);
+
+    useEffect(() => {
+        loadHistory();
+    }, [loadHistory]);
+
+    const openEdit = () => {
+        setEditValue(url?.original_url ?? '');
+        setEditError(null);
+        setIsEditOpen(true);
+    };
+
+    const handleSaveEdit = async () => {
+        if (!decodedShortCode) return;
+        const trimmed = editValue.trim();
+        if (!trimmed) {
+            setEditError('Destination cannot be empty');
+            return;
+        }
+        setIsSaving(true);
+        setEditError(null);
+        try {
+            const updated = await apiClient.updateUrl(decodedShortCode, trimmed);
+            setUrl(updated);
+            setIsEditOpen(false);
+            await loadHistory();
+        } catch (err: unknown) {
+            const apiError = err as { response?: { data?: { error?: string } } };
+            setEditError(apiError.response?.data?.error || 'Failed to update destination');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleRestore = async () => {
+        if (!decodedShortCode || !restoreTarget) return;
+        setIsRestoring(true);
+        setRestoreError(null);
+        try {
+            const updated = await apiClient.restoreUrl(decodedShortCode, restoreTarget.id);
+            setUrl(updated);
+            setRestoreTarget(null);
+            await loadHistory();
+        } catch (err: unknown) {
+            const apiError = err as { response?: { data?: { error?: string } } };
+            setRestoreError(apiError.response?.data?.error || 'Failed to restore destination');
+        } finally {
+            setIsRestoring(false);
+        }
+    };
 
     useEffect(() => {
         const loadAnalytics = async () => {
@@ -342,9 +425,19 @@ const UrlDetails: React.FC = () => {
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
-                                        Destination
-                                    </p>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
+                                            Destination
+                                        </p>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={openEdit}
+                                            leftIcon={<Pencil className="h-3.5 w-3.5" />}
+                                        >
+                                            Edit
+                                        </Button>
+                                    </div>
                                     <div className="rounded-xl border border-border bg-surface-2/60 px-4 py-3">
                                         <a
                                             href={url.original_url}
@@ -391,6 +484,75 @@ const UrlDetails: React.FC = () => {
                                 </div>
                             </>
                         ) : null}
+                    </CardBody>
+                </Card>
+
+                {/* Destination history */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Destination history</CardTitle>
+                    </CardHeader>
+                    <CardBody>
+                        {isLoadingHistory ? (
+                            <div className="space-y-3">
+                                <Skeleton className="h-12 w-full" />
+                                <Skeleton className="h-12 w-full" />
+                            </div>
+                        ) : historyError ? (
+                            <Alert tone="error">{historyError}</Alert>
+                        ) : history.length === 0 ? (
+                            <EmptyState
+                                icon={<History className="h-6 w-6" />}
+                                title="No previous destinations"
+                                description="When you change this link's destination, the previous values appear here so you can restore them."
+                            />
+                        ) : (
+                            <TableScroll>
+                                <Table>
+                                    <THead>
+                                        <TR>
+                                            <TH>Previous destination</TH>
+                                            <TH>Changed</TH>
+                                            <TH>Changed by</TH>
+                                            <TH className="text-right">Action</TH>
+                                        </TR>
+                                    </THead>
+                                    <TBody>
+                                        {history.map((entry) => (
+                                            <TR key={entry.id}>
+                                                <TD>
+                                                    <a
+                                                        href={entry.historic_url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="break-all text-sm text-fg-muted hover:text-fg hover:underline"
+                                                    >
+                                                        {entry.historic_url}
+                                                    </a>
+                                                </TD>
+                                                <TD className="whitespace-nowrap text-fg-muted">
+                                                    {formatDate(entry.changed_at)}
+                                                </TD>
+                                                <TD className="text-fg-muted">{entry.changed_by || '—'}</TD>
+                                                <TD className="text-right">
+                                                    <Button
+                                                        variant="secondary"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            setRestoreError(null);
+                                                            setRestoreTarget(entry);
+                                                        }}
+                                                        leftIcon={<RotateCcw className="h-3.5 w-3.5" />}
+                                                    >
+                                                        Restore
+                                                    </Button>
+                                                </TD>
+                                            </TR>
+                                        ))}
+                                    </TBody>
+                                </Table>
+                            </TableScroll>
+                        )}
                     </CardBody>
                 </Card>
 
@@ -599,6 +761,86 @@ const UrlDetails: React.FC = () => {
                     </CardBody>
                 </Card>
             </main>
+
+            <Dialog
+                open={isEditOpen}
+                onClose={() => {
+                    if (!isSaving) setIsEditOpen(false);
+                }}
+                title="Edit destination"
+                description="Update where this short link points. The previous destination is saved to history."
+                footer={
+                    <>
+                        <Button
+                            variant="secondary"
+                            onClick={() => setIsEditOpen(false)}
+                            disabled={isSaving}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handleSaveEdit}
+                            isLoading={isSaving}
+                            disabled={editValue.trim().length === 0}
+                        >
+                            Save destination
+                        </Button>
+                    </>
+                }
+            >
+                <div className="space-y-4">
+                    <Field label="Destination URL" htmlFor="edit-destination">
+                        <Input
+                            id="edit-destination"
+                            value={editValue}
+                            onChange={(event) => setEditValue(event.target.value)}
+                            placeholder="https://example.com/page"
+                            invalid={Boolean(editError)}
+                            autoFocus
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    handleSaveEdit();
+                                }
+                            }}
+                        />
+                    </Field>
+                    {editError && <Alert tone="error">{editError}</Alert>}
+                </div>
+            </Dialog>
+
+            <Dialog
+                open={restoreTarget !== null}
+                onClose={() => {
+                    if (!isRestoring) setRestoreTarget(null);
+                }}
+                title="Restore destination"
+                description="This makes the selected previous destination the link's active target. The current destination is saved to history."
+                footer={
+                    <>
+                        <Button
+                            variant="secondary"
+                            onClick={() => setRestoreTarget(null)}
+                            disabled={isRestoring}
+                        >
+                            Cancel
+                        </Button>
+                        <Button onClick={handleRestore} isLoading={isRestoring}>
+                            Restore
+                        </Button>
+                    </>
+                }
+            >
+                <div className="space-y-4">
+                    <div className="rounded-xl border border-border bg-surface-2/60 px-4 py-3">
+                        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-fg-subtle">
+                            Restore to
+                        </p>
+                        <p className="break-all text-sm text-fg">{restoreTarget?.historic_url}</p>
+                    </div>
+                    {restoreError && <Alert tone="error">{restoreError}</Alert>}
+                </div>
+            </Dialog>
         </div>
     );
 };

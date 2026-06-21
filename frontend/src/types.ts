@@ -20,6 +20,18 @@ export interface CreateUrlRequest {
   custom_code?: string;
 }
 
+export interface UpdateUrlRequest {
+  url: string;
+}
+
+export interface UrlHistoryEntry {
+  id: number;
+  short_code: string;
+  historic_url: string;
+  changed_at: number;
+  changed_by: string | null;
+}
+
 export interface UserInfo {
   user_id: string | null;
   is_admin: boolean;
