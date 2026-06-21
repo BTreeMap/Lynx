@@ -1,305 +1,283 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Download, Link2, MousePointerClick, Search as SearchIcon, Signal } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { apiClient } from '../api';
-import CreateUrlForm from './CreateUrlForm';
-import SearchBar from './SearchBar';
-import UrlList from './UrlList';
 import type { ShortenedUrl } from '../types';
+import CreateUrlForm from './CreateUrlForm';
+import SearchPanel, { type SearchFilters } from './SearchPanel';
+import UrlList from './UrlList';
+import { AppHeader } from './layout/AppHeader';
+import { Button } from './ui/Button';
+import { Alert } from './ui/Alert';
+import { EmptyState } from './ui/EmptyState';
+import { Skeleton } from './ui/Skeleton';
+import { StatCard } from './ui/StatCard';
+import { Badge } from './ui/Badge';
+
+const PAGE_SIZE = 50;
 
 const Dashboard: React.FC = () => {
-  const { userInfo } = useAuth();
-  const [urls, setUrls] = useState<ShortenedUrl[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [searchQuery, setSearchQuery] = useState<string | null>(null);
+    const { userInfo } = useAuth();
+    const isAdmin = userInfo?.is_admin ?? false;
 
-  const loadUrls = async (reset = true) => {
-    if (reset) {
-      setIsLoading(true);
-      setUrls([]);
-      setNextCursor(null);
-    }
-    setError(null);
-    try {
-      const data = await apiClient.listUrls(50);
-      if (reset) {
-        setUrls(data.urls);
-      } else {
-        setUrls(prev => [...prev, ...data.urls]);
-      }
-      setNextCursor(data.next_cursor || null);
-      setHasMore(data.has_more);
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error.response?.data?.error || 'Failed to load URLs');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    const [urls, setUrls] = useState<ShortenedUrl[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [isSearching, setIsSearching] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [nextCursor, setNextCursor] = useState<string | null>(null);
+    const [hasMore, setHasMore] = useState(false);
+    const [activeFilters, setActiveFilters] = useState<SearchFilters | null>(null);
 
-  const loadMoreUrls = async () => {
-    if (!nextCursor || isLoadingMore) return;
-    
-    setIsLoadingMore(true);
-    setError(null);
-    try {
-      if (searchQuery) {
-        // Load more search results
-        const data = await apiClient.searchUrls({ q: searchQuery, limit: 50, cursor: nextCursor });
-        setUrls(prev => [...prev, ...data.items]);
-        setNextCursor(data.next_cursor || null);
-        setHasMore(data.has_more);
-      } else {
-        // Load more list results
-        const data = await apiClient.listUrls(50, nextCursor);
-        setUrls(prev => [...prev, ...data.urls]);
-        setNextCursor(data.next_cursor || null);
-        setHasMore(data.has_more);
-      }
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error.response?.data?.error || 'Failed to load more URLs');
-    } finally {
-      setIsLoadingMore(false);
-    }
-  };
+    const loadUrls = useCallback(async () => {
+        setIsLoading(true);
+        setActiveFilters(null);
+        setError(null);
+        try {
+            const data = await apiClient.listUrls(PAGE_SIZE);
+            setUrls(data.urls);
+            setNextCursor(data.next_cursor || null);
+            setHasMore(data.has_more);
+        } catch (err: unknown) {
+            const apiError = err as { response?: { data?: { error?: string } } };
+            setError(apiError.response?.data?.error || 'Failed to load URLs');
+            setUrls([]);
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
 
-  const handleSearch = useCallback(async (query: string) => {
-    setIsSearching(true);
-    setError(null);
-    setSearchQuery(query);
-    setUrls([]);
-    setNextCursor(null);
-    
-    try {
-      const data = await apiClient.searchUrls({ q: query, limit: 50 });
-      setUrls(data.items);
-      setNextCursor(data.next_cursor || null);
-      setHasMore(data.has_more);
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error.response?.data?.error || 'Search failed');
-    } finally {
-      setIsSearching(false);
-    }
-  }, []);
+    const loadMoreUrls = useCallback(async () => {
+        if (!nextCursor || isLoadingMore) return;
+        setIsLoadingMore(true);
+        setError(null);
+        try {
+            if (activeFilters) {
+                const data = await apiClient.searchUrls({
+                    ...activeFilters,
+                    limit: PAGE_SIZE,
+                    cursor: nextCursor,
+                });
+                setUrls((prev) => [...prev, ...data.items]);
+                setNextCursor(data.next_cursor || null);
+                setHasMore(data.has_more);
+            } else {
+                const data = await apiClient.listUrls(PAGE_SIZE, nextCursor);
+                setUrls((prev) => [...prev, ...data.urls]);
+                setNextCursor(data.next_cursor || null);
+                setHasMore(data.has_more);
+            }
+        } catch (err: unknown) {
+            const apiError = err as { response?: { data?: { error?: string } } };
+            setError(apiError.response?.data?.error || 'Failed to load more URLs');
+        } finally {
+            setIsLoadingMore(false);
+        }
+    }, [nextCursor, isLoadingMore, activeFilters]);
 
-  const handleClearSearch = useCallback(() => {
-    setSearchQuery(null);
-    loadUrls(true);
-  }, []);
+    const handleSearch = useCallback(async (filters: SearchFilters) => {
+        setIsSearching(true);
+        setError(null);
+        setActiveFilters(filters);
+        setUrls([]);
+        setNextCursor(null);
+        try {
+            const data = await apiClient.searchUrls({ ...filters, limit: PAGE_SIZE });
+            setUrls(data.items);
+            setNextCursor(data.next_cursor || null);
+            setHasMore(data.has_more);
+        } catch (err: unknown) {
+            const apiError = err as { response?: { data?: { error?: string } } };
+            setError(apiError.response?.data?.error || 'Search failed');
+        } finally {
+            setIsSearching(false);
+        }
+    }, []);
 
-  const exportToJson = async () => {
-    setIsExporting(true);
-    setError(null);
-    try {
-      // Fetch all URLs using pagination
-      const allUrls: ShortenedUrl[] = [];
-      let cursor: string | null = null;
-      let hasMoreData = true;
+    const handleClearSearch = useCallback(() => {
+        loadUrls();
+    }, [loadUrls]);
 
-      while (hasMoreData) {
-        const data = await apiClient.listUrls(50, cursor || undefined);
-        allUrls.push(...data.urls);
-        cursor = data.next_cursor || null;
-        hasMoreData = data.has_more;
-      }
+    const exportToJson = useCallback(async () => {
+        setIsExporting(true);
+        setError(null);
+        try {
+            const allUrls: ShortenedUrl[] = [];
+            let cursor: string | null = null;
+            let hasMoreData = true;
+            while (hasMoreData) {
+                const data = await apiClient.listUrls(PAGE_SIZE, cursor || undefined);
+                allUrls.push(...data.urls);
+                cursor = data.next_cursor || null;
+                hasMoreData = data.has_more;
+            }
+            const jsonStr = JSON.stringify(allUrls, null, 2);
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const objectUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = objectUrl;
+            link.download = `lynx-urls-export-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(objectUrl);
+        } catch (err: unknown) {
+            const apiError = err as { response?: { data?: { error?: string } } };
+            setError(apiError.response?.data?.error || 'Failed to export URLs');
+        } finally {
+            setIsExporting(false);
+        }
+    }, []);
 
-      // Create JSON blob and download
-      const jsonStr = JSON.stringify(allUrls, null, 2);
-      const blob = new Blob([jsonStr], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `lynx-urls-export-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error.response?.data?.error || 'Failed to export URLs');
-    } finally {
-      setIsExporting(false);
-    }
-  };
+    useEffect(() => {
+        loadUrls();
+    }, [loadUrls]);
 
-  useEffect(() => {
-    loadUrls(true);
-  }, []);
+    const stats = useMemo(() => {
+        const totalClicks = urls.reduce((sum, u) => sum + u.clicks, 0);
+        const active = urls.filter((u) => u.is_active).length;
+        return {
+            count: urls.length,
+            totalClicks,
+            active,
+            inactive: urls.length - active,
+        };
+    }, [urls]);
 
-  return (
-    <div style={{ 
-      maxWidth: '1200px', 
-      margin: '0 auto', 
-      padding: '40px 24px',
-      minHeight: '100vh'
-    }}>
-      {/* Header */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        marginBottom: '40px',
-        paddingBottom: '24px',
-        borderBottom: '1px solid var(--color-border)'
-      }}>
-        <div>
-          <h1 style={{ 
-            margin: 0,
-            fontSize: '28px',
-            fontWeight: 600,
-            color: 'var(--color-text-primary)',
-            letterSpacing: '-0.5px'
-          }}>
-            Lynx
-          </h1>
-          {userInfo && (
-            <p style={{ 
-              margin: '8px 0 0 0', 
-              color: 'var(--color-text-secondary)',
-              fontSize: '14px'
-            }}>
-              {userInfo.user_id || 'Unknown'}
-              {userInfo.is_admin && (
-                <span style={{ 
-                  marginLeft: '12px', 
-                  padding: '3px 10px', 
-                  backgroundColor: 'var(--color-text-primary)',
-                  color: 'var(--color-bg-elevated)', 
-                  borderRadius: 'var(--radius-sm)', 
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  Admin
-                </span>
-              )}
-            </p>
-          )}
+    return (
+        <div className="min-h-screen bg-bg">
+            <AppHeader
+                actions={
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={exportToJson}
+                        isLoading={isExporting}
+                        leftIcon={!isExporting ? <Download className="h-4 w-4" /> : undefined}
+                    >
+                        <span className="hidden sm:inline">Export JSON</span>
+                        <span className="sm:hidden">Export</span>
+                    </Button>
+                }
+            />
+
+            <main className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6 sm:py-10">
+                <section>
+                    <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">Dashboard</h1>
+                    <p className="mt-1 text-sm text-fg-muted">
+                        Create, manage, and track your short links.
+                    </p>
+                </section>
+
+                <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <StatCard
+                        label={activeFilters ? 'Links found' : 'Links loaded'}
+                        value={stats.count.toLocaleString()}
+                        icon={<Link2 className="h-5 w-5" />}
+                        tone="primary"
+                        hint={hasMore ? 'More available' : undefined}
+                    />
+                    <StatCard
+                        label="Clicks (shown)"
+                        value={stats.totalClicks.toLocaleString()}
+                        icon={<MousePointerClick className="h-5 w-5" />}
+                        tone="accent"
+                    />
+                    <StatCard
+                        label="Active / Inactive"
+                        value={
+                            <span className="flex items-baseline gap-2">
+                                {stats.active.toLocaleString()}
+                                <span className="text-base font-normal text-fg-subtle">
+                                    / {stats.inactive.toLocaleString()}
+                                </span>
+                            </span>
+                        }
+                        icon={<Signal className="h-5 w-5" />}
+                        tone="success"
+                    />
+                </section>
+
+                <CreateUrlForm onUrlCreated={loadUrls} />
+
+                <section className="space-y-4">
+                    <div className="flex flex-wrap items-end justify-between gap-3">
+                        <div>
+                            <h2 className="text-lg font-semibold tracking-tight text-fg">Your links</h2>
+                            <p className="text-sm text-fg-muted">
+                                {activeFilters
+                                    ? `Showing results for “${activeFilters.q}”`
+                                    : 'All links you have created.'}
+                            </p>
+                        </div>
+                        {activeFilters && (
+                            <Badge tone="primary" className="gap-2 py-1 pl-2.5 pr-1.5">
+                                {stats.count}
+                                {hasMore ? '+' : ''} result{stats.count === 1 ? '' : 's'}
+                                <button
+                                    type="button"
+                                    onClick={handleClearSearch}
+                                    className="rounded-full px-2 py-0.5 text-xs font-medium text-primary-soft-fg/80 underline-offset-2 hover:underline"
+                                >
+                                    Clear
+                                </button>
+                            </Badge>
+                        )}
+                    </div>
+
+                    <SearchPanel
+                        onSearch={handleSearch}
+                        onClear={handleClearSearch}
+                        isSearching={isSearching}
+                        isAdmin={isAdmin}
+                    />
+
+                    {error && <Alert tone="error">{error}</Alert>}
+
+                    {isLoading ? (
+                        <div className="space-y-3">
+                            {Array.from({ length: 4 }).map((_, i) => (
+                                <Skeleton key={i} className="h-16 w-full" />
+                            ))}
+                        </div>
+                    ) : urls.length === 0 ? (
+                        <EmptyState
+                            icon={<SearchIcon className="h-6 w-6" />}
+                            title={activeFilters ? 'No matching links' : 'No links yet'}
+                            description={
+                                activeFilters
+                                    ? 'Try a different search term or adjust your filters.'
+                                    : 'Create your first short link using the form above.'
+                            }
+                            action={
+                                activeFilters ? (
+                                    <Button variant="secondary" size="sm" onClick={handleClearSearch}>
+                                        Clear search
+                                    </Button>
+                                ) : undefined
+                            }
+                        />
+                    ) : (
+                        <>
+                            <UrlList urls={urls} isAdmin={isAdmin} onUrlsChanged={loadUrls} />
+                            {hasMore && (
+                                <div className="flex justify-center pt-2">
+                                    <Button
+                                        variant="secondary"
+                                        onClick={loadMoreUrls}
+                                        isLoading={isLoadingMore}
+                                    >
+                                        {isLoadingMore ? 'Loading…' : 'Load more'}
+                                    </Button>
+                                </div>
+                            )}
+                        </>
+                    )}
+                </section>
+            </main>
         </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <button
-            onClick={exportToJson}
-            disabled={isExporting}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: 'var(--color-bg-elevated)',
-              color: 'var(--color-text-primary)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-md)',
-              fontSize: '14px',
-              fontWeight: 500,
-              cursor: isExporting ? 'not-allowed' : 'pointer',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-            title="Export all URLs to JSON"
-          >
-            {isExporting ? 'Exporting...' : '↓ Export JSON'}
-          </button>
-        </div>
-      </div>
-
-      <CreateUrlForm onUrlCreated={() => loadUrls(true)} />
-
-      <SearchBar
-        onSearch={handleSearch}
-        onClear={handleClearSearch}
-        isSearching={isSearching}
-      />
-
-      {searchQuery && (
-        <div style={{
-          marginBottom: '16px',
-          padding: '12px 16px',
-          backgroundColor: 'var(--color-bg-secondary)',
-          borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--color-border)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}>
-          <span style={{ color: 'var(--color-text-secondary)', fontSize: '14px' }}>
-            Search results for: <strong style={{ color: 'var(--color-text-primary)' }}>"{searchQuery}"</strong>
-            {' '}({urls.length}{hasMore ? '+' : ''} found)
-          </span>
-          <button
-            onClick={handleClearSearch}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--color-text-tertiary)',
-              cursor: 'pointer',
-              fontSize: '14px',
-              textDecoration: 'underline',
-            }}
-          >
-            Clear search
-          </button>
-        </div>
-      )}
-
-      {error && (
-        <div style={{ 
-          padding: '14px 16px', 
-          marginBottom: '24px', 
-          backgroundColor: 'var(--color-error-bg)', 
-          color: 'var(--color-error)', 
-          borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--color-error)',
-          fontSize: '14px'
-        }}>
-          {error}
-        </div>
-      )}
-
-      {isLoading ? (
-        <div style={{ 
-          textAlign: 'center', 
-          padding: '60px 20px', 
-          color: 'var(--color-text-tertiary)',
-          fontSize: '14px'
-        }}>
-          Loading...
-        </div>
-      ) : (
-        <>
-          <UrlList 
-            urls={urls} 
-            isAdmin={userInfo?.is_admin || false} 
-            onUrlsChanged={() => loadUrls(true)}
-          />
-          {hasMore && (
-            <div style={{ textAlign: 'center', marginTop: '32px' }}>
-              <button
-                onClick={loadMoreUrls}
-                disabled={isLoadingMore}
-                style={{
-                  padding: '12px 32px',
-                  backgroundColor: 'var(--color-bg-elevated)',
-                  color: 'var(--color-text-primary)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  cursor: isLoadingMore ? 'not-allowed' : 'pointer',
-                  boxShadow: 'var(--shadow-sm)',
-                }}
-              >
-                {isLoadingMore ? 'Loading...' : 'Load More'}
-              </button>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
+    );
 };
 
 export default Dashboard;

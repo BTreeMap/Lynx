@@ -1,25 +1,29 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './components/AuthProvider';
 import { useAuth } from './hooks/useAuth';
 import Login from './components/Login';
-import Dashboard from './components/Dashboard';
-import UrlDetails from './components/UrlDetails';
+import { Logo } from './components/layout/Logo';
+import { Spinner } from './components/ui/Spinner';
+
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const UrlDetails = lazy(() => import('./components/UrlDetails'));
+
+const Splash: React.FC<{ message?: string }> = ({ message = 'Loading your workspace…' }) => (
+  <div className="flex min-h-screen flex-col items-center justify-center gap-6">
+    <Logo asLink={false} />
+    <div className="flex items-center gap-2 text-sm text-fg-muted">
+      <Spinner />
+      {message}
+    </div>
+  </div>
+);
 
 const AppContent: React.FC = () => {
   const { authMode, token, isLoading } = useAuth();
 
   if (isLoading) {
-    return (
-      <div style={{ 
-        textAlign: 'center', 
-        padding: '80px 20px',
-        color: 'var(--color-text-tertiary)',
-        fontSize: '14px'
-      }}>
-        Loading...
-      </div>
-    );
+    return <Splash />;
   }
 
   // For auth=none or cloudflare, go directly to dashboard
@@ -27,11 +31,16 @@ const AppContent: React.FC = () => {
   const isAuthenticated = authMode === 'none' || authMode === 'cloudflare' || token;
 
   return (
-    <Routes>
-      <Route path="/" element={isAuthenticated ? <Dashboard /> : <Login />} />
-      <Route path="/url/:shortCode" element={isAuthenticated ? <UrlDetails /> : <Navigate to="/" replace />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <Suspense fallback={<Splash message="Loading…" />}>
+      <Routes>
+        <Route path="/" element={isAuthenticated ? <Dashboard /> : <Login />} />
+        <Route
+          path="/url/:shortCode"
+          element={isAuthenticated ? <UrlDetails /> : <Navigate to="/" replace />}
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 };
 

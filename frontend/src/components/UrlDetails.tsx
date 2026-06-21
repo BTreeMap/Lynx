@@ -1,904 +1,606 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import {
+    ArrowLeft,
+    CalendarDays,
+    ExternalLink,
+    MousePointerClick,
+    Signal,
+    UserRound,
+} from 'lucide-react';
+import {
+    Bar,
+    BarChart,
+    Cell,
+    Pie,
+    PieChart,
+    ResponsiveContainer,
+    Tooltip,
+    XAxis,
+    YAxis,
+} from 'recharts';
 import { apiClient } from '../api';
-import type { ShortenedUrl, AnalyticsEntry, AnalyticsAggregate } from '../types';
+import type { AnalyticsAggregate, AnalyticsEntry, ShortenedUrl } from '../types';
 import { buildShortLink, decodeShortCodeFromApi } from '../utils/url';
+import { useTheme } from '../hooks/useTheme';
+import { AppHeader } from './layout/AppHeader';
+import { Badge } from './ui/Badge';
+import { Button } from './ui/Button';
+import { CopyButton } from './ui/CopyButton';
+import { Alert } from './ui/Alert';
+import { EmptyState } from './ui/EmptyState';
+import { Skeleton } from './ui/Skeleton';
+import { StatCard } from './ui/StatCard';
+import { SegmentedControl } from './ui/SegmentedControl';
+import { Card, CardBody, CardHeader, CardTitle } from './ui/Card';
+import { Table, TBody, TD, TH, THead, TR, TableScroll } from './ui/Table';
 
 type AggregateDimension = 'country' | 'region' | 'city' | 'asn' | 'hour' | 'day';
 
+const DIMENSIONS: { value: AggregateDimension; label: string }[] = [
+    { value: 'country', label: 'Country' },
+    { value: 'region', label: 'Region' },
+    { value: 'city', label: 'City' },
+    { value: 'asn', label: 'ASN' },
+    { value: 'hour', label: 'Hour' },
+    { value: 'day', label: 'Day' },
+];
+
 const DIMENSION_LABELS: Record<AggregateDimension, string> = {
-  country: 'Country',
-  region: 'Region',
-  city: 'City',
-  asn: 'ASN',
-  hour: 'Hour',
-  day: 'Day',
+    country: 'Country',
+    region: 'Region',
+    city: 'City',
+    asn: 'ASN',
+    hour: 'Hour',
+    day: 'Day',
+};
+
+const CHART_COLORS = [
+    '#13a0ec',
+    '#0f80bd',
+    '#42b3f0',
+    '#0b608e',
+    '#71c6f4',
+    '#d52a77',
+    '#aa225f',
+    '#6dda25',
+    '#58ae1e',
+    '#dd5592',
+];
+const OTHER_COLOR = '#94a3b8';
+
+const formatDate = (timestamp: number) => new Date(timestamp * 1000).toLocaleString();
+
+const formatTimeBucket = (timestamp: number) => {
+    const date = new Date(timestamp * 1000);
+    return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+    })}`;
+};
+
+const formatDimensionValue = (value: string, dimension: AggregateDimension): string => {
+    if (dimension === 'hour' || dimension === 'day') {
+        const timestamp = parseInt(value, 10);
+        if (!Number.isNaN(timestamp)) {
+            const date = new Date(timestamp * 1000);
+            return dimension === 'hour'
+                ? date.toLocaleString([], {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                })
+                : date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+    }
+    return value || 'Unknown';
+};
+
+interface ChartDatum {
+    name: string;
+    value: number;
+    isOther: boolean;
+}
+
+const ChartTooltip: React.FC<{
+    active?: boolean;
+    payload?: { payload: ChartDatum }[];
+    total: number;
+}> = ({ active, payload, total }) => {
+    if (!active || !payload?.length) return null;
+    const datum = payload[0].payload;
+    const pct = total > 0 ? ((datum.value / total) * 100).toFixed(1) : '0.0';
+    return (
+        <div className="rounded-lg border border-border bg-elevated px-3 py-2 text-sm shadow-elevated">
+            <p className="font-medium text-fg">{datum.name}</p>
+            <p className="text-fg-muted">
+                {datum.value.toLocaleString()} visits · {pct}%
+            </p>
+        </div>
+    );
 };
 
 const UrlDetails: React.FC = () => {
-  const { shortCode } = useParams<{ shortCode: string }>();
-  const navigate = useNavigate();
-  const [url, setUrl] = useState<ShortenedUrl | null>(null);
-  const [analytics, setAnalytics] = useState<AnalyticsEntry[]>([]);
-  const [aggregateStats, setAggregateStats] = useState<AnalyticsAggregate[]>([]);
-  const [totalClicks, setTotalClicks] = useState<number>(0);
-  const [selectedDimension, setSelectedDimension] = useState<AggregateDimension>('country');
-  const [isLoadingUrl, setIsLoadingUrl] = useState(true);
-  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
-  const [isLoadingAggregate, setIsLoadingAggregate] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+    const { shortCode } = useParams<{ shortCode: string }>();
+    const navigate = useNavigate();
+    const { resolvedTheme } = useTheme();
 
-  const decodedShortCode = useMemo(() => {
-    if (!shortCode) {
-      return null;
-    }
+    const [url, setUrl] = useState<ShortenedUrl | null>(null);
+    const [analytics, setAnalytics] = useState<AnalyticsEntry[]>([]);
+    const [aggregateStats, setAggregateStats] = useState<AnalyticsAggregate[]>([]);
+    const [totalClicks, setTotalClicks] = useState<number>(0);
+    const [selectedDimension, setSelectedDimension] = useState<AggregateDimension>('country');
+    const [isLoadingUrl, setIsLoadingUrl] = useState(true);
+    const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(true);
+    const [isLoadingAggregate, setIsLoadingAggregate] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
-    try {
-      return decodeShortCodeFromApi(shortCode);
-    } catch {
-      return null;
-    }
-  }, [shortCode]);
-
-  // Load URL details
-  useEffect(() => {
-    const loadUrlData = async () => {
-      if (!shortCode) {
-        navigate('/');
-        return;
-      }
-
-      if (!decodedShortCode) {
-        setError('Invalid short code');
-        setIsLoadingUrl(false);
-        return;
-      }
-
-      setIsLoadingUrl(true);
-      setError(null);
-
-      try {
-        const urlData = await apiClient.getUrl(decodedShortCode);
-        setUrl(urlData);
-      } catch (err: unknown) {
-        const error = err as { response?: { data?: { error?: string } } };
-        setError(error.response?.data?.error || 'Failed to load URL details');
-      } finally {
-        setIsLoadingUrl(false);
-      }
-    };
-
-    loadUrlData();
-  }, [shortCode, decodedShortCode, navigate]);
-
-  // Load analytics data
-  useEffect(() => {
-    const loadAnalytics = async () => {
-      if (!decodedShortCode) return;
-
-      setIsLoadingAnalytics(true);
-      try {
-        const analyticsData = await apiClient.getAnalytics(decodedShortCode, undefined, undefined, 50);
-        setAnalytics(analyticsData.entries);
-        setTotalClicks(analyticsData.clicks);
-      } catch (analyticsError) {
-        console.warn('Analytics data not available:', analyticsError);
-        setAnalytics([]);
-        setTotalClicks(0);
-      } finally {
-        setIsLoadingAnalytics(false);
-      }
-    };
-
-    loadAnalytics();
-  }, [decodedShortCode]);
-
-  // Load aggregate data based on selected dimension
-  useEffect(() => {
-    const loadAggregate = async () => {
-      if (!decodedShortCode) return;
-
-      setIsLoadingAggregate(true);
-      try {
-        const aggregateData = await apiClient.getAnalyticsAggregate(decodedShortCode, selectedDimension, undefined, undefined, 20);
-        setAggregateStats(aggregateData.aggregates);
-        setTotalClicks(aggregateData.clicks);
-      } catch (aggregateError) {
-        console.warn('Analytics aggregates not available:', aggregateError);
-        setAggregateStats([]);
-      } finally {
-        setIsLoadingAggregate(false);
-      }
-    };
-
-    loadAggregate();
-  }, [decodedShortCode, selectedDimension]);
-
-  // Calculate aggregates with "Other" category for unaccounted clicks
-  const aggregatesWithOther = useMemo(() => {
-    if (aggregateStats.length === 0 || totalClicks === 0) {
-      return aggregateStats;
-    }
-
-    const accountedVisits = aggregateStats.reduce((sum, s) => sum + s.visit_count, 0);
-    const unaccountedVisits = totalClicks - accountedVisits;
-
-    // Only add "Other" if there are unaccounted visits
-    if (unaccountedVisits > 0) {
-      return [
-        ...aggregateStats,
-        {
-          dimension: 'Other',
-          visit_count: unaccountedVisits
-        }
-      ];
-    }
-
-    return aggregateStats;
-  }, [aggregateStats, totalClicks]);
-
-  const handleCopyLink = async () => {
-    if (url) {
-      const link = buildShortLink(url.short_code, url.redirect_base_url);
-      if (link) {
+    const decodedShortCode = useMemo(() => {
+        if (!shortCode) return null;
         try {
-          await navigator.clipboard.writeText(link);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-        } catch (err) {
-          console.error('Failed to copy:', err);
+            return decodeShortCodeFromApi(shortCode);
+        } catch {
+            return null;
         }
-      }
-    }
-  };
+    }, [shortCode]);
 
-  const formatDate = (timestamp: number) => {
-    // Backend returns Unix timestamps in seconds
-    return new Date(timestamp * 1000).toLocaleString();
-  };
+    useEffect(() => {
+        const loadUrlData = async () => {
+            if (!shortCode) {
+                navigate('/');
+                return;
+            }
+            if (!decodedShortCode) {
+                setError('Invalid short code');
+                setIsLoadingUrl(false);
+                return;
+            }
+            setIsLoadingUrl(true);
+            setError(null);
+            try {
+                const urlData = await apiClient.getUrl(decodedShortCode);
+                setUrl(urlData);
+            } catch (err: unknown) {
+                const apiError = err as { response?: { data?: { error?: string } } };
+                setError(apiError.response?.data?.error || 'Failed to load URL details');
+            } finally {
+                setIsLoadingUrl(false);
+            }
+        };
+        loadUrlData();
+    }, [shortCode, decodedShortCode, navigate]);
 
-  const formatTimeBucket = (timestamp: number) => {
-    // Backend returns Unix timestamps in seconds
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+    useEffect(() => {
+        const loadAnalytics = async () => {
+            if (!decodedShortCode) return;
+            setIsLoadingAnalytics(true);
+            try {
+                const data = await apiClient.getAnalytics(decodedShortCode, undefined, undefined, 50);
+                setAnalytics(data.entries);
+                setTotalClicks(data.clicks);
+            } catch (analyticsError) {
+                console.warn('Analytics data not available:', analyticsError);
+                setAnalytics([]);
+                setTotalClicks(0);
+            } finally {
+                setIsLoadingAnalytics(false);
+            }
+        };
+        loadAnalytics();
+    }, [decodedShortCode]);
 
-  const formatDimensionValue = (value: string, dimension: AggregateDimension): string => {
-    if (dimension === 'hour' || dimension === 'day') {
-      const timestamp = parseInt(value, 10);
-      if (!isNaN(timestamp)) {
-        // Backend returns Unix timestamps in seconds
-        const date = new Date(timestamp * 1000);
-        if (dimension === 'hour') {
-          return date.toLocaleString([], { 
-            month: 'short', 
-            day: 'numeric', 
-            hour: '2-digit', 
-            minute: '2-digit' 
-          });
-        } else {
-          return date.toLocaleDateString([], { 
-            year: 'numeric', 
-            month: 'short', 
-            day: 'numeric' 
-          });
+    useEffect(() => {
+        const loadAggregate = async () => {
+            if (!decodedShortCode) return;
+            setIsLoadingAggregate(true);
+            try {
+                const data = await apiClient.getAnalyticsAggregate(
+                    decodedShortCode,
+                    selectedDimension,
+                    undefined,
+                    undefined,
+                    20,
+                );
+                setAggregateStats(data.aggregates);
+                setTotalClicks(data.clicks);
+            } catch (aggregateError) {
+                console.warn('Analytics aggregates not available:', aggregateError);
+                setAggregateStats([]);
+            } finally {
+                setIsLoadingAggregate(false);
+            }
+        };
+        loadAggregate();
+    }, [decodedShortCode, selectedDimension]);
+
+    const aggregatesWithOther = useMemo<AnalyticsAggregate[]>(() => {
+        if (aggregateStats.length === 0 || totalClicks === 0) {
+            return aggregateStats;
         }
-      }
-    }
-    return value || 'Unknown';
-  };
+        const accounted = aggregateStats.reduce((sum, s) => sum + s.visit_count, 0);
+        const unaccounted = totalClicks - accounted;
+        if (unaccounted > 0) {
+            return [...aggregateStats, { dimension: 'Other', visit_count: unaccounted }];
+        }
+        return aggregateStats;
+    }, [aggregateStats, totalClicks]);
 
-  // Memoize short link calculation
-  const shortLink = useMemo(
-    () => url ? buildShortLink(url.short_code, url.redirect_base_url) : null,
-    [url]
-  );
-
-  // Show error state only if error occurred and we have no URL data
-  if (error && !url) {
-    return (
-      <div style={{ 
-        maxWidth: '1200px', 
-        margin: '0 auto', 
-        padding: '40px 24px'
-      }}>
-        <div style={{ 
-          padding: '14px 16px', 
-          marginBottom: '24px', 
-          backgroundColor: 'var(--color-error-bg)', 
-          color: 'var(--color-error)', 
-          borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--color-error)',
-          fontSize: '14px'
-        }}>
-          {error || (decodedShortCode ? `URL not found: ${decodedShortCode}` : 'Invalid short code')}
-        </div>
-        <button
-          onClick={() => navigate('/')}
-          style={{
-            padding: '12px 24px',
-            backgroundColor: 'var(--color-primary)',
-            color: 'var(--color-bg-elevated)',
-            border: 'none',
-            borderRadius: 'var(--radius-md)',
-            fontSize: '14px',
-            fontWeight: 500,
-            cursor: 'pointer',
-            boxShadow: 'var(--shadow-sm)',
-          }}
-        >
-          ← Back to Dashboard
-        </button>
-      </div>
+    const chartData = useMemo<ChartDatum[]>(
+        () =>
+            aggregatesWithOther.slice(0, 10).map((stat) => ({
+                name:
+                    stat.dimension === 'Other'
+                        ? 'Other'
+                        : formatDimensionValue(stat.dimension, selectedDimension),
+                value: stat.visit_count,
+                isOther: stat.dimension === 'Other',
+            })),
+        [aggregatesWithOther, selectedDimension],
     );
-  }
 
-  return (
-    <div style={{ 
-      maxWidth: '1200px', 
-      margin: '0 auto', 
-      padding: '40px 24px',
-      minHeight: '100vh'
-    }}>
-      {/* Header with Back Button */}
-      <div style={{ marginBottom: '32px' }}>
-        <button
-          onClick={() => navigate('/')}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: 'var(--color-bg-elevated)',
-            color: 'var(--color-text-secondary)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)',
-            fontSize: '14px',
-            fontWeight: 500,
-            cursor: 'pointer',
-            boxShadow: 'var(--shadow-sm)',
-            marginBottom: '16px'
-          }}
-        >
-          ← Back to Dashboard
-        </button>
-        <h1 style={{ 
-          margin: '0 0 8px 0',
-          fontSize: '28px',
-          fontWeight: 600,
-          color: 'var(--color-text-primary)',
-          letterSpacing: '-0.5px'
-        }}>
-          URL Details & Analytics
-        </h1>
-        <p style={{ 
-          margin: 0, 
-          color: 'var(--color-text-tertiary)',
-          fontSize: '14px'
-        }}>
-          View detailed information and analytics for your short link
-        </p>
-      </div>
+    const shortLink = useMemo(
+        () => (url ? buildShortLink(url.short_code, url.redirect_base_url) : null),
+        [url],
+    );
 
-      {/* URL Information Card */}
-      <div style={{
-        backgroundColor: 'var(--color-bg-elevated)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-lg)',
-        boxShadow: 'var(--shadow-sm)',
-        padding: '24px',
-        marginBottom: '24px'
-      }}>
-        <h2 style={{
-          margin: '0 0 20px 0',
-          fontSize: '18px',
-          fontWeight: 600,
-          color: 'var(--color-text-primary)'
-        }}>
-          Link Information
-        </h2>
-        
-        {isLoadingUrl ? (
-          <div style={{ display: 'grid', gap: '16px' }}>
-            <div style={{ 
-              height: '60px', 
-              backgroundColor: 'var(--color-bg-secondary)', 
-              borderRadius: 'var(--radius-md)',
-              animation: 'pulse 1.5s ease-in-out infinite'
-            }} />
-            <div style={{ 
-              height: '60px', 
-              backgroundColor: 'var(--color-bg-secondary)', 
-              borderRadius: 'var(--radius-md)',
-              animation: 'pulse 1.5s ease-in-out infinite',
-              animationDelay: '0.1s'
-            }} />
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-              {[1, 2, 3, 4].map(i => (
-                <div key={i} style={{ 
-                  height: '80px', 
-                  backgroundColor: 'var(--color-bg-secondary)', 
-                  borderRadius: 'var(--radius-md)',
-                  animation: 'pulse 1.5s ease-in-out infinite',
-                  animationDelay: `${0.1 * i}s`
-                }} />
-              ))}
-            </div>
-          </div>
-        ) : url ? (
-        <div style={{ display: 'grid', gap: '16px' }}>
-          {/* Short Link */}
-          <div>
-            <label style={{
-              display: 'block',
-              marginBottom: '6px',
-              fontSize: '13px',
-              fontWeight: 500,
-              color: 'var(--color-text-secondary)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px'
-            }}>
-              Short Link
-            </label>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <div style={{
-                flex: 1,
-                padding: '12px 16px',
-                backgroundColor: 'var(--color-bg-secondary)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--color-border)',
-                wordBreak: 'break-all'
-              }}>
-                {shortLink ? (
-                  <a
-                    href={shortLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      color: 'var(--color-text-primary)',
-                      fontWeight: 500,
-                      fontSize: '14px'
-                    }}
-                  >
-                    {shortLink}
-                  </a>
-                ) : (
-                  <span style={{ color: 'var(--color-text-primary)', fontSize: '14px' }}>
-                    {url.short_code}
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={handleCopyLink}
-                style={{
-                  padding: '12px 20px',
-                  backgroundColor: 'var(--color-bg-elevated)',
-                  color: 'var(--color-text-primary)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  boxShadow: 'var(--shadow-sm)',
-                }}
-              >
-                {copied ? '✓ Copied' : '📋 Copy'}
-              </button>
-            </div>
-          </div>
+    const axisColor = resolvedTheme === 'dark' ? '#6088a1' : '#7d96a6';
 
-          {/* Original URL */}
-          <div>
-            <label style={{
-              display: 'block',
-              marginBottom: '6px',
-              fontSize: '13px',
-              fontWeight: 500,
-              color: 'var(--color-text-secondary)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px'
-            }}>
-              Original URL
-            </label>
-            <div style={{
-              padding: '12px 16px',
-              backgroundColor: 'var(--color-bg-secondary)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--color-border)',
-              wordBreak: 'break-all'
-            }}>
-              <a
-                href={url.original_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  color: 'var(--color-text-secondary)',
-                  fontSize: '14px'
-                }}
-              >
-                {url.original_url}
-              </a>
-            </div>
-          </div>
-
-          {/* Stats Grid */}
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-            gap: '16px',
-            marginTop: '8px'
-          }}>
-            <div style={{
-              padding: '16px',
-              backgroundColor: 'var(--color-bg-secondary)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--color-border)'
-            }}>
-              <div style={{ 
-                fontSize: '13px', 
-                color: 'var(--color-text-secondary)',
-                marginBottom: '4px',
-                fontWeight: 500,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px'
-              }}>
-                Total Clicks
-              </div>
-              <div style={{ 
-                fontSize: '24px', 
-                fontWeight: 600, 
-                color: 'var(--color-text-primary)' 
-              }}>
-                {url.clicks.toLocaleString()}
-              </div>
-            </div>
-
-            <div style={{
-              padding: '16px',
-              backgroundColor: 'var(--color-bg-secondary)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--color-border)'
-            }}>
-              <div style={{ 
-                fontSize: '13px', 
-                color: 'var(--color-text-secondary)',
-                marginBottom: '4px',
-                fontWeight: 500,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px'
-              }}>
-                Status
-              </div>
-              <div style={{ marginTop: '6px' }}>
-                <span style={{
-                  padding: '6px 12px',
-                  borderRadius: 'var(--radius-sm)',
-                  backgroundColor: url.is_active ? 'var(--color-success-bg)' : 'var(--color-error-bg)',
-                  color: url.is_active ? 'var(--color-success)' : 'var(--color-error)',
-                  fontSize: '13px',
-                  fontWeight: 500,
-                  border: `1px solid ${url.is_active ? 'var(--color-success)' : 'var(--color-error)'}`
-                }}>
-                  {url.is_active ? 'Active' : 'Inactive'}
-                </span>
-              </div>
-            </div>
-
-            <div style={{
-              padding: '16px',
-              backgroundColor: 'var(--color-bg-secondary)',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--color-border)'
-            }}>
-              <div style={{ 
-                fontSize: '13px', 
-                color: 'var(--color-text-secondary)',
-                marginBottom: '4px',
-                fontWeight: 500,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px'
-              }}>
-                Created
-              </div>
-              <div style={{ 
-                fontSize: '14px', 
-                fontWeight: 500, 
-                color: 'var(--color-text-primary)',
-                marginTop: '4px'
-              }}>
-                {formatDate(url.created_at)}
-              </div>
-            </div>
-
-            {url.created_by && (
-              <div style={{
-                padding: '16px',
-                backgroundColor: 'var(--color-bg-secondary)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--color-border)'
-              }}>
-                <div style={{ 
-                  fontSize: '13px', 
-                  color: 'var(--color-text-secondary)',
-                  marginBottom: '4px',
-                  fontWeight: 500,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  Created By
-                </div>
-                <div style={{ 
-                  fontSize: '14px', 
-                  fontWeight: 500, 
-                  color: 'var(--color-text-primary)',
-                  marginTop: '4px'
-                }}>
-                  {url.created_by}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        ) : null}
-      </div>
-
-      {/* Aggregate Analytics with Dimension Selector */}
-      <div style={{
-        backgroundColor: 'var(--color-bg-elevated)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-lg)',
-        boxShadow: 'var(--shadow-sm)',
-        padding: '24px',
-        marginBottom: '24px'
-      }}>
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          marginBottom: '20px',
-          flexWrap: 'wrap',
-          gap: '16px'
-        }}>
-          <h2 style={{
-            margin: 0,
-            fontSize: '18px',
-            fontWeight: 600,
-            color: 'var(--color-text-primary)'
-          }}>
-            Analytics by Dimension
-          </h2>
-          
-          {/* Dimension Selector */}
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {(Object.keys(DIMENSION_LABELS) as AggregateDimension[]).map((dimension) => (
-              <button
-                key={dimension}
-                onClick={() => setSelectedDimension(dimension)}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: selectedDimension === dimension 
-                    ? 'var(--color-primary)' 
-                    : 'var(--color-bg-elevated)',
-                  color: selectedDimension === dimension 
-                    ? 'var(--color-bg-elevated)' 
-                    : 'var(--color-text-secondary)',
-                  border: `1px solid ${selectedDimension === dimension 
-                    ? 'var(--color-primary)' 
-                    : 'var(--color-border)'}`,
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: '13px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  boxShadow: selectedDimension === dimension ? 'var(--shadow-sm)' : 'none',
-                }}
-              >
-                {DIMENSION_LABELS[dimension]}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {isLoadingAggregate ? (
-          <div style={{ 
-            height: '200px', 
-            backgroundColor: 'var(--color-bg-secondary)', 
-            borderRadius: 'var(--radius-md)',
-            animation: 'pulse 1.5s ease-in-out infinite'
-          }} />
-        ) : aggregatesWithOther.length > 0 ? (
-          <div style={{
-            overflowX: 'auto',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)'
-          }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ 
-                  backgroundColor: 'var(--color-bg-secondary)',
-                  borderBottom: '1px solid var(--color-border)'
-                }}>
-                  <th style={{ 
-                    padding: '12px 16px', 
-                    textAlign: 'left',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    {DIMENSION_LABELS[selectedDimension]}
-                  </th>
-                  <th style={{ 
-                    padding: '12px 16px', 
-                    textAlign: 'right',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    Visits
-                  </th>
-                  <th style={{ 
-                    padding: '12px 16px', 
-                    textAlign: 'left',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: 'var(--color-text-secondary)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                    width: '50%'
-                  }}>
-                    Distribution
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {aggregatesWithOther.map((stat, index) => {
-                  const totalVisits = totalClicks; // Use total clicks for percentage calculation
-                  const percentage = totalVisits > 0 ? (stat.visit_count / totalVisits) * 100 : 0;
-                  const isOther = stat.dimension === 'Other';
-                  
-                  return (
-                    <tr 
-                      key={index}
-                      style={{ 
-                        borderBottom: index < aggregatesWithOther.length - 1 ? '1px solid var(--color-border-light)' : 'none',
-                        backgroundColor: isOther ? 'var(--color-bg-tertiary)' : 'transparent'
-                      }}
+    if (error && !url) {
+        return (
+            <div className="min-h-screen bg-bg">
+                <AppHeader />
+                <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+                    <Alert tone="error">
+                        {error ||
+                            (decodedShortCode ? `URL not found: ${decodedShortCode}` : 'Invalid short code')}
+                    </Alert>
+                    <Button
+                        variant="secondary"
+                        className="mt-6"
+                        onClick={() => navigate('/')}
+                        leftIcon={<ArrowLeft className="h-4 w-4" />}
                     >
-                      <td style={{ 
-                        padding: '12px 16px',
-                        fontSize: '14px',
-                        color: isOther ? 'var(--color-text-secondary)' : 'var(--color-text-primary)',
-                        fontWeight: 500,
-                        fontStyle: isOther ? 'italic' : 'normal'
-                      }}>
-                        {isOther ? stat.dimension : formatDimensionValue(stat.dimension, selectedDimension)}
-                      </td>
-                      <td style={{ 
-                        padding: '12px 16px',
-                        fontSize: '14px',
-                        color: isOther ? 'var(--color-text-secondary)' : 'var(--color-text-primary)',
-                        textAlign: 'right',
-                        fontWeight: 500
-                      }}>
-                        {stat.visit_count.toLocaleString()}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <div style={{
-                            flex: 1,
-                            height: '8px',
-                            backgroundColor: 'var(--color-bg-secondary)',
-                            borderRadius: 'var(--radius-sm)',
-                            overflow: 'hidden'
-                          }}>
-                            <div style={{
-                              height: '100%',
-                              width: `${percentage}%`,
-                              backgroundColor: isOther ? 'var(--color-text-tertiary)' : 'var(--color-primary)',
-                              transition: 'width 0.3s ease'
-                            }} />
-                          </div>
-                          <span style={{
-                            fontSize: '13px',
-                            color: 'var(--color-text-tertiary)',
-                            minWidth: '45px',
-                            textAlign: 'right'
-                          }}>
-                            {percentage.toFixed(1)}%
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div style={{
-            padding: '40px 24px',
-            textAlign: 'center',
-            backgroundColor: 'var(--color-bg-secondary)',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--color-border)'
-          }}>
-            <p style={{ 
-              color: 'var(--color-text-tertiary)',
-              fontSize: '14px',
-              margin: 0
-            }}>
-              No {DIMENSION_LABELS[selectedDimension].toLowerCase()} data available yet.
-            </p>
-          </div>
-        )}
-      </div>
+                        Back to dashboard
+                    </Button>
+                </main>
+            </div>
+        );
+    }
 
-      {/* Recent Analytics Activity */}
-      <div style={{
-        backgroundColor: 'var(--color-bg-elevated)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-lg)',
-        boxShadow: 'var(--shadow-sm)',
-        padding: '24px'
-      }}>
-        <h2 style={{
-          margin: '0 0 20px 0',
-          fontSize: '18px',
-          fontWeight: 600,
-          color: 'var(--color-text-primary)'
-        }}>
-          Recent Activity
-        </h2>
-        
-        {isLoadingAnalytics ? (
-          <div style={{ 
-            height: '300px', 
-            backgroundColor: 'var(--color-bg-secondary)', 
-            borderRadius: 'var(--radius-md)',
-            animation: 'pulse 1.5s ease-in-out infinite'
-          }} />
-        ) : analytics.length > 0 ? (
-        <div style={{
-          overflowX: 'auto',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-md)'
-        }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ 
-                backgroundColor: 'var(--color-bg-secondary)',
-                borderBottom: '1px solid var(--color-border)'
-              }}>
-                <th style={{ 
-                  padding: '12px 16px', 
-                  textAlign: 'left',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: 'var(--color-text-secondary)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  Time Period
-                </th>
-                <th style={{ 
-                  padding: '12px 16px', 
-                  textAlign: 'left',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: 'var(--color-text-secondary)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  Country
-                </th>
-                <th style={{ 
-                  padding: '12px 16px', 
-                  textAlign: 'left',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: 'var(--color-text-secondary)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  Region
-                </th>
-                <th style={{ 
-                  padding: '12px 16px', 
-                  textAlign: 'left',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: 'var(--color-text-secondary)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  City
-                </th>
-                <th style={{ 
-                  padding: '12px 16px', 
-                  textAlign: 'right',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: 'var(--color-text-secondary)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  Visits
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {analytics.slice(0, 20).map((entry, index) => (
-                <tr 
-                  key={entry.id}
-                    style={{ 
-                      borderBottom: index < Math.min(analytics.length, 20) - 1 ? '1px solid var(--color-border-light)' : 'none'
-                    }}
-                  >
-                    <td style={{ 
-                      padding: '12px 16px',
-                      fontSize: '14px',
-                      color: 'var(--color-text-primary)'
-                    }}>
-                      {formatTimeBucket(entry.time_bucket)}
-                    </td>
-                    <td style={{ 
-                      padding: '12px 16px',
-                      fontSize: '14px',
-                      color: 'var(--color-text-secondary)'
-                    }}>
-                      {entry.country_code || 'N/A'}
-                    </td>
-                    <td style={{ 
-                      padding: '12px 16px',
-                      fontSize: '14px',
-                      color: 'var(--color-text-secondary)'
-                    }}>
-                      {entry.region || 'N/A'}
-                    </td>
-                    <td style={{ 
-                      padding: '12px 16px',
-                      fontSize: '14px',
-                      color: 'var(--color-text-secondary)'
-                    }}>
-                      {entry.city || 'N/A'}
-                    </td>
-                    <td style={{ 
-                      padding: '12px 16px',
-                      fontSize: '14px',
-                      color: 'var(--color-text-primary)',
-                      textAlign: 'right',
-                      fontWeight: 500
-                    }}>
-                      {entry.visit_count.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div style={{
-            padding: '40px 24px',
-            textAlign: 'center',
-            backgroundColor: 'var(--color-bg-secondary)',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--color-border)'
-          }}>
-            <p style={{ 
-              color: 'var(--color-text-tertiary)',
-              fontSize: '14px',
-              margin: 0
-            }}>
-              No recent activity data available yet. Analytics will appear once your link receives visits.
-            </p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+    return (
+        <div className="min-h-screen bg-bg">
+            <AppHeader />
+            <main className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 sm:py-10">
+                <div>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => navigate('/')}
+                        leftIcon={<ArrowLeft className="h-4 w-4" />}
+                        className="-ml-2 mb-3"
+                    >
+                        Back to dashboard
+                    </Button>
+                    <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+                        Link analytics
+                    </h1>
+                    <p className="mt-1 text-sm text-fg-muted">
+                        Detailed performance and audience insights for your short link.
+                    </p>
+                </div>
+
+                {/* Link information */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Link information</CardTitle>
+                    </CardHeader>
+                    <CardBody className="space-y-5">
+                        {isLoadingUrl ? (
+                            <div className="space-y-4">
+                                <Skeleton className="h-14 w-full" />
+                                <Skeleton className="h-14 w-full" />
+                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                    {Array.from({ length: 4 }).map((_, i) => (
+                                        <Skeleton key={i} className="h-20" />
+                                    ))}
+                                </div>
+                            </div>
+                        ) : url ? (
+                            <>
+                                <div className="space-y-1.5">
+                                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
+                                        Short link
+                                    </p>
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                                        <div className="min-w-0 flex-1 rounded-xl border border-border bg-surface-2/60 px-4 py-3">
+                                            {shortLink ? (
+                                                <a
+                                                    href={shortLink}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex max-w-full items-center gap-1.5 break-all font-medium text-primary hover:underline"
+                                                >
+                                                    <span className="break-all">{shortLink}</span>
+                                                    <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                                                </a>
+                                            ) : (
+                                                <span className="break-all font-mono text-sm text-fg">
+                                                    {url.short_code}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {(shortLink || url.short_code) && (
+                                            <CopyButton
+                                                value={shortLink ?? url.short_code}
+                                                variant="secondary"
+                                                size="md"
+                                                idleLabel="Copy link"
+                                            />
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
+                                        Destination
+                                    </p>
+                                    <div className="rounded-xl border border-border bg-surface-2/60 px-4 py-3">
+                                        <a
+                                            href={url.original_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="break-all text-sm text-fg-muted hover:text-fg hover:underline"
+                                        >
+                                            {url.original_url}
+                                        </a>
+                                    </div>
+                                </div>
+
+                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                    <StatCard
+                                        label="Total clicks"
+                                        value={url.clicks.toLocaleString()}
+                                        icon={<MousePointerClick className="h-5 w-5" />}
+                                        tone="primary"
+                                    />
+                                    <StatCard
+                                        label="Status"
+                                        value={
+                                            <Badge tone={url.is_active ? 'success' : 'danger'} dot>
+                                                {url.is_active ? 'Active' : 'Inactive'}
+                                            </Badge>
+                                        }
+                                        icon={<Signal className="h-5 w-5" />}
+                                        tone={url.is_active ? 'success' : 'neutral'}
+                                    />
+                                    <StatCard
+                                        label="Created"
+                                        value={
+                                            <span className="text-sm font-medium">{formatDate(url.created_at)}</span>
+                                        }
+                                        icon={<CalendarDays className="h-5 w-5" />}
+                                        tone="neutral"
+                                    />
+                                    <StatCard
+                                        label="Created by"
+                                        value={<span className="text-base">{url.created_by || '—'}</span>}
+                                        icon={<UserRound className="h-5 w-5" />}
+                                        tone="accent"
+                                    />
+                                </div>
+                            </>
+                        ) : null}
+                    </CardBody>
+                </Card>
+
+                {/* Analytics by dimension */}
+                <Card>
+                    <CardHeader className="flex-row flex-wrap items-center justify-between gap-3">
+                        <CardTitle>Analytics by dimension</CardTitle>
+                        <SegmentedControl
+                            ariaLabel="Group analytics by"
+                            options={DIMENSIONS}
+                            value={selectedDimension}
+                            onChange={setSelectedDimension}
+                        />
+                    </CardHeader>
+                    <CardBody>
+                        {isLoadingAggregate ? (
+                            <Skeleton className="h-72 w-full" />
+                        ) : aggregatesWithOther.length > 0 ? (
+                            <div className="space-y-6">
+                                <div className="grid gap-6 lg:grid-cols-5">
+                                    <div className="lg:col-span-3">
+                                        <p className="mb-3 text-xs font-medium uppercase tracking-wide text-fg-subtle">
+                                            Top {DIMENSION_LABELS[selectedDimension].toLowerCase()} by visits
+                                        </p>
+                                        <div className="h-72 w-full">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart
+                                                    data={chartData}
+                                                    layout="vertical"
+                                                    margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
+                                                >
+                                                    <XAxis
+                                                        type="number"
+                                                        tick={{ fill: axisColor, fontSize: 12 }}
+                                                        axisLine={false}
+                                                        tickLine={false}
+                                                    />
+                                                    <YAxis
+                                                        type="category"
+                                                        dataKey="name"
+                                                        width={110}
+                                                        tick={{ fill: axisColor, fontSize: 12 }}
+                                                        axisLine={false}
+                                                        tickLine={false}
+                                                        tickFormatter={(value: string) =>
+                                                            value.length > 16 ? `${value.slice(0, 15)}…` : value
+                                                        }
+                                                    />
+                                                    <Tooltip
+                                                        cursor={{ fill: 'rgba(19,160,236,0.08)' }}
+                                                        content={<ChartTooltip total={totalClicks} />}
+                                                    />
+                                                    <Bar dataKey="value" radius={[0, 6, 6, 0]} maxBarSize={26}>
+                                                        {chartData.map((entry, index) => (
+                                                            <Cell
+                                                                key={entry.name}
+                                                                fill={
+                                                                    entry.isOther
+                                                                        ? OTHER_COLOR
+                                                                        : CHART_COLORS[index % CHART_COLORS.length]
+                                                                }
+                                                            />
+                                                        ))}
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+
+                                    <div className="lg:col-span-2">
+                                        <p className="mb-3 text-xs font-medium uppercase tracking-wide text-fg-subtle">
+                                            Share of total
+                                        </p>
+                                        <div className="h-72 w-full">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={chartData}
+                                                        dataKey="value"
+                                                        nameKey="name"
+                                                        innerRadius="55%"
+                                                        outerRadius="80%"
+                                                        paddingAngle={2}
+                                                        stroke="none"
+                                                    >
+                                                        {chartData.map((entry, index) => (
+                                                            <Cell
+                                                                key={entry.name}
+                                                                fill={
+                                                                    entry.isOther
+                                                                        ? OTHER_COLOR
+                                                                        : CHART_COLORS[index % CHART_COLORS.length]
+                                                                }
+                                                            />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip content={<ChartTooltip total={totalClicks} />} />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <TableScroll className="shadow-none">
+                                    <Table>
+                                        <THead>
+                                            <TR className="border-b-0">
+                                                <TH>{DIMENSION_LABELS[selectedDimension]}</TH>
+                                                <TH className="text-right">Visits</TH>
+                                                <TH className="w-1/2">Distribution</TH>
+                                            </TR>
+                                        </THead>
+                                        <TBody>
+                                            {aggregatesWithOther.map((stat, index) => {
+                                                const percentage =
+                                                    totalClicks > 0 ? (stat.visit_count / totalClicks) * 100 : 0;
+                                                const isOther = stat.dimension === 'Other';
+                                                return (
+                                                    <TR key={`${stat.dimension}-${index}`}>
+                                                        <TD
+                                                            className={
+                                                                isOther ? 'italic text-fg-muted' : 'font-medium text-fg'
+                                                            }
+                                                        >
+                                                            {isOther
+                                                                ? stat.dimension
+                                                                : formatDimensionValue(stat.dimension, selectedDimension)}
+                                                        </TD>
+                                                        <TD className="text-right font-medium tabular-nums">
+                                                            {stat.visit_count.toLocaleString()}
+                                                        </TD>
+                                                        <TD>
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2">
+                                                                    <div
+                                                                        className={
+                                                                            isOther
+                                                                                ? 'h-full rounded-full bg-fg-subtle'
+                                                                                : 'h-full rounded-full bg-primary'
+                                                                        }
+                                                                        style={{ width: `${percentage}%` }}
+                                                                    />
+                                                                </div>
+                                                                <span className="w-12 text-right text-[13px] text-fg-subtle tabular-nums">
+                                                                    {percentage.toFixed(1)}%
+                                                                </span>
+                                                            </div>
+                                                        </TD>
+                                                    </TR>
+                                                );
+                                            })}
+                                        </TBody>
+                                    </Table>
+                                </TableScroll>
+                            </div>
+                        ) : (
+                            <EmptyState
+                                title={`No ${DIMENSION_LABELS[selectedDimension].toLowerCase()} data yet`}
+                                description="Analytics will appear here once your link starts receiving visits."
+                            />
+                        )}
+                    </CardBody>
+                </Card>
+
+                {/* Recent activity */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Recent activity</CardTitle>
+                    </CardHeader>
+                    <CardBody>
+                        {isLoadingAnalytics ? (
+                            <Skeleton className="h-64 w-full" />
+                        ) : analytics.length > 0 ? (
+                            <TableScroll className="shadow-none">
+                                <Table>
+                                    <THead>
+                                        <TR className="border-b-0">
+                                            <TH>Time period</TH>
+                                            <TH>Country</TH>
+                                            <TH>Region</TH>
+                                            <TH>City</TH>
+                                            <TH className="text-right">Visits</TH>
+                                        </TR>
+                                    </THead>
+                                    <TBody>
+                                        {analytics.slice(0, 20).map((entry) => (
+                                            <TR key={entry.id}>
+                                                <TD className="whitespace-nowrap">{formatTimeBucket(entry.time_bucket)}</TD>
+                                                <TD className="text-fg-muted">{entry.country_code || 'N/A'}</TD>
+                                                <TD className="text-fg-muted">{entry.region || 'N/A'}</TD>
+                                                <TD className="text-fg-muted">{entry.city || 'N/A'}</TD>
+                                                <TD className="text-right font-medium tabular-nums">
+                                                    {entry.visit_count.toLocaleString()}
+                                                </TD>
+                                            </TR>
+                                        ))}
+                                    </TBody>
+                                </Table>
+                            </TableScroll>
+                        ) : (
+                            <EmptyState
+                                title="No recent activity"
+                                description="Analytics will appear once your link receives visits."
+                            />
+                        )}
+                    </CardBody>
+                </Card>
+            </main>
+        </div>
+    );
 };
 
 export default UrlDetails;

@@ -1,280 +1,159 @@
 import React, { useState } from 'react';
+import { CheckCircle2, Link2, Plus, Sparkles } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { apiClient } from '../api';
-import type { CreateUrlRequest } from '../types';
+import type { CreateUrlRequest, ShortenedUrl } from '../types';
 import { buildShortLink } from '../utils/url';
+import { Button } from './ui/Button';
+import { Card, CardBody, CardHeader, CardTitle, CardDescription } from './ui/Card';
+import { Field, Input } from './ui/Input';
+import { Alert } from './ui/Alert';
+import { Dialog } from './ui/Dialog';
+import { CopyButton } from './ui/CopyButton';
 
 const DEFAULT_SHORT_CODE_MAX_LENGTH = 50;
 
 interface CreateUrlFormProps {
-  onUrlCreated: () => void;
+    onUrlCreated: () => void;
 }
 
 const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
-  const { shortCodeMaxLength } = useAuth();
-  const maxShortCodeLength = shortCodeMaxLength || DEFAULT_SHORT_CODE_MAX_LENGTH;
-  const [url, setUrl] = useState('');
-  const [customCode, setCustomCode] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successLink, setSuccessLink] = useState<string | null>(null);
-  const [showModal, setShowModal] = useState(false);
-  const [copied, setCopied] = useState(false);
+    const { shortCodeMaxLength } = useAuth();
+    const maxShortCodeLength = shortCodeMaxLength || DEFAULT_SHORT_CODE_MAX_LENGTH;
+    const [url, setUrl] = useState('');
+    const [customCode, setCustomCode] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [created, setCreated] = useState<ShortenedUrl | null>(null);
+    const [successLink, setSuccessLink] = useState<string | null>(null);
+    const [showModal, setShowModal] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    setError(null);
-    setSuccessLink(null);
-    setCopied(false);
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        setError(null);
 
-    try {
-      const request: CreateUrlRequest = {
-        url,
-        custom_code: customCode || undefined,
-      };
-      const result = await apiClient.createUrl(request);
-      const fullLink = buildShortLink(result.short_code, result.redirect_base_url);
-      setSuccessLink(fullLink);
-      setUrl('');
-      setCustomCode('');
-      setShowModal(true);
-      onUrlCreated();
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { error?: string } } };
-      setError(error.response?.data?.error || 'Failed to create URL');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+        try {
+            const request: CreateUrlRequest = {
+                url,
+                custom_code: customCode || undefined,
+            };
+            const result = await apiClient.createUrl(request);
+            const fullLink = buildShortLink(result.short_code, result.redirect_base_url);
+            setCreated(result);
+            setSuccessLink(fullLink);
+            setUrl('');
+            setCustomCode('');
+            setShowModal(true);
+            onUrlCreated();
+        } catch (err: unknown) {
+            const apiError = err as { response?: { data?: { error?: string } } };
+            setError(apiError.response?.data?.error || 'Failed to create URL');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
 
-  const handleCopyToClipboard = async () => {
-    if (successLink) {
-      try {
-        await navigator.clipboard.writeText(successLink);
-        setCopied(true);
-        setTimeout(() => {
-          setCopied(false);
-          setShowModal(false);
-        }, 1500);
-      } catch (err) {
-        console.error('Failed to copy:', err);
-      }
-    }
-  };
+    const handleDismiss = () => {
+        setShowModal(false);
+    };
 
-  const handleDismiss = () => {
-    setShowModal(false);
-    setCopied(false);
-  };
+    const displayValue = successLink ?? created?.short_code ?? '';
 
-  return (
-    <div style={{ 
-      marginBottom: '40px', 
-      padding: '24px', 
-      backgroundColor: 'var(--color-bg-elevated)',
-      border: '1px solid var(--color-border)', 
-      borderRadius: 'var(--radius-lg)',
-      boxShadow: 'var(--shadow-sm)'
-    }}>
-      <h2 style={{ 
-        marginTop: 0,
-        marginBottom: '20px',
-        fontSize: '18px',
-        fontWeight: 600,
-        color: 'var(--color-text-primary)'
-      }}>
-        Create Short URL
-      </h2>
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '16px' }}>
-          <label htmlFor="url" style={{ 
-            display: 'block', 
-            marginBottom: '8px',
-            fontSize: '14px',
-            fontWeight: 500,
-            color: 'var(--color-text-primary)'
-          }}>
-            Original URL *
-          </label>
-          <input
-            type="url"
-            id="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://example.com/very/long/url"
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              fontSize: '14px',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--color-bg)',
-              color: 'var(--color-text-primary)',
-            }}
-            required
-          />
-        </div>
-        <div style={{ marginBottom: '20px' }}>
-          <label htmlFor="customCode" style={{ 
-            display: 'block', 
-            marginBottom: '8px',
-            fontSize: '14px',
-            fontWeight: 500,
-            color: 'var(--color-text-primary)'
-          }}>
-            Custom Code (optional)
-          </label>
-          <input
-            type="text"
-            id="customCode"
-            value={customCode}
-            onChange={(e) => setCustomCode(e.target.value)}
-            placeholder="my-custom-code"
-            maxLength={maxShortCodeLength}
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              fontSize: '14px',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--color-bg)',
-              color: 'var(--color-text-primary)',
-            }}
-          />
-          <small style={{ 
-            color: 'var(--color-text-tertiary)',
-            fontSize: '13px'
-          }}>
-            Up to {maxShortCodeLength} characters. Leave empty for auto-generated code.
-          </small>
-        </div>
-        {error && (
-          <div style={{ 
-            padding: '12px 14px', 
-            marginBottom: '16px', 
-            backgroundColor: 'var(--color-error-bg)', 
-            color: 'var(--color-error)', 
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--color-error)',
-            fontSize: '14px'
-          }}>
-            {error}
-          </div>
-        )}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          style={{
-            padding: '12px 24px',
-            backgroundColor: 'var(--color-primary)',
-            color: 'var(--color-bg-elevated)',
-            border: 'none',
-            borderRadius: 'var(--radius-md)',
-            fontSize: '14px',
-            fontWeight: 500,
-            cursor: isSubmitting ? 'not-allowed' : 'pointer',
-            boxShadow: 'var(--shadow-sm)',
-          }}
-        >
-          {isSubmitting ? 'Creating...' : 'Create Short URL'}
-        </button>
-      </form>
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>Create a short link</CardTitle>
+                <CardDescription>
+                    Paste a long URL and optionally choose a custom code.
+                </CardDescription>
+            </CardHeader>
+            <CardBody>
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    <div className="grid gap-5 sm:grid-cols-[1fr_auto] sm:items-start">
+                        <Field label="Original URL" htmlFor="url" required>
+                            <Input
+                                id="url"
+                                type="url"
+                                value={url}
+                                onChange={(e) => setUrl(e.target.value)}
+                                placeholder="https://example.com/very/long/url"
+                                required
+                            />
+                        </Field>
 
-      {/* Success Modal */}
-      {showModal && successLink && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            backgroundColor: 'var(--color-bg-elevated)',
-            padding: '32px',
-            borderRadius: 'var(--radius-lg)',
-            boxShadow: 'var(--shadow-lg)',
-            maxWidth: '500px',
-            width: '90%',
-            border: '1px solid var(--color-border)'
-          }}>
-            <h3 style={{
-              margin: '0 0 16px 0',
-              fontSize: '18px',
-              fontWeight: 600,
-              color: 'var(--color-text-primary)'
-            }}>
-              Short URL Created Successfully!
-            </h3>
-            <div style={{
-              padding: '12px 16px',
-              backgroundColor: 'var(--color-bg-secondary)',
-              borderRadius: 'var(--radius-md)',
-              marginBottom: '24px',
-              border: '1px solid var(--color-border)',
-              wordBreak: 'break-all'
-            }}>
-              <a
-                href={successLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  color: 'var(--color-text-primary)',
-                  fontWeight: 500,
-                  fontSize: '14px',
-                  textDecoration: 'none'
-                }}
-              >
-                {successLink}
-              </a>
-            </div>
-            <div style={{ display: 'flex', gap: '12px' }}>
-              <button
-                onClick={handleCopyToClipboard}
-                style={{
-                  flex: 1,
-                  padding: '12px 24px',
-                  backgroundColor: 'var(--color-success)',
-                  color: 'var(--color-bg-elevated)',
-                  border: 'none',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  boxShadow: 'var(--shadow-sm)',
-                }}
-              >
-                {copied ? '✓ Copied!' : 'Copy to Clipboard'}
-              </button>
-              <button
-                onClick={handleDismiss}
-                style={{
-                  flex: 1,
-                  padding: '12px 24px',
-                  backgroundColor: 'var(--color-bg-elevated)',
-                  color: 'var(--color-text-secondary)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  boxShadow: 'var(--shadow-sm)',
-                }}
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+                        <Field
+                            label="Custom code"
+                            htmlFor="customCode"
+                            hint={`Up to ${maxShortCodeLength} characters. Optional.`}
+                            className="sm:w-56"
+                        >
+                            <Input
+                                id="customCode"
+                                type="text"
+                                value={customCode}
+                                onChange={(e) => setCustomCode(e.target.value)}
+                                placeholder="my-link"
+                                maxLength={maxShortCodeLength}
+                            />
+                        </Field>
+                    </div>
+
+                    {error && <Alert tone="error">{error}</Alert>}
+
+                    <div className="flex justify-end">
+                        <Button
+                            type="submit"
+                            isLoading={isSubmitting}
+                            leftIcon={<Plus className="h-4 w-4" />}
+                        >
+                            {isSubmitting ? 'Creating…' : 'Create short link'}
+                        </Button>
+                    </div>
+                </form>
+            </CardBody>
+
+            <Dialog
+                open={showModal && !!displayValue}
+                onClose={handleDismiss}
+                title={
+                    <span className="flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5 text-success" />
+                        Short link created
+                    </span>
+                }
+                description="Your link is ready to share."
+                footer={
+                    <>
+                        <Button variant="secondary" onClick={handleDismiss}>
+                            Done
+                        </Button>
+                        <CopyButton value={displayValue} size="md" variant="primary" idleLabel="Copy link" />
+                    </>
+                }
+            >
+                <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-2/60 p-4">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary-soft-fg">
+                        {successLink ? <Link2 className="h-4.5 w-4.5" /> : <Sparkles className="h-4.5 w-4.5" />}
+                    </span>
+                    {successLink ? (
+                        <a
+                            href={successLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="min-w-0 break-all text-sm font-medium text-primary hover:underline"
+                        >
+                            {successLink}
+                        </a>
+                    ) : (
+                        <span className="min-w-0 break-all font-mono text-sm font-medium text-fg">
+                            {created?.short_code}
+                        </span>
+                    )}
+                </div>
+            </Dialog>
+        </Card>
+    );
 };
 
 export default CreateUrlForm;

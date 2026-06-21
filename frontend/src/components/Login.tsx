@@ -1,5 +1,28 @@
 import React, { useState } from 'react';
+import { ArrowRight, KeyRound, LinkIcon, ShieldCheck, Zap } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { Button } from './ui/Button';
+import { Field, Input } from './ui/Input';
+import { ThemeToggle } from './ui/ThemeToggle';
+import { Logo } from './layout/Logo';
+
+const highlights = [
+  {
+    icon: <Zap className="h-4.5 w-4.5" />,
+    title: 'Blazing-fast redirects',
+    description: 'A Rust-powered engine resolves short links in microseconds.',
+  },
+  {
+    icon: <LinkIcon className="h-4.5 w-4.5" />,
+    title: 'Custom short codes',
+    description: 'Brand every link with a memorable, human-friendly slug.',
+  },
+  {
+    icon: <ShieldCheck className="h-4.5 w-4.5" />,
+    title: 'Privacy-first analytics',
+    description: 'Understand reach with aggregated geo and network insights.',
+  },
+];
 
 const Login: React.FC = () => {
   const [token, setToken] = useState('');
@@ -13,108 +36,125 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div style={{ 
-      maxWidth: '440px', 
-      margin: '80px auto', 
-      padding: '32px',
-      backgroundColor: 'var(--color-bg-elevated)',
-      border: '1px solid var(--color-border)',
-      borderRadius: 'var(--radius-lg)',
-      boxShadow: 'var(--shadow-md)'
-    }}>
-      <h1 style={{ 
-        fontSize: '24px',
-        fontWeight: 600,
-        marginBottom: '8px',
-        color: 'var(--color-text-primary)',
-        letterSpacing: '-0.5px'
-      }}>
-        Lynx
-      </h1>
-      <p style={{ 
-        marginBottom: '28px',
-        color: 'var(--color-text-secondary)',
-        fontSize: '14px'
-      }}>
-        Enter your OAuth 2.0 bearer token to continue.
-      </p>
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '20px' }}>
-          <label htmlFor="token" style={{ 
-            display: 'block', 
-            marginBottom: '8px',
-            fontSize: '14px',
-            fontWeight: 500,
-            color: 'var(--color-text-primary)'
-          }}>
-            Bearer Token
-          </label>
-          <input
-            type="text"
-            id="token"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Enter your OAuth 2.0 bearer token"
-            style={{
-              width: '100%',
-              padding: '10px 12px',
-              fontSize: '14px',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--color-bg)',
-              color: 'var(--color-text-primary)',
-            }}
-            required
-          />
-        </div>
-        <button
-          type="submit"
+    <div className="grid min-h-screen lg:grid-cols-2">
+      {/* Brand / marketing panel */}
+      <aside className="relative hidden flex-col justify-between overflow-hidden bg-baltic-blue-950 p-10 text-baltic-blue-50 lg:flex">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-70"
           style={{
-            width: '100%',
-            padding: '12px',
-            backgroundColor: 'var(--color-primary)',
-            color: 'var(--color-bg-elevated)',
-            border: 'none',
-            borderRadius: 'var(--radius-md)',
-            fontSize: '14px',
-            fontWeight: 500,
-            cursor: 'pointer',
-            boxShadow: 'var(--shadow-sm)',
+            backgroundImage:
+              'radial-gradient(60% 50% at 20% 10%, rgba(19,160,236,0.28), transparent 60%), radial-gradient(50% 50% at 90% 90%, rgba(213,42,119,0.22), transparent 60%)',
           }}
-        >
-          Login
-        </button>
-      </form>
-      <div style={{ 
-        marginTop: '24px', 
-        padding: '16px', 
-        backgroundColor: 'var(--color-bg-secondary)', 
-        borderRadius: 'var(--radius-md)',
-        border: '1px solid var(--color-border-light)'
-      }}>
-        <h3 style={{ 
-          marginTop: 0,
-          marginBottom: '12px',
-          fontSize: '13px',
-          fontWeight: 600,
-          color: 'var(--color-text-primary)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.5px'
-        }}>
-          How to get a token
-        </h3>
-        <ol style={{ 
-          fontSize: '13px', 
-          paddingLeft: '20px',
-          margin: 0,
-          color: 'var(--color-text-secondary)',
-          lineHeight: '1.6'
-        }}>
-          <li>Obtain a bearer token from your OAuth 2.0 provider</li>
-          <li>Paste it in the field above</li>
-          <li>The token will be stored in your browser's local storage</li>
-        </ol>
-      </div>
+          aria-hidden
+        />
+        <div className="relative">
+          <Logo asLink={false} className="[&_span:last-child]:text-white" />
+        </div>
+
+        <div className="relative space-y-8">
+          <div className="space-y-3">
+            <h1 className="text-4xl font-bold leading-tight tracking-tight text-white">
+              Short links,
+              <br />
+              serious performance.
+            </h1>
+            <p className="max-w-md text-baltic-blue-200">
+              Lynx turns long, unwieldy URLs into fast, trackable short links —
+              backed by a high-performance Rust core.
+            </p>
+          </div>
+
+          <ul className="space-y-4">
+            {highlights.map((item) => (
+              <li key={item.title} className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 text-baltic-blue-100 backdrop-blur">
+                  {item.icon}
+                </span>
+                <div>
+                  <p className="font-semibold text-white">{item.title}</p>
+                  <p className="text-sm text-baltic-blue-200">{item.description}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <p className="relative text-xs text-baltic-blue-300">
+          © {new Date().getFullYear()} Lynx. Built for speed.
+        </p>
+      </aside>
+
+      {/* Auth panel */}
+      <main className="flex flex-col px-6 py-8 sm:px-10">
+        <div className="flex items-center justify-between lg:justify-end">
+          <Logo className="lg:hidden" asLink={false} />
+          <ThemeToggle />
+        </div>
+
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-full max-w-md py-10">
+            <div className="mb-8 flex flex-col items-center text-center">
+              <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-soft text-primary-soft-fg">
+                <KeyRound className="h-6 w-6" />
+              </span>
+              <h2 className="text-2xl font-bold tracking-tight text-fg">Welcome back</h2>
+              <p className="mt-1.5 text-sm text-fg-muted">
+                Enter your OAuth 2.0 bearer token to access your dashboard.
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <Field label="Bearer token" htmlFor="token" required>
+                <Input
+                  id="token"
+                  type="password"
+                  autoComplete="off"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  placeholder="Paste your OAuth 2.0 bearer token"
+                  required
+                />
+              </Field>
+
+              <Button
+                type="submit"
+                size="lg"
+                fullWidth
+                disabled={!token.trim()}
+                rightIcon={<ArrowRight className="h-4 w-4" />}
+              >
+                Continue
+              </Button>
+            </form>
+
+            <div className="mt-8 rounded-2xl border border-border bg-surface-2/50 p-5">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
+                How to get a token
+              </h3>
+              <ol className="mt-3 space-y-2 text-sm text-fg-muted">
+                <li className="flex gap-2.5">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary-soft-fg">
+                    1
+                  </span>
+                  Obtain a bearer token from your OAuth 2.0 provider.
+                </li>
+                <li className="flex gap-2.5">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary-soft-fg">
+                    2
+                  </span>
+                  Paste it into the field above.
+                </li>
+                <li className="flex gap-2.5">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary-soft-fg">
+                    3
+                  </span>
+                  It is stored locally in your browser for future visits.
+                </li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      </main>
     </div>
   );
 };
