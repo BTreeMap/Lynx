@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { BarChart3, ExternalLink, PowerOff, RotateCcw } from 'lucide-react';
 import { apiClient } from '../api';
 import type { ShortenedUrl } from '../types';
@@ -25,6 +26,25 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
     const [actionInProgress, setActionInProgress] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [pending, setPending] = useState<PendingAction>(null);
+    const listRef = useRef<HTMLDivElement>(null);
+
+    // Only the rows in (or near) the viewport are mounted in the DOM. The full
+    // dataset stays in `urls` (cheap JS objects); virtualizing against the page
+    // scroll keeps the DOM small even after "Load all" pulls in thousands of rows.
+    const rowVirtualizer = useWindowVirtualizer({
+        count: urls.length,
+        estimateSize: () => 57,
+        overscan: 12,
+        scrollMargin: listRef.current?.offsetTop ?? 0,
+    });
+    const virtualItems = rowVirtualizer.getVirtualItems();
+    const totalSize = rowVirtualizer.getTotalSize();
+    const scrollMargin = rowVirtualizer.options.scrollMargin;
+    const paddingTop = virtualItems.length ? virtualItems[0].start - scrollMargin : 0;
+    const paddingBottom = virtualItems.length
+        ? totalSize - (virtualItems[virtualItems.length - 1].end - scrollMargin)
+        : 0;
+    const colCount = isAdmin ? 7 : 6;
 
     const runAction = async () => {
         if (!pending) return;
@@ -50,7 +70,7 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
     const linkFor = (item: ShortenedUrl) => buildShortLink(item.short_code, item.redirect_base_url);
 
     return (
-        <div className="space-y-4">
+        <div ref={listRef} className="space-y-4">
             {error && <Alert tone="error">{error}</Alert>}
 
             <TableScroll>
@@ -67,11 +87,22 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
                         </TR>
                     </THead>
                     <TBody>
-                        {urls.map((url) => {
+                        {paddingTop > 0 && (
+                            <tr aria-hidden>
+                                <td colSpan={colCount} style={{ height: paddingTop }} />
+                            </tr>
+                        )}
+                        {virtualItems.map((virtualRow) => {
+                            const url = urls[virtualRow.index];
                             const link = linkFor(url);
                             const busy = actionInProgress === url.short_code;
                             return (
-                                <TR key={url.id} className="transition-colors hover:bg-surface-2/50">
+                                <tr
+                                    key={url.id}
+                                    data-index={virtualRow.index}
+                                    ref={rowVirtualizer.measureElement}
+                                    className="border-b border-border/60 transition-colors hover:bg-surface-2/50"
+                                >
                                     <TD>
                                         <Link
                                             to={`/url/${encodeShortCodeForApi(url.short_code)}`}
@@ -149,9 +180,14 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
                                                 ))}
                                         </div>
                                     </TD>
-                                </TR>
+                                </tr>
                             );
                         })}
+                        {paddingBottom > 0 && (
+                            <tr aria-hidden>
+                                <td colSpan={colCount} style={{ height: paddingBottom }} />
+                            </tr>
+                        )}
                     </TBody>
                 </Table>
             </TableScroll>
