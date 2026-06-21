@@ -164,7 +164,7 @@ pub async fn get_analytics_aggregate(
             .collect();
 
         // Sort by visit_count descending
-        result.sort_by(|a, b| b.visit_count.cmp(&a.visit_count));
+        result.sort_by_key(|aggregate| std::cmp::Reverse(aggregate.visit_count));
 
         // Apply limit
         result.truncate(limit as usize);

@@ -268,9 +268,9 @@ async fn test_concurrent_url_lookups() {
 
     for handle in handles {
         if let Ok(Ok(result)) = handle.await {
-            if result.url.is_some() {
+            if let Some(url) = result.url {
                 success_count += 1;
-                assert_eq!(result.url.unwrap().short_code, "lookup_test");
+                assert_eq!(url.short_code, "lookup_test");
             }
         }
     }

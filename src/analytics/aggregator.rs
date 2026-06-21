@@ -473,7 +473,7 @@ impl AnalyticsAggregator {
 
         // Convert to Vec and sort by count descending
         let mut result: Vec<(String, i64)> = grouped.into_iter().collect();
-        result.sort_by(|a, b| b.1.cmp(&a.1));
+        result.sort_by_key(|entry| std::cmp::Reverse(entry.1));
         result
     }
 
