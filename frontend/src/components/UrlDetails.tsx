@@ -57,19 +57,37 @@ const DIMENSION_LABELS = Object.fromEntries(
     DIMENSIONS.map(({ value, label }) => [value, label]),
 ) as Record<AggregateDimension, string>;
 
-const CHART_COLORS = [
-    '#13a0ec',
-    '#0f80bd',
-    '#42b3f0',
-    '#0b608e',
-    '#71c6f4',
-    '#d52a77',
-    '#aa225f',
-    '#6dda25',
-    '#58ae1e',
-    '#dd5592',
+const CHART_SERIES_TOKENS = [
+    '--chart-1',
+    '--chart-2',
+    '--chart-3',
+    '--chart-4',
+    '--chart-5',
+    '--chart-6',
+    '--chart-7',
+    '--chart-8',
+    '--chart-9',
+    '--chart-10',
 ];
-const OTHER_COLOR = '#94a3b8';
+
+interface ChartPalette {
+    series: string[];
+    other: string;
+    axis: string;
+    cursor: string;
+}
+
+/** Resolve chart colors from CSS tokens so index.css stays the single source. */
+const readChartPalette = (): ChartPalette => {
+    const styles = getComputedStyle(document.documentElement);
+    const read = (token: string) => styles.getPropertyValue(token).trim();
+    return {
+        series: CHART_SERIES_TOKENS.map(read),
+        other: read('--chart-other'),
+        axis: read('--fg-subtle'),
+        cursor: read('--chart-cursor'),
+    };
+};
 
 const formatTimeBucket = (timestamp: number) => {
     const date = new Date(timestamp * 1000);
@@ -125,6 +143,11 @@ const UrlDetails: React.FC = () => {
     const { shortCode } = useParams<{ shortCode: string }>();
     const navigate = useNavigate();
     const { resolvedTheme } = useTheme();
+
+    const [chartPalette, setChartPalette] = useState<ChartPalette>(readChartPalette);
+    useEffect(() => {
+        setChartPalette(readChartPalette());
+    }, [resolvedTheme]);
 
     const [url, setUrl] = useState<ShortenedUrl | null>(null);
     const [analytics, setAnalytics] = useState<AnalyticsEntry[]>([]);
@@ -317,8 +340,6 @@ const UrlDetails: React.FC = () => {
         () => (url ? buildShortLink(url.short_code, url.redirect_base_url) : null),
         [url],
     );
-
-    const axisColor = resolvedTheme === 'dark' ? '#6088a1' : '#7d96a6';
 
     if (error && !url) {
         return (
@@ -577,7 +598,7 @@ const UrlDetails: React.FC = () => {
                                                 >
                                                     <XAxis
                                                         type="number"
-                                                        tick={{ fill: axisColor, fontSize: 12 }}
+                                                        tick={{ fill: chartPalette.axis, fontSize: 12 }}
                                                         axisLine={false}
                                                         tickLine={false}
                                                     />
@@ -585,7 +606,7 @@ const UrlDetails: React.FC = () => {
                                                         type="category"
                                                         dataKey="name"
                                                         width={110}
-                                                        tick={{ fill: axisColor, fontSize: 12 }}
+                                                        tick={{ fill: chartPalette.axis, fontSize: 12 }}
                                                         axisLine={false}
                                                         tickLine={false}
                                                         tickFormatter={(value: string) =>
@@ -593,7 +614,7 @@ const UrlDetails: React.FC = () => {
                                                         }
                                                     />
                                                     <Tooltip
-                                                        cursor={{ fill: 'rgba(19,160,236,0.08)' }}
+                                                        cursor={{ fill: chartPalette.cursor }}
                                                         content={<ChartTooltip total={totalClicks} />}
                                                     />
                                                     <Bar dataKey="value" radius={[0, 6, 6, 0]} maxBarSize={26}>
@@ -602,8 +623,10 @@ const UrlDetails: React.FC = () => {
                                                                 key={entry.name}
                                                                 fill={
                                                                     entry.isOther
-                                                                        ? OTHER_COLOR
-                                                                        : CHART_COLORS[index % CHART_COLORS.length]
+                                                                        ? chartPalette.other
+                                                                        : chartPalette.series[
+                                                                              index % chartPalette.series.length
+                                                                          ]
                                                                 }
                                                             />
                                                         ))}
@@ -634,8 +657,10 @@ const UrlDetails: React.FC = () => {
                                                                 key={entry.name}
                                                                 fill={
                                                                     entry.isOther
-                                                                        ? OTHER_COLOR
-                                                                        : CHART_COLORS[index % CHART_COLORS.length]
+                                                                        ? chartPalette.other
+                                                                        : chartPalette.series[
+                                                                              index % chartPalette.series.length
+                                                                          ]
                                                                 }
                                                             />
                                                         ))}

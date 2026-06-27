@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ThemeContext, type ThemeMode } from '../contexts/ThemeContext';
 
@@ -27,8 +27,10 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const resolvedTheme: 'light' | 'dark' = mode === 'system' ? systemTheme : mode;
 
-    // Keep the document class in sync with the resolved theme.
-    useEffect(() => {
+    // Keep the document class in sync with the resolved theme. A layout effect
+    // ensures the class lands before passive effects in consumers read computed
+    // styles (e.g. chart colors derived from CSS tokens).
+    useLayoutEffect(() => {
         applyThemeClass(resolvedTheme);
     }, [resolvedTheme]);
 

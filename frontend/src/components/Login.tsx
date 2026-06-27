@@ -43,7 +43,7 @@ const Login: React.FC = () => {
           className="pointer-events-none absolute inset-0 opacity-70"
           style={{
             backgroundImage:
-              'radial-gradient(60% 50% at 20% 10%, rgba(19,160,236,0.28), transparent 60%), radial-gradient(50% 50% at 90% 90%, rgba(213,42,119,0.22), transparent 60%)',
+              'radial-gradient(60% 50% at 20% 10%, rgba(110,142,171,0.25), transparent 60%), radial-gradient(50% 50% at 90% 90%, rgba(129,210,199,0.16), transparent 60%)',
           }}
           aria-hidden
         />
