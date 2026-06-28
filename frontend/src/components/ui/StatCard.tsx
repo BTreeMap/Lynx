@@ -42,11 +42,11 @@ export const StatCard: React.FC<StatCardProps> = ({
             </div>
         )}
         <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle sm:text-xs">{label}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">{label}</p>
             <div className="mt-0.5 break-words text-lg font-semibold tracking-tight text-fg sm:mt-1 sm:text-2xl">
                 {value}
             </div>
-            {hint && <p className="text-[11px] text-fg-muted sm:text-xs">{hint}</p>}
+            {hint && <p className="text-xs text-fg-muted">{hint}</p>}
         </div>
     </div>
 );

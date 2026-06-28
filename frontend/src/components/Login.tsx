@@ -54,7 +54,7 @@ const Login: React.FC = () => {
           aria-hidden
         />
         <div className="relative">
-          <Logo asLink={false} className="[&_span:last-child]:text-white" />
+          <Logo asLink={false} wordmarkClassName="text-white" />
         </div>
 
         <div className="relative space-y-8">
@@ -104,7 +104,7 @@ const Login: React.FC = () => {
                 <KeyRound className="h-6 w-6" />
               </span>
               <h2 className="text-xl font-bold tracking-tight text-fg sm:text-2xl">Welcome back</h2>
-              <p className="mt-1 text-[13px] text-fg-muted sm:mt-1.5 sm:text-sm">
+              <p className="mt-1 text-sm text-fg-muted sm:mt-1.5">
                 Sign in with your OAuth provider to access your dashboard.
               </p>
             </div>
@@ -133,19 +133,19 @@ const Login: React.FC = () => {
               </h3>
               <ol className="mt-3 space-y-2 text-sm text-fg-muted">
                 <li className="flex gap-2.5">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary-soft-fg">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-soft-fg">
                     1
                   </span>
                   You are redirected to your OAuth provider to sign in.
                 </li>
                 <li className="flex gap-2.5">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary-soft-fg">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-soft-fg">
                     2
                   </span>
                   Lynx completes PKCE code exchange in your browser.
                 </li>
                 <li className="flex gap-2.5">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary-soft-fg">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-soft-fg">
                     3
                   </span>
                   A bearer token is stored locally and sent in HTTP headers.

@@ -39,7 +39,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ actions, className }) => {
                                     <UserRound className="h-4 w-4" />
                                 )}
                             </span>
-                            <span className="max-w-[12rem] truncate text-sm font-medium text-fg">
+                            <span className="max-w-48 truncate text-sm font-medium text-fg">
                                 {userId || 'Anonymous'}
                             </span>
                             {userInfo.is_admin && (

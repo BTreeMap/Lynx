@@ -70,8 +70,8 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
             </CardHeader>
             <CardBody>
                 <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
-                    <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-start sm:gap-5">
-                        <Field label="Original URL" htmlFor="url" required>
+                    <div className="grid gap-4 sm:grid-cols-3 sm:items-start sm:gap-5">
+                        <Field label="Original URL" htmlFor="url" required className="sm:col-span-2">
                             <Input
                                 id="url"
                                 type="url"

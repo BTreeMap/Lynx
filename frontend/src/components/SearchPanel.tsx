@@ -125,7 +125,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                     >
                         Filters
                         {hasActiveFilters && (
-                            <span className="ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[11px] font-semibold text-primary-fg">
+                            <span className="ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-fg">
                                 •
                             </span>
                         )}
@@ -143,11 +143,11 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
 
             <div
                 className={cn(
-                    'grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out',
-                    showFilters ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+                    'overflow-hidden transition-all duration-200 ease-out',
+                    showFilters ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0',
                 )}
             >
-                <div className="min-h-0">
+                <div className="min-h-0 pt-0.5">
                     <div className="rounded-2xl border border-border bg-surface p-3.5 shadow-soft sm:p-5">
                         <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
                             <Field label="Created from" htmlFor="created-from">
@@ -190,7 +190,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                             )}
                         </div>
                         <div className="mt-3.5 flex flex-col gap-2.5 sm:mt-4 sm:flex-row sm:items-center sm:justify-between">
-                            <p className="text-[11px] text-fg-subtle sm:text-xs">
+                            <p className="text-xs text-fg-subtle">
                                 Filters apply together with your search query.
                             </p>
                             <IconButton label="Reset filters" onClick={handleClear} variant="outline" size="sm">

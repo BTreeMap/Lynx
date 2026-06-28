@@ -23,7 +23,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const base =
     'inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap ' +
-    'transition-[background-color,color,border-color,box-shadow,transform] duration-150 ' +
+    'transition-all duration-150 ' +
     'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ' +
     'disabled:cursor-not-allowed disabled:opacity-55 disabled:pointer-events-none ' +
     'active:translate-y-px select-none cursor-pointer';
@@ -43,9 +43,9 @@ const variants: Record<ButtonVariant, string> = {
 };
 
 const sizes: Record<ButtonSize, string> = {
-    sm: 'h-8 px-2.5 text-xs sm:px-3 sm:text-[13px]',
-    md: 'h-9 px-3.5 text-[13px] sm:h-10 sm:px-4 sm:text-sm',
-    lg: 'h-11 px-5 text-sm sm:h-12 sm:px-6 sm:text-[15px]',
+    sm: 'h-8 px-2.5 text-xs sm:px-3',
+    md: 'h-9 px-3.5 text-sm sm:h-10 sm:px-4',
+    lg: 'h-11 px-5 text-sm sm:h-12 sm:px-6 sm:text-base',
 };
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(

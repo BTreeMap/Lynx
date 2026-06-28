@@ -3,7 +3,7 @@ import { cn } from '../../lib/cn';
 
 const fieldBase =
     'w-full rounded-lg border border-border bg-bg text-fg placeholder:text-fg-subtle ' +
-    'transition-[border-color,box-shadow] duration-150 ' +
+    'transition duration-150 ' +
     'focus:border-primary focus-visible:outline-none focus:ring-2 focus:ring-ring/30 ' +
     'disabled:cursor-not-allowed disabled:opacity-60';
 
@@ -17,7 +17,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             className={cn(
                 fieldBase,
-                'h-10 px-3 text-[13px] sm:h-11 sm:px-3.5 sm:text-sm',
+                'h-10 px-3 text-sm sm:h-11 sm:px-3.5',
                 invalid && 'border-danger focus:border-danger focus:ring-danger/30',
                 className,
             )}
@@ -36,7 +36,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
             ref={ref}
             className={cn(
                 fieldBase,
-                'h-10 px-3 text-[13px] appearance-none cursor-pointer sm:h-11 sm:px-3.5 sm:text-sm',
+                'h-10 px-3 text-sm appearance-none cursor-pointer sm:h-11 sm:px-3.5',
                 className,
             )}
             {...props}
@@ -67,11 +67,11 @@ export const Field: React.FC<FieldProps> = ({
     children,
 }) => (
     <div className={cn('flex flex-col gap-1.5 sm:gap-2', className)}>
-        <label htmlFor={htmlFor} className="text-[13px] font-medium text-fg sm:text-sm">
+        <label htmlFor={htmlFor} className="text-sm font-medium text-fg">
             {label}
             {required && <span className="ml-1 text-danger">*</span>}
         </label>
         {children}
-        {hint && <p className="text-[13px] text-fg-subtle">{hint}</p>}
+        {hint && <p className="text-sm text-fg-subtle">{hint}</p>}
     </div>
 );

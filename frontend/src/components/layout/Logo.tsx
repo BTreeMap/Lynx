@@ -4,6 +4,7 @@ import { cn } from '../../lib/cn';
 
 export interface LogoProps {
     className?: string;
+    wordmarkClassName?: string;
     /** Render as a link to the dashboard root. */
     asLink?: boolean;
 }
@@ -36,17 +37,17 @@ const Mark = () => (
     </span>
 );
 
-const Wordmark = () => (
-    <span className="text-xl font-bold tracking-tight text-fg">
+const Wordmark: React.FC<{ className?: string }> = ({ className }) => (
+    <span className={cn('text-xl font-bold tracking-tight text-fg', className)}>
         Lynx
     </span>
 );
 
-export const Logo: React.FC<LogoProps> = ({ className, asLink = true }) => {
+export const Logo: React.FC<LogoProps> = ({ className, wordmarkClassName, asLink = true }) => {
     const content = (
         <span className={cn('inline-flex items-center gap-2.5', className)}>
             <Mark />
-            <Wordmark />
+            <Wordmark className={wordmarkClassName} />
         </span>
     );
 

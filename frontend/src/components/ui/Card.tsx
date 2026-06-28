@@ -42,7 +42,7 @@ export const CardDescription: React.FC<React.HTMLAttributes<HTMLParagraphElement
     children,
     ...props
 }) => (
-    <p className={cn('text-[13px] text-fg-muted sm:text-sm', className)} {...props}>
+    <p className={cn('text-sm text-fg-muted', className)} {...props}>
         {children}
     </p>
 );

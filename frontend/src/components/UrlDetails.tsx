@@ -380,7 +380,7 @@ const UrlDetails: React.FC = () => {
                     <h1 className="text-xl font-bold tracking-tight text-fg sm:text-3xl">
                         Link analytics
                     </h1>
-                    <p className="mt-1 text-[13px] text-fg-muted sm:text-sm">
+                    <p className="mt-1 text-sm text-fg-muted">
                         Detailed performance and audience insights for your short link.
                     </p>
                 </div>
@@ -713,7 +713,7 @@ const UrlDetails: React.FC = () => {
                                                                         style={{ width: `${percentage}%` }}
                                                                     />
                                                                 </div>
-                                                                <span className="w-12 text-right text-[13px] text-fg-subtle tabular-nums">
+                                                                <span className="w-12 text-right text-xs text-fg-subtle tabular-nums sm:text-sm">
                                                                     {percentage.toFixed(1)}%
                                                                 </span>
                                                             </div>

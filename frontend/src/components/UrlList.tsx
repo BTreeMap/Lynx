@@ -110,7 +110,7 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
                                             {url.short_code}
                                         </Link>
                                     </TD>
-                                    <TD className="max-w-[18rem] sm:max-w-[22rem]">
+                                    <TD className="max-w-72 sm:max-w-96">
                                         <a
                                             href={url.original_url}
                                             target="_blank"
