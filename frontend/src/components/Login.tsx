@@ -91,25 +91,25 @@ const Login: React.FC = () => {
       </aside>
 
       {/* Auth panel */}
-      <main className="flex flex-col px-6 py-8 sm:px-10">
+      <main className="flex flex-col px-4 py-6 sm:px-10 sm:py-8">
         <div className="flex items-center justify-between lg:justify-end">
           <Logo className="lg:hidden" asLink={false} />
           <ThemeToggle />
         </div>
 
         <div className="flex flex-1 items-center justify-center">
-          <div className="w-full max-w-md py-10">
-            <div className="mb-8 flex flex-col items-center text-center">
-              <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-soft text-primary-soft-fg">
+          <div className="w-full max-w-md py-8 sm:py-10">
+            <div className="mb-6 flex flex-col items-center text-center sm:mb-8">
+              <span className="mb-3.5 flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-soft text-primary-soft-fg sm:mb-4 sm:h-12 sm:w-12">
                 <KeyRound className="h-6 w-6" />
               </span>
-              <h2 className="text-2xl font-bold tracking-tight text-fg">Welcome back</h2>
-              <p className="mt-1.5 text-sm text-fg-muted">
+              <h2 className="text-xl font-bold tracking-tight text-fg sm:text-2xl">Welcome back</h2>
+              <p className="mt-1 text-[13px] text-fg-muted sm:mt-1.5 sm:text-sm">
                 Sign in with your OAuth provider to access your dashboard.
               </p>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
               <Button
                 type="submit"
                 size="lg"
@@ -127,7 +127,7 @@ const Login: React.FC = () => {
               )}
             </form>
 
-            <div className="mt-8 rounded-2xl border border-border bg-surface-2/50 p-5">
+            <div className="mt-6 rounded-2xl border border-border bg-surface-2/50 p-4 sm:mt-8 sm:p-5">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
                 Authentication flow
               </h3>

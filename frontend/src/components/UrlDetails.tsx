@@ -345,7 +345,7 @@ const UrlDetails: React.FC = () => {
         return (
             <div className="min-h-screen bg-bg">
                 <AppHeader />
-                <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+                <main className="mx-auto max-w-6xl px-3 py-8 sm:px-6 sm:py-10">
                     <Alert tone="error">
                         {error ||
                             (decodedShortCode ? `URL not found: ${decodedShortCode}` : 'Invalid short code')}
@@ -366,7 +366,7 @@ const UrlDetails: React.FC = () => {
     return (
         <div className="min-h-screen bg-bg">
             <AppHeader />
-            <main className="mx-auto max-w-6xl space-y-6 overflow-x-clip px-4 py-8 sm:px-6 sm:py-10">
+            <main className="mx-auto max-w-6xl space-y-5 overflow-x-clip px-3 py-6 sm:space-y-6 sm:px-6 sm:py-10">
                 <div>
                     <Button
                         variant="ghost"
@@ -377,10 +377,10 @@ const UrlDetails: React.FC = () => {
                     >
                         Back to dashboard
                     </Button>
-                    <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+                    <h1 className="text-xl font-bold tracking-tight text-fg sm:text-3xl">
                         Link analytics
                     </h1>
-                    <p className="mt-1 text-sm text-fg-muted">
+                    <p className="mt-1 text-[13px] text-fg-muted sm:text-sm">
                         Detailed performance and audience insights for your short link.
                     </p>
                 </div>
@@ -390,12 +390,12 @@ const UrlDetails: React.FC = () => {
                     <CardHeader className="border-b border-border/70 bg-surface/70">
                         <CardTitle>Link information</CardTitle>
                     </CardHeader>
-                    <CardBody className="space-y-5">
+                    <CardBody className="space-y-4 sm:space-y-5">
                         {isLoadingUrl ? (
-                            <div className="space-y-4">
+                            <div className="space-y-3 sm:space-y-4">
                                 <Skeleton className="h-14 w-full" />
                                 <Skeleton className="h-14 w-full" />
-                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
                                     {Array.from({ length: 4 }).map((_, i) => (
                                         <Skeleton key={i} className="h-20" />
                                     ))}
@@ -403,11 +403,11 @@ const UrlDetails: React.FC = () => {
                             </div>
                         ) : url ? (
                             <>
-                                <div className="space-y-1.5">
+                                <div className="space-y-1">
                                     <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
                                         Short link
                                     </p>
-                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                                    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:gap-3">
                                         <div className="min-w-0 flex-1 rounded-xl border border-border bg-surface-2/60 px-4 py-3">
                                             {shortLink ? (
                                                 <a
@@ -437,7 +437,7 @@ const UrlDetails: React.FC = () => {
                                     </div>
                                 </div>
 
-                                <div className="space-y-1.5">
+                                <div className="space-y-1">
                                     <div className="flex items-center justify-between gap-3">
                                         <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
                                             Destination
@@ -463,7 +463,7 @@ const UrlDetails: React.FC = () => {
                                     </div>
                                 </div>
 
-                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
                                     <StatCard
                                         label="Total clicks"
                                         value={url.clicks.toLocaleString()}
@@ -507,7 +507,7 @@ const UrlDetails: React.FC = () => {
                     </CardHeader>
                     <CardBody>
                         {isLoadingHistory ? (
-                            <div className="space-y-3">
+                            <div className="space-y-2.5 sm:space-y-3">
                                 <Skeleton className="h-12 w-full" />
                                 <Skeleton className="h-12 w-full" />
                             </div>
@@ -584,8 +584,8 @@ const UrlDetails: React.FC = () => {
                         {isLoadingAggregate ? (
                             <Skeleton className="h-72 w-full" />
                         ) : aggregatesWithOther.length > 0 ? (
-                            <div className="space-y-6">
-                                <div className="grid gap-6 lg:grid-cols-5">
+                            <div className="space-y-5 sm:space-y-6">
+                                <div className="grid gap-5 sm:gap-6 lg:grid-cols-5">
                                     <div className="lg:col-span-3">
                                         <p className="mb-3 text-xs font-medium uppercase tracking-wide text-fg-subtle">
                                             Top {DIMENSION_LABELS[selectedDimension].toLowerCase()} by visits

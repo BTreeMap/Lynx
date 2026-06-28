@@ -70,7 +70,7 @@ export const TH: React.FC<React.ThHTMLAttributes<HTMLTableCellElement>> = ({
 }) => (
     <th
         className={cn(
-            'px-4 py-3 text-xs font-semibold uppercase tracking-wide text-fg-subtle whitespace-nowrap',
+            'px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle whitespace-nowrap sm:px-4 sm:py-3 sm:text-xs',
             className,
         )}
         {...props}
@@ -84,7 +84,13 @@ export const TD: React.FC<React.TdHTMLAttributes<HTMLTableCellElement>> = ({
     children,
     ...props
 }) => (
-    <td className={cn('px-4 py-3 text-sm text-fg align-middle', className)} {...props}>
+    <td
+        className={cn(
+            'px-3 py-2.5 text-[13px] text-fg align-middle sm:px-4 sm:py-3 sm:text-sm',
+            className,
+        )}
+        {...props}
+    >
         {children}
     </td>
 );

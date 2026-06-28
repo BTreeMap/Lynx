@@ -215,15 +215,15 @@ const Dashboard: React.FC = () => {
                 }
             />
 
-            <main className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6 sm:py-10">
+            <main className="mx-auto max-w-6xl space-y-6 px-3 py-6 sm:space-y-8 sm:px-6 sm:py-10">
                 <section>
-                    <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">Dashboard</h1>
-                    <p className="mt-1 text-sm text-fg-muted">
+                    <h1 className="text-xl font-bold tracking-tight text-fg sm:text-3xl">Dashboard</h1>
+                    <p className="mt-1 text-[13px] text-fg-muted sm:text-sm">
                         Create, manage, and track your short links.
                     </p>
                 </section>
 
-                <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <section className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
                     <StatCard
                         label={activeFilters ? 'Links found' : 'Links loaded'}
                         value={stats.count.toLocaleString()}
@@ -275,11 +275,11 @@ const Dashboard: React.FC = () => {
 
                 <CreateUrlForm onUrlCreated={loadUrls} />
 
-                <section className="space-y-4">
-                    <div className="flex flex-wrap items-end justify-between gap-3">
+                <section className="space-y-3 sm:space-y-4">
+                    <div className="flex flex-wrap items-end justify-between gap-2.5 sm:gap-3">
                         <div>
                             <h2 className="text-lg font-semibold tracking-tight text-fg">Your links</h2>
-                            <p className="text-sm text-fg-muted">
+                            <p className="text-[13px] text-fg-muted sm:text-sm">
                                 {activeFilters
                                     ? `Showing results for “${activeFilters.q}”`
                                     : 'All links you have created.'}

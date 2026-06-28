@@ -24,7 +24,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ actions, className }) => {
                 className,
             )}
         >
-            <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
+            <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-2.5 px-3 sm:h-16 sm:gap-3 sm:px-6">
                 <Logo />
 
                 <div className="flex items-center gap-2 sm:gap-3">

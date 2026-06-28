@@ -90,17 +90,17 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
     );
 
     return (
-        <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
+        <form onSubmit={handleSubmit} className="space-y-2.5 sm:space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-2.5">
                 <div className="relative flex-1">
-                    <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-fg-subtle" />
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle sm:left-3.5 sm:h-4.5 sm:w-4.5" />
                     <Input
                         type="text"
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         onKeyDown={handleKeyDown}
                         placeholder="Search by short code or URL…"
-                        className="pl-11"
+                        className="pl-10 sm:pl-11"
                         aria-label="Search URLs"
                     />
                     {query && (
@@ -108,7 +108,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                             type="button"
                             onClick={() => setQuery('')}
                             aria-label="Clear query"
-                            className="absolute right-2.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg"
+                            className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-fg-subtle transition-colors hover:bg-surface-2 hover:text-fg sm:right-2.5"
                         >
                             <X className="h-4 w-4" />
                         </button>
@@ -148,8 +148,8 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                 )}
             >
                 <div className="min-h-0">
-                    <div className="rounded-2xl border border-border bg-surface p-4 shadow-soft sm:p-5">
-                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-2xl border border-border bg-surface p-3.5 shadow-soft sm:p-5">
+                        <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
                             <Field label="Created from" htmlFor="created-from">
                                 <Input
                                     id="created-from"
@@ -189,11 +189,11 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                                 </Field>
                             )}
                         </div>
-                        <div className="mt-4 flex items-center justify-between">
-                            <p className="text-xs text-fg-subtle">
+                        <div className="mt-3.5 flex flex-col gap-2.5 sm:mt-4 sm:flex-row sm:items-center sm:justify-between">
+                            <p className="text-[11px] text-fg-subtle sm:text-xs">
                                 Filters apply together with your search query.
                             </p>
-                            <IconButton label="Reset filters" onClick={handleClear} variant="outline">
+                            <IconButton label="Reset filters" onClick={handleClear} variant="outline" size="sm">
                                 <X className="h-4 w-4" />
                             </IconButton>
                         </div>

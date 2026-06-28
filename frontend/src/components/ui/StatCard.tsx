@@ -27,14 +27,14 @@ export const StatCard: React.FC<StatCardProps> = ({
 }) => (
     <div
         className={cn(
-            'flex w-full min-w-0 items-center gap-4 rounded-2xl border border-border bg-surface p-4 shadow-soft sm:p-5',
+            'flex w-full min-w-0 items-center gap-3 rounded-2xl border border-border bg-surface p-3.5 shadow-soft sm:gap-4 sm:p-5',
             className,
         )}
     >
         {icon && (
             <div
                 className={cn(
-                    'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl',
+                    'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-11 sm:w-11',
                     iconTones[tone],
                 )}
             >
@@ -42,11 +42,11 @@ export const StatCard: React.FC<StatCardProps> = ({
             </div>
         )}
         <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">{label}</p>
-            <div className="mt-1 break-words text-xl font-semibold tracking-tight text-fg sm:text-2xl">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle sm:text-xs">{label}</p>
+            <div className="mt-0.5 break-words text-lg font-semibold tracking-tight text-fg sm:mt-1 sm:text-2xl">
                 {value}
             </div>
-            {hint && <p className="text-xs text-fg-muted">{hint}</p>}
+            {hint && <p className="text-[11px] text-fg-muted sm:text-xs">{hint}</p>}
         </div>
     </div>
 );

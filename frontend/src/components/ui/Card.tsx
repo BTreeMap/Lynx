@@ -22,7 +22,7 @@ export const CardHeader: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({
     children,
     ...props
 }) => (
-    <div className={cn('flex flex-col gap-1 p-5 sm:p-6', className)} {...props}>
+    <div className={cn('flex flex-col gap-1 p-4 sm:p-6', className)} {...props}>
         {children}
     </div>
 );
@@ -32,7 +32,7 @@ export const CardTitle: React.FC<React.HTMLAttributes<HTMLHeadingElement>> = ({
     children,
     ...props
 }) => (
-    <h2 className={cn('text-lg font-semibold tracking-tight text-fg', className)} {...props}>
+    <h2 className={cn('text-base font-semibold tracking-tight text-fg sm:text-lg', className)} {...props}>
         {children}
     </h2>
 );
@@ -42,7 +42,7 @@ export const CardDescription: React.FC<React.HTMLAttributes<HTMLParagraphElement
     children,
     ...props
 }) => (
-    <p className={cn('text-sm text-fg-muted', className)} {...props}>
+    <p className={cn('text-[13px] text-fg-muted sm:text-sm', className)} {...props}>
         {children}
     </p>
 );
@@ -52,7 +52,7 @@ export const CardBody: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({
     children,
     ...props
 }) => (
-    <div className={cn('p-5 pt-0 sm:p-6 sm:pt-0', className)} {...props}>
+    <div className={cn('p-4 pt-0 sm:p-6 sm:pt-0', className)} {...props}>
         {children}
     </div>
 );

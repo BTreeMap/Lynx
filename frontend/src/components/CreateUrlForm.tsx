@@ -69,8 +69,8 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
                 </CardDescription>
             </CardHeader>
             <CardBody>
-                <form onSubmit={handleSubmit} className="space-y-5">
-                    <div className="grid gap-5 sm:grid-cols-[1fr_auto] sm:items-start">
+                <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
+                    <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-start sm:gap-5">
                         <Field label="Original URL" htmlFor="url" required>
                             <Input
                                 id="url"
@@ -101,11 +101,12 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
 
                     {error && <Alert tone="error">{error}</Alert>}
 
-                    <div className="flex justify-end">
+                    <div className="flex justify-stretch sm:justify-end">
                         <Button
                             type="submit"
                             isLoading={isSubmitting}
                             leftIcon={<Plus className="h-4 w-4" />}
+                            className="w-full sm:w-auto"
                         >
                             {isSubmitting ? 'Creating…' : 'Create short link'}
                         </Button>
@@ -132,7 +133,7 @@ const CreateUrlForm: React.FC<CreateUrlFormProps> = ({ onUrlCreated }) => {
                     </>
                 }
             >
-                <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-2/60 p-4">
+                <div className="flex items-center gap-2.5 rounded-xl border border-border bg-surface-2/60 p-3.5 sm:gap-3 sm:p-4">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary-soft-fg">
                         {successLink ? <Link2 className="h-4.5 w-4.5" /> : <Sparkles className="h-4.5 w-4.5" />}
                     </span>

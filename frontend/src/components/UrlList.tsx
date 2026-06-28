@@ -69,7 +69,7 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
     const linkFor = (item: ShortenedUrl) => buildShortLink(item.short_code, item.redirect_base_url);
 
     return (
-        <div ref={listRef} className="space-y-4">
+        <div ref={listRef} className="space-y-3 sm:space-y-4">
             {error && <Alert tone="error">{error}</Alert>}
 
             <TableScroll>
@@ -110,7 +110,7 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
                                             {url.short_code}
                                         </Link>
                                     </TD>
-                                    <TD className="max-w-[22rem]">
+                                    <TD className="max-w-[18rem] sm:max-w-[22rem]">
                                         <a
                                             href={url.original_url}
                                             target="_blank"
@@ -135,7 +135,7 @@ const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
                                         <TD className="whitespace-nowrap text-fg-muted">{url.created_by || '—'}</TD>
                                     )}
                                     <TD>
-                                        <div className="flex items-center justify-end gap-2">
+                                        <div className="flex items-center justify-end gap-1.5 sm:gap-2">
                                             {link && (
                                                 <CopyButton
                                                     value={link}
