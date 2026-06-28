@@ -115,13 +115,14 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                     )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
                     <Button
                         type="button"
                         variant={showFilters || hasActiveFilters ? 'secondary' : 'outline'}
                         onClick={() => setShowFilters((s) => !s)}
                         leftIcon={<SlidersHorizontal className="h-4 w-4" />}
                         aria-expanded={showFilters}
+                        className="w-full sm:w-auto"
                     >
                         Filters
                         {hasActiveFilters && (
@@ -135,6 +136,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                         isLoading={isSearching}
                         disabled={!query.trim()}
                         leftIcon={!isSearching ? <Search className="h-4 w-4" /> : undefined}
+                        className="w-full sm:w-auto"
                     >
                         Search
                     </Button>

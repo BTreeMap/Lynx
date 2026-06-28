@@ -216,9 +216,9 @@ const Dashboard: React.FC = () => {
             />
 
             <main className="mx-auto max-w-6xl space-y-6 px-3 py-6 sm:space-y-8 sm:px-6 sm:py-10">
-                <section>
+                <section className="space-y-1.5">
                     <h1 className="text-xl font-bold tracking-tight text-fg sm:text-3xl">Dashboard</h1>
-                    <p className="mt-1 text-sm text-fg-muted">
+                    <p className="max-w-2xl text-sm text-fg-muted">
                         Create, manage, and track your short links.
                     </p>
                 </section>
@@ -229,6 +229,7 @@ const Dashboard: React.FC = () => {
                         value={stats.count.toLocaleString()}
                         icon={<Link2 className="h-5 w-5" />}
                         tone="primary"
+                        className="h-full"
                         hint={
                             hasMore ? (
                                 <button
@@ -257,6 +258,7 @@ const Dashboard: React.FC = () => {
                         value={stats.totalClicks.toLocaleString()}
                         icon={<MousePointerClick className="h-5 w-5" />}
                         tone="accent"
+                        className="h-full"
                     />
                     <StatCard
                         label="Active / Inactive"
@@ -270,6 +272,7 @@ const Dashboard: React.FC = () => {
                         }
                         icon={<Signal className="h-5 w-5" />}
                         tone="success"
+                        className="h-full"
                     />
                 </section>
 
@@ -279,7 +282,7 @@ const Dashboard: React.FC = () => {
                     <div className="flex flex-wrap items-end justify-between gap-2.5 sm:gap-3">
                         <div>
                             <h2 className="text-lg font-semibold tracking-tight text-fg">Your links</h2>
-                            <p className="text-sm text-fg-muted">
+                            <p className="mt-1 text-sm text-fg-muted">
                                 {activeFilters
                                     ? `Showing results for “${activeFilters.q}”`
                                     : 'All links you have created.'}

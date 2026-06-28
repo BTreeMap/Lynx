@@ -366,24 +366,26 @@ const UrlDetails: React.FC = () => {
     return (
         <div className="min-h-screen bg-bg">
             <AppHeader />
-            <main className="mx-auto max-w-6xl space-y-5 overflow-x-clip px-3 py-6 sm:space-y-6 sm:px-6 sm:py-10">
-                <div>
+            <main className="mx-auto max-w-6xl space-y-6 overflow-x-clip px-3 py-6 sm:space-y-8 sm:px-6 sm:py-10">
+                <section className="space-y-3 sm:space-y-4">
                     <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => navigate('/')}
                         leftIcon={<ArrowLeft className="h-4 w-4" />}
-                        className="-ml-2 mb-3"
+                        className="-ml-2 w-fit"
                     >
                         Back to dashboard
                     </Button>
-                    <h1 className="text-xl font-bold tracking-tight text-fg sm:text-3xl">
-                        Link analytics
-                    </h1>
-                    <p className="mt-1 text-sm text-fg-muted">
-                        Detailed performance and audience insights for your short link.
-                    </p>
-                </div>
+                    <div className="space-y-1.5">
+                        <h1 className="text-xl font-bold tracking-tight text-fg sm:text-3xl">
+                            Link analytics
+                        </h1>
+                        <p className="max-w-2xl text-sm text-fg-muted">
+                            Detailed performance and audience insights for your short link.
+                        </p>
+                    </div>
+                </section>
 
                 {/* Link information */}
                 <Card>
@@ -463,12 +465,13 @@ const UrlDetails: React.FC = () => {
                                     </div>
                                 </div>
 
-                                <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
+                                <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
                                     <StatCard
                                         label="Total clicks"
                                         value={url.clicks.toLocaleString()}
                                         icon={<MousePointerClick className="h-5 w-5" />}
                                         tone="primary"
+                                        className="h-full"
                                     />
                                     <StatCard
                                         label="Status"
@@ -479,20 +482,32 @@ const UrlDetails: React.FC = () => {
                                         }
                                         icon={<Signal className="h-5 w-5" />}
                                         tone={url.is_active ? 'success' : 'neutral'}
+                                        valueClassName="text-base font-medium sm:text-lg"
+                                        className="h-full"
                                     />
                                     <StatCard
                                         label="Created"
                                         value={
-                                            <span className="text-sm font-medium">{formatDate(url.created_at)}</span>
+                                            <span className="text-sm font-medium leading-snug text-fg sm:text-base">
+                                                {formatDate(url.created_at)}
+                                            </span>
                                         }
                                         icon={<CalendarDays className="h-5 w-5" />}
                                         tone="neutral"
+                                        valueClassName="text-base sm:text-lg"
+                                        className="h-full"
                                     />
                                     <StatCard
                                         label="Created by"
-                                        value={<span className="text-base">{url.created_by || '—'}</span>}
+                                        value={
+                                            <span className="block break-all font-mono text-sm font-medium leading-relaxed text-fg-muted sm:text-base">
+                                                {url.created_by || '—'}
+                                            </span>
+                                        }
                                         icon={<UserRound className="h-5 w-5" />}
                                         tone="accent"
+                                        valueClassName="text-base sm:text-lg"
+                                        className="h-full"
                                     />
                                 </div>
                             </>

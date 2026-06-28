@@ -7,6 +7,7 @@ export interface StatCardProps {
     icon?: React.ReactNode;
     hint?: React.ReactNode;
     tone?: 'primary' | 'success' | 'accent' | 'neutral';
+    valueClassName?: string;
     className?: string;
 }
 
@@ -23,11 +24,12 @@ export const StatCard: React.FC<StatCardProps> = ({
     icon,
     hint,
     tone = 'neutral',
+    valueClassName,
     className,
 }) => (
     <div
         className={cn(
-            'flex w-full min-w-0 items-center gap-3 rounded-2xl border border-border bg-surface p-3.5 shadow-soft sm:gap-4 sm:p-5',
+            'grid min-h-full w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-2xl border border-border bg-surface p-3.5 shadow-soft sm:gap-4 sm:p-5',
             className,
         )}
     >
@@ -41,9 +43,14 @@ export const StatCard: React.FC<StatCardProps> = ({
                 {icon}
             </div>
         )}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 space-y-1.5">
             <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">{label}</p>
-            <div className="mt-0.5 break-words text-lg font-semibold tracking-tight text-fg sm:mt-1 sm:text-2xl">
+            <div
+                className={cn(
+                    'break-words text-lg font-semibold leading-tight tracking-tight text-fg sm:text-2xl',
+                    valueClassName,
+                )}
+            >
                 {value}
             </div>
             {hint && <p className="text-xs text-fg-muted">{hint}</p>}
