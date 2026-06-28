@@ -40,6 +40,28 @@ export interface UserInfo {
 export interface AuthModeResponse {
   mode: string;
   short_code_max_length: number;
+  oauth?: OAuthFrontendConfig;
+}
+
+export interface OAuthFrontendConfig {
+  issuer_url: string;
+  client_id: string;
+  scopes: string;
+  redirect_uri: string;
+}
+
+export interface OidcDiscoveryResponse {
+  authorization_endpoint: string;
+  token_endpoint: string;
+}
+
+export interface OidcTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in?: number;
+  id_token?: string;
+  scope?: string;
+  refresh_token?: string;
 }
 
 export interface ErrorResponse {

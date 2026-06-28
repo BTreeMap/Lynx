@@ -1,5 +1,19 @@
 import axios from 'axios';
-import type { ShortenedUrl, CreateUrlRequest, UserInfo, SuccessResponse, AuthModeResponse, PaginatedUrlsResponse, AnalyticsResponse, AnalyticsAggregateResponse, SearchParams, SearchResponse, UrlHistoryEntry } from './types';
+import type {
+  ShortenedUrl,
+  CreateUrlRequest,
+  UserInfo,
+  SuccessResponse,
+  AuthModeResponse,
+  PaginatedUrlsResponse,
+  AnalyticsResponse,
+  AnalyticsAggregateResponse,
+  SearchParams,
+  SearchResponse,
+  UrlHistoryEntry,
+  OidcDiscoveryResponse,
+  OidcTokenResponse,
+} from './types';
 import { encodeShortCodeForApi, normalizeOriginalUrl } from './utils/url';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -7,6 +21,8 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 const api = axios.create({
   baseURL: API_BASE_URL,
 });
+
+const oidcClient = axios.create();
 
 // Add token to all requests if available
 api.interceptors.request.use((config) => {
@@ -18,8 +34,41 @@ api.interceptors.request.use((config) => {
 });
 
 export const apiClient = {
+  getApiBaseUrl(): string {
+    return API_BASE_URL;
+  },
+
   async getAuthMode(): Promise<AuthModeResponse> {
     const { data } = await api.get<AuthModeResponse>('/auth/mode');
+    return data;
+  },
+
+  async getOidcDiscovery(issuerUrl: string): Promise<OidcDiscoveryResponse> {
+    const discoveryUrl = `${issuerUrl.replace(/\/$/, '')}/.well-known/openid-configuration`;
+    const { data } = await oidcClient.get<OidcDiscoveryResponse>(discoveryUrl);
+    return data;
+  },
+
+  async exchangeOidcCode(params: {
+    tokenEndpoint: string;
+    code: string;
+    clientId: string;
+    redirectUri: string;
+    codeVerifier: string;
+  }): Promise<OidcTokenResponse> {
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: params.code,
+      client_id: params.clientId,
+      redirect_uri: params.redirectUri,
+      code_verifier: params.codeVerifier,
+    });
+
+    const { data } = await oidcClient.post<OidcTokenResponse>(params.tokenEndpoint, body, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    });
     return data;
   },
 

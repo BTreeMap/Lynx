@@ -543,6 +543,16 @@ pub async fn get_user_info(
 pub struct AuthModeResponse {
     pub mode: String,
     pub short_code_max_length: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<OAuthFrontendConfig>,
+}
+
+#[derive(Serialize)]
+pub struct OAuthFrontendConfig {
+    pub issuer_url: String,
+    pub client_id: String,
+    pub scopes: String,
+    pub redirect_uri: String,
 }
 
 /// Get the authentication mode configured for this instance
@@ -554,9 +564,17 @@ pub async fn get_auth_mode(State(state): State<Arc<AppState>>) -> Json<AuthModeR
         crate::config::AuthMode::Cloudflare => "cloudflare",
     };
 
+    let oauth = state.config.auth.oauth.as_ref().map(|oauth| OAuthFrontendConfig {
+        issuer_url: oauth.issuer_url.clone(),
+        client_id: oauth.client_id.clone(),
+        scopes: oauth.scopes.clone(),
+        redirect_uri: oauth.redirect_uri.clone(),
+    });
+
     Json(AuthModeResponse {
         mode: mode.to_string(),
         short_code_max_length: state.config.short_code_max_length,
+        oauth,
     })
 }
 

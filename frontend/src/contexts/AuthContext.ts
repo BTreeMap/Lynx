@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { UserInfo } from '../types';
+import type { OAuthFrontendConfig, UserInfo } from '../types';
 
 export interface AuthContextType {
   authMode: string | null;
@@ -7,8 +7,11 @@ export interface AuthContextType {
   userInfo: UserInfo | null;
   isLoading: boolean;
   shortCodeMaxLength: number;
+  oauthConfig: OAuthFrontendConfig | null;
   login: (token: string) => void;
   logout: () => void;
+  startOAuthLogin: () => Promise<void>;
+  completeOAuthLogin: (code: string, state: string) => Promise<void>;
   refreshUserInfo: () => Promise<void>;
 }
 

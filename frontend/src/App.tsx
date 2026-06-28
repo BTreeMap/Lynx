@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './components/AuthProvider';
 import { useAuth } from './hooks/useAuth';
 import Login from './components/Login';
+import OAuthCallback from './components/OAuthCallback';
 import { Logo } from './components/layout/Logo';
 import { Spinner } from './components/ui/Spinner';
 
@@ -34,6 +35,7 @@ const AppContent: React.FC = () => {
     <Suspense fallback={<Splash message="Loading…" />}>
       <Routes>
         <Route path="/" element={isAuthenticated ? <Dashboard /> : <Login />} />
+        <Route path="/auth/callback" element={<OAuthCallback />} />
         <Route
           path="/url/:shortCode"
           element={isAuthenticated ? <UrlDetails /> : <Navigate to="/" replace />}

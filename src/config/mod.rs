@@ -169,6 +169,10 @@ pub struct AuthConfig {
 pub struct OAuthConfig {
     pub issuer_url: String,
     pub audience: String,
+    pub client_id: String,
+    #[serde(default = "OAuthConfig::default_scopes")]
+    pub scopes: String,
+    pub redirect_uri: String,
     #[serde(default)]
     pub jwks_url: Option<String>,
     #[serde(default = "OAuthConfig::default_cache_ttl_secs")]
@@ -259,6 +263,10 @@ impl AnalyticsConfig {
 impl OAuthConfig {
     const fn default_cache_ttl_secs() -> u64 {
         300
+    }
+
+    fn default_scopes() -> String {
+        "openid profile email".to_string()
     }
 }
 
@@ -373,8 +381,13 @@ impl Config {
         let oauth = if matches!(auth_mode, AuthMode::Oauth) {
             let issuer_url = std::env::var("OAUTH_ISSUER_URL")
                 .context("OAUTH_ISSUER_URL must be set when AUTH_MODE=oauth")?;
-            let audience = std::env::var("OAUTH_AUDIENCE")
-                .context("OAUTH_AUDIENCE must be set when AUTH_MODE=oauth")?;
+            let client_id = std::env::var("OAUTH_CLIENT_ID")
+                .context("OAUTH_CLIENT_ID must be set when AUTH_MODE=oauth")?;
+            let audience = std::env::var("OAUTH_AUDIENCE").unwrap_or_else(|_| client_id.clone());
+            let scopes = std::env::var("OAUTH_SCOPES")
+                .unwrap_or_else(|_| OAuthConfig::default_scopes());
+            let redirect_uri = std::env::var("OAUTH_REDIRECT_URI")
+                .context("OAUTH_REDIRECT_URI must be set when AUTH_MODE=oauth")?;
             let jwks_url = std::env::var("OAUTH_JWKS_URL").ok();
             let jwks_cache_ttl_secs = std::env::var("OAUTH_JWKS_CACHE_SECS")
                 .ok()
@@ -384,6 +397,9 @@ impl Config {
             Some(OAuthConfig {
                 issuer_url,
                 audience,
+                client_id,
+                scopes,
+                redirect_uri,
                 jwks_url,
                 jwks_cache_ttl_secs,
             })

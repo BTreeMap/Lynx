@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { ArrowRight, KeyRound, LinkIcon, ShieldCheck, Zap } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { Button } from './ui/Button';
-import { Field, Input } from './ui/Input';
 import { ThemeToggle } from './ui/ThemeToggle';
 import { Logo } from './layout/Logo';
 
@@ -25,13 +24,20 @@ const highlights = [
 ];
 
 const Login: React.FC = () => {
-  const [token, setToken] = useState('');
-  const { login } = useAuth();
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { startOAuthLogin } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (token.trim()) {
-      login(token.trim());
+    setError(null);
+    setIsSigningIn(true);
+
+    try {
+      await startOAuthLogin();
+    } catch (err) {
+      setIsSigningIn(false);
+      setError(err instanceof Error ? err.message : 'Failed to start OAuth login.');
     }
   };
 
@@ -99,56 +105,50 @@ const Login: React.FC = () => {
               </span>
               <h2 className="text-2xl font-bold tracking-tight text-fg">Welcome back</h2>
               <p className="mt-1.5 text-sm text-fg-muted">
-                Enter your OAuth 2.0 bearer token to access your dashboard.
+                Sign in with your OAuth provider to access your dashboard.
               </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              <Field label="Bearer token" htmlFor="token" required>
-                <Input
-                  id="token"
-                  type="password"
-                  autoComplete="off"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder="Paste your OAuth 2.0 bearer token"
-                  required
-                />
-              </Field>
-
               <Button
                 type="submit"
                 size="lg"
                 fullWidth
-                disabled={!token.trim()}
+                isLoading={isSigningIn}
                 rightIcon={<ArrowRight className="h-4 w-4" />}
               >
-                Continue
+                Sign in with OAuth
               </Button>
+
+              {error && (
+                <p className="rounded-xl border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
+                  {error}
+                </p>
+              )}
             </form>
 
             <div className="mt-8 rounded-2xl border border-border bg-surface-2/50 p-5">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
-                How to get a token
+                Authentication flow
               </h3>
               <ol className="mt-3 space-y-2 text-sm text-fg-muted">
                 <li className="flex gap-2.5">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary-soft-fg">
                     1
                   </span>
-                  Obtain a bearer token from your OAuth 2.0 provider.
+                  You are redirected to your OAuth provider to sign in.
                 </li>
                 <li className="flex gap-2.5">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary-soft-fg">
                     2
                   </span>
-                  Paste it into the field above.
+                  Lynx completes PKCE code exchange in your browser.
                 </li>
                 <li className="flex gap-2.5">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-soft text-[11px] font-semibold text-primary-soft-fg">
                     3
                   </span>
-                  It is stored locally in your browser for future visits.
+                  A bearer token is stored locally and sent in HTTP headers.
                 </li>
               </ol>
             </div>
