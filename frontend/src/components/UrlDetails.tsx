@@ -29,6 +29,7 @@ import { formatDate } from '../utils/date';
 import { extractErrorMessage } from '../utils/errorHandling';
 import { useTheme } from '../hooks/useTheme';
 import { AppHeader } from './layout/AppHeader';
+import { PageIntro, PageShell } from './layout/Page';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { CopyButton } from './ui/CopyButton';
@@ -39,7 +40,7 @@ import { EmptyState } from './ui/EmptyState';
 import { Skeleton } from './ui/Skeleton';
 import { StatCard } from './ui/StatCard';
 import { SegmentedControl } from './ui/SegmentedControl';
-import { Card, CardBody, CardHeader, CardTitle } from './ui/Card';
+import { Card, CardBody, CardSectionHeader, CardTitle } from './ui/Card';
 import { Table, TBody, TD, TH, THead, TR, TableScroll } from './ui/Table';
 
 type AggregateDimension = 'country' | 'region' | 'city' | 'asn' | 'hour' | 'day';
@@ -345,7 +346,7 @@ const UrlDetails: React.FC = () => {
         return (
             <div className="min-h-screen bg-bg">
                 <AppHeader />
-                <main className="mx-auto max-w-6xl px-3 py-8 sm:px-6 sm:py-10">
+                <PageShell className="px-3 py-8 sm:px-6 sm:py-10">
                     <Alert tone="error">
                         {error ||
                             (decodedShortCode ? `URL not found: ${decodedShortCode}` : 'Invalid short code')}
@@ -358,7 +359,7 @@ const UrlDetails: React.FC = () => {
                     >
                         Back to dashboard
                     </Button>
-                </main>
+                </PageShell>
             </div>
         );
     }
@@ -366,32 +367,28 @@ const UrlDetails: React.FC = () => {
     return (
         <div className="min-h-screen bg-bg">
             <AppHeader />
-            <main className="mx-auto max-w-6xl space-y-6 overflow-x-clip px-3 py-6 sm:space-y-8 sm:px-6 sm:py-10">
-                <section className="space-y-3 sm:space-y-4">
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => navigate('/')}
-                        leftIcon={<ArrowLeft className="h-4 w-4" />}
-                        className="-ml-2 w-fit"
-                    >
-                        Back to dashboard
-                    </Button>
-                    <div className="space-y-1.5">
-                        <h1 className="text-xl font-bold tracking-tight text-fg sm:text-3xl">
-                            Link analytics
-                        </h1>
-                        <p className="max-w-2xl text-sm text-fg-muted">
-                            Detailed performance and audience insights for your short link.
-                        </p>
-                    </div>
-                </section>
+            <PageShell className="overflow-x-clip">
+                <PageIntro
+                    title="Link analytics"
+                    description="Detailed performance and audience insights for your short link."
+                    actions={
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => navigate('/')}
+                            leftIcon={<ArrowLeft className="h-4 w-4" />}
+                            className="-ml-2 w-fit"
+                        >
+                            Back to dashboard
+                        </Button>
+                    }
+                />
 
                 {/* Link information */}
                 <Card>
-                    <CardHeader className="border-b border-border/70 bg-surface/70">
+                    <CardSectionHeader>
                         <CardTitle>Link information</CardTitle>
-                    </CardHeader>
+                    </CardSectionHeader>
                     <CardBody className="space-y-4 sm:space-y-5">
                         {isLoadingUrl ? (
                             <div className="space-y-3 sm:space-y-4">
@@ -482,7 +479,7 @@ const UrlDetails: React.FC = () => {
                                         }
                                         icon={<Signal className="h-5 w-5" />}
                                         tone={url.is_active ? 'success' : 'neutral'}
-                                        valueClassName="text-base font-medium sm:text-lg"
+                                        valueClassName="min-h-8 text-base font-medium sm:min-h-10 sm:text-lg"
                                         className="h-full"
                                     />
                                     <StatCard
@@ -494,7 +491,7 @@ const UrlDetails: React.FC = () => {
                                         }
                                         icon={<CalendarDays className="h-5 w-5" />}
                                         tone="neutral"
-                                        valueClassName="text-base sm:text-lg"
+                                        valueClassName="min-h-8 items-start text-base sm:min-h-10 sm:text-lg"
                                         className="h-full"
                                     />
                                     <StatCard
@@ -506,8 +503,8 @@ const UrlDetails: React.FC = () => {
                                         }
                                         icon={<UserRound className="h-5 w-5" />}
                                         tone="accent"
-                                        valueClassName="text-base sm:text-lg"
-                                        className="h-full"
+                                        valueClassName="min-h-0 items-start text-base sm:text-lg"
+                                        className="h-full sm:col-span-2 xl:col-span-1"
                                     />
                                 </div>
                             </>
@@ -517,9 +514,9 @@ const UrlDetails: React.FC = () => {
 
                 {/* Destination history */}
                 <Card>
-                    <CardHeader className="border-b border-border/70 bg-surface/70">
+                    <CardSectionHeader>
                         <CardTitle>Destination history</CardTitle>
-                    </CardHeader>
+                    </CardSectionHeader>
                     <CardBody>
                         {isLoadingHistory ? (
                             <div className="space-y-2.5 sm:space-y-3">
@@ -586,15 +583,18 @@ const UrlDetails: React.FC = () => {
 
                 {/* Analytics by dimension */}
                 <Card>
-                    <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-surface/70">
+                    <CardSectionHeader
+                        actions={
+                            <SegmentedControl
+                                ariaLabel="Group analytics by"
+                                options={DIMENSIONS}
+                                value={selectedDimension}
+                                onChange={setSelectedDimension}
+                            />
+                        }
+                    >
                         <CardTitle>Analytics by dimension</CardTitle>
-                        <SegmentedControl
-                            ariaLabel="Group analytics by"
-                            options={DIMENSIONS}
-                            value={selectedDimension}
-                            onChange={setSelectedDimension}
-                        />
-                    </CardHeader>
+                    </CardSectionHeader>
                     <CardBody>
                         {isLoadingAggregate ? (
                             <Skeleton className="h-72 w-full" />
@@ -751,9 +751,9 @@ const UrlDetails: React.FC = () => {
 
                 {/* Recent activity */}
                 <Card>
-                    <CardHeader className="border-b border-border/70 bg-surface/70">
+                    <CardSectionHeader>
                         <CardTitle>Recent activity</CardTitle>
-                    </CardHeader>
+                    </CardSectionHeader>
                     <CardBody>
                         {isLoadingAnalytics ? (
                             <Skeleton className="h-64 w-full" />
@@ -792,7 +792,7 @@ const UrlDetails: React.FC = () => {
                         )}
                     </CardBody>
                 </Card>
-            </main>
+            </PageShell>
 
             <Dialog
                 open={isEditOpen}

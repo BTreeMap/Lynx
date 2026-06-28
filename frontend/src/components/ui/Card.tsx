@@ -27,6 +27,29 @@ export const CardHeader: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({
     </div>
 );
 
+export interface CardSectionHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
+    actions?: React.ReactNode;
+}
+
+export const CardSectionHeader: React.FC<CardSectionHeaderProps> = ({
+    actions,
+    className,
+    children,
+    ...props
+}) => (
+    <CardHeader
+        className={cn(
+            'border-b border-border/70 bg-surface/70',
+            actions && 'flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3',
+            className,
+        )}
+        {...props}
+    >
+        <div className="min-w-0">{children}</div>
+        {actions && <div className="min-w-0">{actions}</div>}
+    </CardHeader>
+);
+
 export const CardTitle: React.FC<React.HTMLAttributes<HTMLHeadingElement>> = ({
     className,
     children,

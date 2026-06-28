@@ -47,7 +47,7 @@ export const StatCard: React.FC<StatCardProps> = ({
             <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">{label}</p>
             <div
                 className={cn(
-                    'break-words text-lg font-semibold leading-tight tracking-tight text-fg sm:text-2xl',
+                    'flex min-h-8 items-center break-words text-lg font-semibold leading-tight tracking-tight text-fg sm:min-h-10 sm:text-2xl',
                     valueClassName,
                 )}
             >

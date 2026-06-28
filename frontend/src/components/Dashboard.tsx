@@ -8,6 +8,7 @@ import CreateUrlForm from './CreateUrlForm';
 import SearchPanel, { type SearchFilters } from './SearchPanel';
 import UrlList from './UrlList';
 import { AppHeader } from './layout/AppHeader';
+import { PageIntro, PageShell } from './layout/Page';
 import { Button } from './ui/Button';
 import { Alert } from './ui/Alert';
 import { EmptyState } from './ui/EmptyState';
@@ -215,13 +216,11 @@ const Dashboard: React.FC = () => {
                 }
             />
 
-            <main className="mx-auto max-w-6xl space-y-6 px-3 py-6 sm:space-y-8 sm:px-6 sm:py-10">
-                <section className="space-y-1.5">
-                    <h1 className="text-xl font-bold tracking-tight text-fg sm:text-3xl">Dashboard</h1>
-                    <p className="max-w-2xl text-sm text-fg-muted">
-                        Create, manage, and track your short links.
-                    </p>
-                </section>
+            <PageShell>
+                <PageIntro
+                    title="Dashboard"
+                    description="Create, manage, and track your short links."
+                />
 
                 <section className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
                     <StatCard
@@ -375,7 +374,7 @@ const Dashboard: React.FC = () => {
                         </>
                     )}
                 </section>
-            </main>
+            </PageShell>
         </div>
     );
 };
