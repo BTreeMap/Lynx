@@ -366,7 +366,7 @@ const UrlDetails: React.FC = () => {
     return (
         <div className="min-h-screen bg-bg">
             <AppHeader />
-            <main className="mx-auto max-w-6xl space-y-6 px-4 py-8 sm:px-6 sm:py-10">
+            <main className="mx-auto max-w-6xl space-y-6 overflow-x-clip px-4 py-8 sm:px-6 sm:py-10">
                 <div>
                     <Button
                         variant="ghost"
@@ -387,7 +387,7 @@ const UrlDetails: React.FC = () => {
 
                 {/* Link information */}
                 <Card>
-                    <CardHeader>
+                    <CardHeader className="border-b border-border/70 bg-surface/70">
                         <CardTitle>Link information</CardTitle>
                     </CardHeader>
                     <CardBody className="space-y-5">
@@ -414,10 +414,10 @@ const UrlDetails: React.FC = () => {
                                                     href={shortLink}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    className="inline-flex max-w-full items-center gap-1.5 break-all font-medium text-primary hover:underline"
+                                                    className="inline-flex max-w-full items-start gap-1.5 break-all font-medium text-primary hover:underline"
                                                 >
-                                                    <span className="break-all">{shortLink}</span>
-                                                    <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                                                    <span className="break-all leading-snug">{shortLink}</span>
+                                                    <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-60" />
                                                 </a>
                                             ) : (
                                                 <span className="break-all font-mono text-sm text-fg">
@@ -431,6 +431,7 @@ const UrlDetails: React.FC = () => {
                                                 variant="secondary"
                                                 size="md"
                                                 idleLabel="Copy link"
+                                                className="w-full sm:w-auto"
                                             />
                                         )}
                                     </div>
@@ -455,7 +456,7 @@ const UrlDetails: React.FC = () => {
                                             href={url.original_url}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="break-all text-sm text-fg-muted hover:text-fg hover:underline"
+                                            className="block break-all text-sm text-fg-muted hover:text-fg hover:underline"
                                         >
                                             {url.original_url}
                                         </a>
@@ -501,7 +502,7 @@ const UrlDetails: React.FC = () => {
 
                 {/* Destination history */}
                 <Card>
-                    <CardHeader>
+                    <CardHeader className="border-b border-border/70 bg-surface/70">
                         <CardTitle>Destination history</CardTitle>
                     </CardHeader>
                     <CardBody>
@@ -570,7 +571,7 @@ const UrlDetails: React.FC = () => {
 
                 {/* Analytics by dimension */}
                 <Card>
-                    <CardHeader className="flex-row flex-wrap items-center justify-between gap-3">
+                    <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-surface/70">
                         <CardTitle>Analytics by dimension</CardTitle>
                         <SegmentedControl
                             ariaLabel="Group analytics by"
@@ -625,8 +626,8 @@ const UrlDetails: React.FC = () => {
                                                                     entry.isOther
                                                                         ? chartPalette.other
                                                                         : chartPalette.series[
-                                                                              index % chartPalette.series.length
-                                                                          ]
+                                                                        index % chartPalette.series.length
+                                                                        ]
                                                                 }
                                                             />
                                                         ))}
@@ -659,8 +660,8 @@ const UrlDetails: React.FC = () => {
                                                                     entry.isOther
                                                                         ? chartPalette.other
                                                                         : chartPalette.series[
-                                                                              index % chartPalette.series.length
-                                                                          ]
+                                                                        index % chartPalette.series.length
+                                                                        ]
                                                                 }
                                                             />
                                                         ))}
@@ -735,7 +736,7 @@ const UrlDetails: React.FC = () => {
 
                 {/* Recent activity */}
                 <Card>
-                    <CardHeader>
+                    <CardHeader className="border-b border-border/70 bg-surface/70">
                         <CardTitle>Recent activity</CardTitle>
                     </CardHeader>
                     <CardBody>

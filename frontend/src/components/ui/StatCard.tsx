@@ -27,7 +27,7 @@ export const StatCard: React.FC<StatCardProps> = ({
 }) => (
     <div
         className={cn(
-            'flex items-center gap-4 rounded-2xl border border-border bg-surface p-4 shadow-soft sm:p-5',
+            'flex w-full min-w-0 items-center gap-4 rounded-2xl border border-border bg-surface p-4 shadow-soft sm:p-5',
             className,
         )}
     >
@@ -41,9 +41,11 @@ export const StatCard: React.FC<StatCardProps> = ({
                 {icon}
             </div>
         )}
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
             <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">{label}</p>
-            <p className="mt-0.5 truncate text-2xl font-semibold tracking-tight text-fg">{value}</p>
+            <div className="mt-1 break-words text-xl font-semibold tracking-tight text-fg sm:text-2xl">
+                {value}
+            </div>
             {hint && <p className="text-xs text-fg-muted">{hint}</p>}
         </div>
     </div>

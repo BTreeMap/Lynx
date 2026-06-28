@@ -57,6 +57,8 @@
 ---------------------------------------------------------------------------- */
 :root {
   --bg: #f5f6f9;
+  --bg-accent-1: rgba(65, 103, 136, 0.10);
+  --bg-accent-2: rgba(58, 162, 149, 0.08);
   --surface: #ffffff;
   --surface-2: #eef0f5;
   --elevated: #ffffff;
@@ -110,6 +112,8 @@
 
 .dark {
   --bg: #141e27;
+  --bg-accent-1: rgba(110, 142, 171, 0.16);
+  --bg-accent-2: rgba(87, 189, 176, 0.10);
   --surface: #1f2e3b;
   --surface-2: #293d4f;
   --elevated: #1f2e3b;
@@ -194,6 +198,10 @@
     margin: 0;
     min-height: 100vh;
     background-color: var(--bg);
+    background-image:
+      radial-gradient(1200px 620px at 8% -10%, var(--bg-accent-1), transparent 58%),
+      radial-gradient(900px 560px at 100% -18%, var(--bg-accent-2), transparent 54%);
+    background-attachment: fixed;
     color: var(--fg);
     font-family: var(--font-sans);
     line-height: 1.5;

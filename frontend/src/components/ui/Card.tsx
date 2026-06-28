@@ -8,7 +8,7 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 export const Card: React.FC<CardProps> = ({ as: Tag = 'div', className, children, ...props }) => (
     <Tag
         className={cn(
-            'rounded-2xl border border-border bg-surface shadow-soft',
+            'min-w-0 overflow-hidden rounded-2xl border border-border bg-surface shadow-soft',
             className,
         )}
         {...props}
