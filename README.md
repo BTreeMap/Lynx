@@ -197,7 +197,10 @@ docker run -d \
   -e DATABASE_URL=postgresql://user:password@postgres:5432/lynx \
   -e AUTH_MODE=oauth \
   -e OAUTH_ISSUER_URL=https://auth.example.com/realms/lynx \
-  -e OAUTH_AUDIENCE=lynx-api \
+  -e OAUTH_CLIENT_ID=lynx-frontend \
+  -e OAUTH_REDIRECT_URI=https://lynx.example.com/auth/callback \
+  -e OAUTH_SCOPES="openid profile email" \
+  -e OAUTH_AUDIENCE=lynx-frontend \
   -e API_HOST=0.0.0.0 \
   -e REDIRECT_HOST=0.0.0.0 \
   ghcr.io/btreemap/lynx:stable
@@ -257,7 +260,10 @@ services:
       DATABASE_URL: postgresql://lynx:secure_password@postgres:5432/lynx
       AUTH_MODE: oauth
       OAUTH_ISSUER_URL: https://auth.example.com
-      OAUTH_AUDIENCE: lynx-api
+      OAUTH_CLIENT_ID: lynx-frontend
+      OAUTH_REDIRECT_URI: https://lynx.example.com/auth/callback
+      OAUTH_SCOPES: openid profile email
+      OAUTH_AUDIENCE: lynx-frontend
       API_HOST: 0.0.0.0
       REDIRECT_HOST: 0.0.0.0
     depends_on:
@@ -282,15 +288,23 @@ All API endpoints are accessible without authentication. All users are automatic
 
 ### OAuth 2.0
 
-Validates JWT Bearer tokens from any OpenID Connect provider (Keycloak, Auth0, Okta, etc.):
+Uses frontend-managed OIDC Authorization Code + PKCE login and validates bearer
+JWTs from any OpenID Connect provider (Keycloak, Auth0, Okta, etc.):
 
 ```bash
 AUTH_MODE=oauth
 OAUTH_ISSUER_URL=https://auth.example.com/realms/lynx
-OAUTH_AUDIENCE=lynx-api
+OAUTH_CLIENT_ID=lynx-frontend
+OAUTH_REDIRECT_URI=http://localhost:8080/auth/callback
+OAUTH_SCOPES=openid profile email
+# Optional: defaults to OAUTH_CLIENT_ID when omitted
+# OAUTH_AUDIENCE=lynx-frontend
 # Optional: OAUTH_JWKS_URL (if not using OIDC discovery)
 # Optional: OAUTH_JWKS_CACHE_SECS=300
 ```
+
+The frontend starts the OAuth login redirect and stores the resulting bearer
+token in local storage. API requests continue using the `Authorization` header.
 
 API clients must include a valid Bearer token:
 

@@ -51,10 +51,11 @@ The built files will be in the `dist` directory.
 
 To use the application:
 
-1. Obtain an OAuth 2.0 bearer token from your OAuth provider
-2. Enter the token in the login page
-3. The token will be stored in your browser's localStorage
-4. All API requests will include this token in the Authorization header
+1. Click "Sign in with OAuth" on the login page
+2. Complete authentication with your OpenID Connect provider
+3. Return to the frontend callback route for PKCE code exchange
+4. A bearer token is stored in localStorage
+5. All API requests include this token in the Authorization header
 
 ## Admin Features
 
