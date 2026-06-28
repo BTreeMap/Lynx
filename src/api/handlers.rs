@@ -564,12 +564,17 @@ pub async fn get_auth_mode(State(state): State<Arc<AppState>>) -> Json<AuthModeR
         crate::config::AuthMode::Cloudflare => "cloudflare",
     };
 
-    let oauth = state.config.auth.oauth.as_ref().map(|oauth| OAuthFrontendConfig {
-        issuer_url: oauth.issuer_url.clone(),
-        client_id: oauth.client_id.clone(),
-        scopes: oauth.scopes.clone(),
-        redirect_uri: oauth.redirect_uri.clone(),
-    });
+    let oauth = state
+        .config
+        .auth
+        .oauth
+        .as_ref()
+        .map(|oauth| OAuthFrontendConfig {
+            issuer_url: oauth.issuer_url.clone(),
+            client_id: oauth.client_id.clone(),
+            scopes: oauth.scopes.clone(),
+            redirect_uri: oauth.redirect_uri.clone(),
+        });
 
     Json(AuthModeResponse {
         mode: mode.to_string(),

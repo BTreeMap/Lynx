@@ -384,8 +384,8 @@ impl Config {
             let client_id = std::env::var("OAUTH_CLIENT_ID")
                 .context("OAUTH_CLIENT_ID must be set when AUTH_MODE=oauth")?;
             let audience = std::env::var("OAUTH_AUDIENCE").unwrap_or_else(|_| client_id.clone());
-            let scopes = std::env::var("OAUTH_SCOPES")
-                .unwrap_or_else(|_| OAuthConfig::default_scopes());
+            let scopes =
+                std::env::var("OAUTH_SCOPES").unwrap_or_else(|_| OAuthConfig::default_scopes());
             let redirect_uri = std::env::var("OAUTH_REDIRECT_URI")
                 .context("OAUTH_REDIRECT_URI must be set when AUTH_MODE=oauth")?;
             let jwks_url = std::env::var("OAUTH_JWKS_URL").ok();
