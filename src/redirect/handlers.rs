@@ -78,7 +78,7 @@ pub async fn redirect_url_with_analytics(
                 .analytics
                 .as_ref()
                 .expect("analytics handler requires analytics runtime")
-                .record(Arc::clone(&url.analytics_code), &headers, addr.ip());
+                .record(url.analytics_code(), &headers, addr.ip());
             let response = redirect_response(&state, &url);
             buffer_click(&state, code);
             response
@@ -120,7 +120,7 @@ pub async fn redirect_url_with_analytics_and_timing(
                 .analytics
                 .as_ref()
                 .expect("analytics handler requires analytics runtime")
-                .record(Arc::clone(&url.analytics_code), &headers, addr.ip());
+                .record(url.analytics_code(), &headers, addr.ip());
             let response =
                 timed_redirect_response(&state, &url, metadata, handler_start, request_start);
             buffer_click(&state, code);
@@ -158,7 +158,7 @@ fn accept_redirect(
     let Some(target) = target else {
         return Err((StatusCode::NOT_FOUND, "URL not found"));
     };
-    if !target.url.is_active {
+    if !target.is_active() {
         return Err((StatusCode::GONE, "This link has been deactivated"));
     }
 
@@ -217,14 +217,15 @@ fn timed_redirect_response(
 }
 
 fn location_header(target: &RedirectTarget) -> Option<HeaderValue> {
-    if target.location.is_none() {
+    let location = target.location();
+    if location.is_none() {
         tracing::error!(
-            short_code = %target.url.short_code,
-            url = %target.url.original_url,
+            short_code = %target.short_code(),
+            url = %target.original_url(),
             "Failed to create Location header - URL contains invalid characters"
         );
     }
-    target.location.clone()
+    location
 }
 
 fn internal_error() -> Response {

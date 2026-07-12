@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use dashmap::DashMap;
 use divan::{black_box, Bencher};
+use lynx::models::ShortenedUrl;
 use lynx::storage::{LookupMetadata, LookupResult};
 use tokio::sync::mpsc;
 
@@ -26,6 +27,42 @@ static LONG_LOCATION: LazyLock<HeaderValue> =
 static SHORT_CODE: LazyLock<String> = LazyLock::new(|| "abc12345".to_owned());
 static SHARED_SHORT_CODE: LazyLock<Arc<str>> = LazyLock::new(|| Arc::from(SHORT_CODE.as_str()));
 static MAX_LENGTH_CODE: LazyLock<String> = LazyLock::new(|| "x".repeat(50));
+static CACHED_PROJECTION: LazyLock<Arc<BenchmarkCachedProjection>> = LazyLock::new(|| {
+    Arc::new(BenchmarkCachedProjection {
+        url: Arc::new(ShortenedUrl {
+            id: 1,
+            short_code: SHORT_CODE.clone(),
+            original_url: SHORT_DESTINATION.to_owned(),
+            created_at: 0,
+            created_by: None,
+            clicks: 0,
+            is_active: true,
+        }),
+        location: (*SHORT_LOCATION).clone(),
+        analytics_code: Arc::clone(&*SHARED_SHORT_CODE),
+    })
+});
+
+/// Mirrors the relevant ownership shape of the cached redirect projection.
+struct BenchmarkCachedProjection {
+    url: Arc<ShortenedUrl>,
+    location: HeaderValue,
+    analytics_code: Arc<str>,
+}
+
+/// The projection shape used before `RedirectTarget` retained the cache entry.
+#[allow(dead_code)]
+struct ClonedRedirectProjection {
+    url: Arc<ShortenedUrl>,
+    location: HeaderValue,
+    analytics_code: Arc<str>,
+}
+
+/// The projection shape used by the current lean redirect path.
+#[allow(dead_code)]
+struct RetainedRedirectProjection {
+    cached: Arc<BenchmarkCachedProjection>,
+}
 
 fn main() {
     divan::main();
@@ -74,6 +111,23 @@ fn short_code_clone_max_length() {
 #[divan::bench]
 fn analytics_short_code_arc_clone() {
     black_box(Arc::clone(black_box(&*SHARED_SHORT_CODE)));
+}
+
+#[divan::bench]
+fn redirect_projection_clone_components() {
+    let cached = Arc::clone(&CACHED_PROJECTION);
+    black_box(ClonedRedirectProjection {
+        url: Arc::clone(&cached.url),
+        location: cached.location.clone(),
+        analytics_code: Arc::clone(&cached.analytics_code),
+    });
+}
+
+#[divan::bench]
+fn redirect_projection_retain_cache_entry() {
+    black_box(RetainedRedirectProjection {
+        cached: Arc::clone(&CACHED_PROJECTION),
+    });
 }
 
 #[divan::bench]

@@ -10,9 +10,9 @@ use dashmap::DashMap;
 use moka::future::Cache;
 use std::collections::HashMap;
 use std::num::NonZeroU64;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, mpsc::error::TrySendError, Mutex};
+use tokio::sync::{mpsc, mpsc::error::TrySendError};
 use tokio::task::JoinHandle;
 use tokio::time;
 
@@ -245,20 +245,41 @@ impl CachedUrl {
             url,
         })
     }
-
-    fn redirect_target(&self) -> RedirectTarget {
-        RedirectTarget {
-            url: Arc::clone(&self.url),
-            location: self.location.clone(),
-            analytics_code: Arc::clone(&self.analytics_code),
-        }
-    }
 }
 
+/// An immutable redirect projection retained directly from the cache.
+///
+/// Holding the cache entry avoids separately cloning its URL model and
+/// analytics-code allocations for every successful redirect. The response still
+/// receives an owned header value because Axum must own response headers.
 pub struct RedirectTarget {
-    pub url: Arc<ShortenedUrl>,
-    pub location: Option<HeaderValue>,
-    pub analytics_code: Arc<str>,
+    cached: Arc<CachedUrl>,
+}
+
+impl RedirectTarget {
+    fn new(cached: Arc<CachedUrl>) -> Self {
+        Self { cached }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.cached.url.is_active
+    }
+
+    pub fn short_code(&self) -> &str {
+        &self.cached.url.short_code
+    }
+
+    pub fn original_url(&self) -> &str {
+        &self.cached.url.original_url
+    }
+
+    pub fn location(&self) -> Option<HeaderValue> {
+        self.cached.location.clone()
+    }
+
+    pub fn analytics_code(&self) -> Arc<str> {
+        Arc::clone(&self.cached.analytics_code)
+    }
 }
 
 pub struct RedirectLookup {
@@ -305,8 +326,12 @@ impl CachedStorage {
 
     /// Flush buffered clicks and wait for the long-lived actor to stop.
     pub async fn shutdown(&self) {
-        let mut actor_handle = self.actor_handle.lock().await;
-        let Some(actor_handle) = actor_handle.take() else {
+        let actor_handle = self
+            .actor_handle
+            .lock()
+            .expect("click actor handle mutex poisoned")
+            .take();
+        let Some(actor_handle) = actor_handle else {
             return;
         };
 
@@ -345,17 +370,14 @@ impl CachedStorage {
     }
 
     pub async fn get_redirect(&self, short_code: &str) -> Result<Option<RedirectTarget>> {
-        Ok(self
-            .get_cached(short_code)
-            .await?
-            .map(|cached| cached.redirect_target()))
+        Ok(self.get_cached(short_code).await?.map(RedirectTarget::new))
     }
 
     pub async fn get_redirect_with_metadata(&self, short_code: &str) -> Result<RedirectLookup> {
         let cache_start = Instant::now();
         if let Some(cached) = self.read_cache.get(short_code).await {
             return Ok(RedirectLookup {
-                target: cached.map(|cached| cached.redirect_target()),
+                target: cached.map(RedirectTarget::new),
                 metadata: LookupMetadata {
                     cache_hit: true,
                     cache_duration: Some(cache_start.elapsed()),
@@ -365,10 +387,7 @@ impl CachedStorage {
         }
         let cache_duration = cache_start.elapsed();
         let db_start = Instant::now();
-        let target = self
-            .get_cached(short_code)
-            .await?
-            .map(|cached| cached.redirect_target());
+        let target = self.get_cached(short_code).await?.map(RedirectTarget::new);
 
         Ok(RedirectLookup {
             target,

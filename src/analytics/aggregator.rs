@@ -12,9 +12,9 @@
 use dashmap::DashMap;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{mpsc, mpsc::error::TrySendError, Mutex, Notify};
+use tokio::sync::{mpsc, mpsc::error::TrySendError, Notify};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
@@ -28,6 +28,33 @@ enum ActorMessage {
     RecordEvent(AnalyticsEvent),
     /// Shutdown signal - flush all data
     Shutdown,
+}
+
+/// Shared lifecycle capability for the flush task.
+///
+/// A flush task only exits after observing `requested`; `Notify` wakes it
+/// promptly rather than making graceful shutdown wait for its interval.
+struct ShutdownSignal {
+    requested: AtomicBool,
+    notify: Notify,
+}
+
+impl ShutdownSignal {
+    fn new() -> Self {
+        Self {
+            requested: AtomicBool::new(false),
+            notify: Notify::new(),
+        }
+    }
+
+    fn request(&self) {
+        self.requested.store(true, Ordering::Release);
+        self.notify.notify_waiters();
+    }
+
+    fn is_requested(&self) -> bool {
+        self.requested.load(Ordering::Acquire)
+    }
 }
 
 fn enqueue_event(
@@ -146,8 +173,7 @@ pub struct AnalyticsAggregator {
     /// Shared event buffer (Layer 2) for concurrent flush access
     shared_buffer: Arc<DashMap<Arc<str>, Vec<AnalyticsEvent>>>,
 
-    shutdown: Arc<AtomicBool>,
-    shutdown_notify: Arc<Notify>,
+    shutdown: Arc<ShutdownSignal>,
     actor_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -155,8 +181,7 @@ impl AnalyticsAggregator {
     /// Create a new analytics aggregator with configurable parameters
     pub fn new_with_config(buffer_size: usize, fast_flush_interval_ms: u64) -> Self {
         let (actor_tx, actor_rx) = mpsc::channel(buffer_size);
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let shutdown_notify = Arc::new(Notify::new());
+        let shutdown = Arc::new(ShutdownSignal::new());
         let shared_buffer = Arc::new(DashMap::new());
 
         // Spawn the analytics actor
@@ -176,7 +201,6 @@ impl AnalyticsAggregator {
             actor_tx,
             shared_buffer,
             shutdown,
-            shutdown_notify,
             actor_handle: Mutex::new(Some(actor_handle)),
         }
     }
@@ -279,7 +303,6 @@ impl AnalyticsAggregator {
         let aggregates = Arc::clone(&self.aggregates);
         let shared_buffer = Arc::clone(&self.shared_buffer);
         let shutdown = Arc::clone(&self.shutdown);
-        let shutdown_notify = Arc::clone(&self.shutdown_notify);
 
         tokio::spawn(async move {
             let mut interval =
@@ -288,7 +311,7 @@ impl AnalyticsAggregator {
             loop {
                 tokio::select! {
                     _ = interval.tick() => {}
-                    _ = shutdown_notify.notified() => {}
+                    _ = shutdown.notify.notified() => {}
                 }
 
                 // Without GeoIP, preserve events using the explicit unknown
@@ -341,7 +364,7 @@ impl AnalyticsAggregator {
                     }
                 }
 
-                if shutdown.load(Ordering::Acquire) {
+                if shutdown.is_requested() {
                     if flush_failed {
                         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         continue;
@@ -375,7 +398,6 @@ impl AnalyticsAggregator {
         let shared_buffer = Arc::clone(&self.shared_buffer);
         let aggregates = Arc::clone(&self.aggregates);
         let shutdown = Arc::clone(&self.shutdown);
-        let shutdown_notify = Arc::clone(&self.shutdown_notify);
 
         tokio::spawn(async move {
             let mut interval =
@@ -384,7 +406,7 @@ impl AnalyticsAggregator {
             loop {
                 tokio::select! {
                     _ = interval.tick() => {}
-                    _ = shutdown_notify.notified() => {}
+                    _ = shutdown.notify.notified() => {}
                 }
 
                 // Drain events from shared buffer (Layer 2) and process with GeoIP
@@ -444,7 +466,7 @@ impl AnalyticsAggregator {
                     }
                 }
 
-                if shutdown.load(Ordering::Acquire) {
+                if shutdown.is_requested() {
                     if flush_failed {
                         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         continue;
@@ -562,15 +584,18 @@ impl AnalyticsAggregator {
 
     /// Signal shutdown to the flush task and actor
     pub async fn shutdown(&self) {
-        let mut actor_handle = self.actor_handle.lock().await;
-        if let Some(actor_handle) = actor_handle.take() {
+        let actor_handle = self
+            .actor_handle
+            .lock()
+            .expect("analytics actor handle mutex poisoned")
+            .take();
+        if let Some(actor_handle) = actor_handle {
             let _ = self.actor_tx.send(ActorMessage::Shutdown).await;
             if let Err(error) = actor_handle.await {
                 tracing::error!(%error, "analytics actor panicked during shutdown");
             }
         }
-        self.shutdown.store(true, Ordering::Release);
-        self.shutdown_notify.notify_waiters();
+        self.shutdown.request();
     }
 
     /// Get the current number of aggregated entries

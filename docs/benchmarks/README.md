@@ -29,6 +29,7 @@ cargo bench --bench redirect_hot_path
 |---|---|
 | `short_code_clone_*` / `short_code_transfer_*` | What allocation cost is avoided by transferring Axum's owned path string? |
 | `analytics_short_code_arc_clone` | What is the isolated cost of sharing a cache-resident analytics code instead of allocating per event? |
+| `redirect_projection_*` | How much local work is avoided by retaining one cached projection instead of cloning each of its shared components? |
 | `click_enqueue_bounded_available` | What is the uncontended cost of ownership transfer through a bounded Tokio channel? |
 | `click_enqueue_full_merge_existing` | What is the synchronous lossless fallback cost when that channel is saturated? |
 | `plain_lookup_result_shape` / `measured_lookup_result_shape` | What local work is removed when timing metadata is disabled? |

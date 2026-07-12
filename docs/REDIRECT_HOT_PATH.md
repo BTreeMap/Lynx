@@ -77,6 +77,37 @@ normal path is message passing and actor-local aggregation.
 No global mutex is acquired per redirect. Locks used for graceful shutdown are
 not touched by request handling.
 
+## Ownership and synchronization audit
+
+- `Arc<RedirectState>` is retained because Axum clones extracted route state per
+  request. One outer `Arc` is cheaper and clearer than cloning its storage and
+  optional analytics members independently.
+- `Arc<dyn Storage>` and `Arc<DashMap<...>>` express real `Send + 'static`
+  ownership shared by the long-lived click actor, its asynchronous database
+  flushes, and the storage facade. They are cloned at startup or on a periodic
+  flush, not by successful lean redirects.
+- A cache hit retains one `Arc<CachedUrl>` through `RedirectTarget`. It does
+  not clone the entry's `Arc<ShortenedUrl>` or analytics `Arc<str>` unless the
+  selected handler actually records analytics. This removes two unrelated
+  atomic reference-count operations from lean redirect construction.
+- `Arc<str>` remains the event's ownership boundary: the bounded analytics
+  queue can outlive both the request and a cache eviction, without allocating a
+  new short-code string for every access record. It is a deliberate tradeoff;
+  cross-core contention on one viral code's reference count must be evaluated
+  under representative PostgreSQL load rather than inferred from microbenchmarks.
+- Actor-handle mutexes are lifecycle-only `std::sync::Mutex` values. Their
+  guards are dropped before signaling or awaiting actors; no request obtains
+  either lock. The analytics shutdown flag and notification are one shared
+  capability so the flush task cannot observe an unrelated wakeup state.
+- `DashMap` locking occurs only on click/analytics queue saturation or background
+  flushes. It is not part of the normal bounded-channel serving path.
+
+There is deliberately no `Arc<Mutex<T>>` in the redirect or analytics serving
+path. An `Arc` makes a value shareable; a mutex makes mutation serial. Combining
+them is appropriate only when independently owned tasks must synchronously
+serialize a mutable resource. The request path instead transfers ownership to
+one actor, which preserves the single-writer invariant without a global lock.
+
 ## Remaining optimization plan
 
 1. Split oversized cache and analytics modules into cohesive actor/cache modules.
