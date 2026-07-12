@@ -499,13 +499,19 @@ async fn run_server() -> Result<()> {
     // Initialize storage
     let base_storage: Arc<dyn Storage> = match config.database.backend {
         DatabaseBackend::Sqlite => {
-            info!("Using SQLite storage: {}", config.database.url);
+            info!(
+                max_connections = config.database.max_connections,
+                "Using SQLite storage"
+            );
             Arc::new(
                 SqliteStorage::new(&config.database.url, config.database.max_connections).await?,
             )
         }
         DatabaseBackend::Postgres => {
-            info!("Using PostgreSQL storage: {}", config.database.url);
+            info!(
+                max_connections = config.database.max_connections,
+                "Using PostgreSQL storage"
+            );
             Arc::new(
                 PostgresStorage::new(&config.database.url, config.database.max_connections).await?,
             )
