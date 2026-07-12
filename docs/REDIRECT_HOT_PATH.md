@@ -97,8 +97,9 @@ not touched by request handling.
   under representative PostgreSQL load rather than inferred from microbenchmarks.
 - Actor-handle mutexes are lifecycle-only `std::sync::Mutex` values. Their
   guards are dropped before signaling or awaiting actors; no request obtains
-  either lock. The analytics shutdown flag and notification are one shared
-  capability so the flush task cannot observe an unrelated wakeup state.
+  either lock. Analytics shutdown uses a Tokio watch channel, whose stateful
+  notification cannot lose a request between checking state and awaiting a
+  wakeup.
 - `DashMap` locking occurs only on click/analytics queue saturation or background
   flushes. It is not part of the normal bounded-channel serving path.
 

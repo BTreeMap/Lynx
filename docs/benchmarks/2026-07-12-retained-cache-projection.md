@@ -55,6 +55,8 @@ throughput claim.
 - The lifecycle mutexes do not appear in these cases because graceful shutdown
   is not a serving-path operation. They use a synchronous short critical section
   only to transfer a `JoinHandle`; the guard is released before any `.await`.
+  A stateful Tokio watch channel prevents shutdown requests from being lost
+  between a flush task's state check and its next wait.
 
 PostgreSQL 18 throughput, tail latency, and flamegraphs remain the authority for
 keeping this optimization.
