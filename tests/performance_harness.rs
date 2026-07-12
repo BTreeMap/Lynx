@@ -30,7 +30,7 @@ use serde_json::json;
 use tokio::net::TcpListener;
 use tokio::task::{JoinHandle, JoinSet};
 
-use profiling::{FlamegraphConfig, ProfileScenario, ProfileSession};
+use profiling::{FlamegraphConfig, ProfileMetric, ProfileScenario, ProfileSession};
 
 const SEED_URL_COUNT: usize = 20;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -317,8 +317,9 @@ fn harness_config(database_url: String) -> Config {
 async fn representative_hot_path_flamegraphs() -> Result<()> {
     let config = FlamegraphConfig::from_env()?;
     let harness = Harness::start().await?;
+    let mut metrics = Vec::new();
 
-    for scenario in ProfileScenario::ALL {
+    for &scenario in config.scenarios() {
         harness.seed(scenario).await?;
         match scenario {
             ProfileScenario::RedirectCached => harness.warm_redirect(scenario).await?,
@@ -353,9 +354,11 @@ async fn representative_hot_path_flamegraphs() -> Result<()> {
             snapshot.total,
             snapshot.requests_per_second
         );
+        metrics.push(ProfileMetric::new(&config, scenario, &snapshot));
     }
 
     config.write_guide()?;
+    config.write_metrics(&metrics)?;
 
     Ok(())
 }
@@ -370,7 +373,7 @@ mod tests {
     #[test]
     fn scenario_concurrency_is_nonzero() {
         let config = FlamegraphConfig::default();
-        for scenario in ProfileScenario::ALL {
+        for &scenario in config.scenarios() {
             assert!(config.concurrency(scenario) >= NonZeroUsize::MIN);
         }
     }

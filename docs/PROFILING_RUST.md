@@ -42,6 +42,7 @@ values fail before either server starts:
 | Variable | Default | Meaning |
 |---|---:|---|
 | `PERF_FLAMEGRAPH_OUTPUT_DIR` | `target/flamegraphs` | Artifact directory |
+| `PERF_FLAMEGRAPH_SCENARIOS` | `all` | `all`, `redirect-cached`, `api-mixed`, or a comma-separated subset |
 | `PERF_FLAMEGRAPH_FREQUENCY_HZ` | `99` | Samples per second |
 | `PERF_FLAMEGRAPH_DURATION` | `15s` | Duration per scenario (`s` or `m`) |
 | `PERF_FLAMEGRAPH_REDIRECT_CONCURRENCY` | `256` | Cached redirect workers |
@@ -74,6 +75,11 @@ The harness writes these artifacts:
 - `target/flamegraphs/flamegraph-redirect-cached.svg`
 - `target/flamegraphs/flamegraph-api-operations.svg`
 - `target/flamegraphs/README.md`
+- `target/flamegraphs/metrics.json`
+
+The metrics file records requests, errors, requests per second, duration,
+concurrency, sampling frequency, and available CI commit/runner metadata. Use
+`PERF_FLAMEGRAPH_SCENARIOS=redirect-cached` for focused repeated measurements.
 
 Because servers and load generators deliberately share one process, graphs
 contain both Lynx hot-path and harness client frames. Search for Lynx handler,
@@ -99,6 +105,22 @@ tokio runtime → axum API handler → sqlx → PostgreSQL → serialization
 Flamegraphs measure CPU samples, not wall-clock latency. Pair them with the
 throughput and latency benchmark artifacts before drawing conclusions about
 network or database waits.
+
+## Local Microbenchmarks
+
+When PostgreSQL is unavailable locally, Divan benchmarks isolate synchronous
+redirect value-level costs without pretending to reproduce production request
+throughput:
+
+```bash
+cargo bench --bench redirect_hot_path
+```
+
+The suite compares destination-header parsing and cloning, short-code copying,
+lookup timing metadata, and lean versus timing-header response construction.
+Fixtures are initialized outside measured operations. These results are
+directional evidence only: SQLite and Divan do not replace the PostgreSQL CI
+profile or its external throughput and latency benchmarks.
 
 ## Continuous Profiling
 

@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
+use serde::Serialize;
+
+use super::Snapshot;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ProfileScenario {
@@ -38,6 +41,16 @@ impl ProfileScenario {
             Self::ApiMixed => status.is_success(),
         }
     }
+
+    fn parse(raw: &str) -> Result<Self> {
+        match raw {
+            "redirect-cached" => Ok(Self::RedirectCached),
+            "api-mixed" => Ok(Self::ApiMixed),
+            _ => bail!(
+                "PERF_FLAMEGRAPH_SCENARIOS contains unknown scenario {raw:?}; expected redirect-cached or api-mixed"
+            ),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -47,6 +60,7 @@ pub(super) struct FlamegraphConfig {
     duration: Duration,
     redirect_concurrency: NonZeroUsize,
     api_concurrency: NonZeroUsize,
+    scenarios: Vec<ProfileScenario>,
 }
 
 impl Default for FlamegraphConfig {
@@ -57,6 +71,7 @@ impl Default for FlamegraphConfig {
             duration: Duration::from_secs(15),
             redirect_concurrency: NonZeroUsize::new(256).expect("constant is non-zero"),
             api_concurrency: NonZeroUsize::new(64).expect("constant is non-zero"),
+            scenarios: ProfileScenario::ALL.to_vec(),
         }
     }
 }
@@ -83,6 +98,7 @@ impl FlamegraphConfig {
                 "PERF_FLAMEGRAPH_API_CONCURRENCY",
                 default.api_concurrency.get(),
             )?,
+            scenarios: env_scenarios("PERF_FLAMEGRAPH_SCENARIOS")?,
         })
     }
 
@@ -99,6 +115,10 @@ impl FlamegraphConfig {
             ProfileScenario::RedirectCached => self.redirect_concurrency,
             ProfileScenario::ApiMixed => self.api_concurrency,
         }
+    }
+
+    pub(super) fn scenarios(&self) -> &[ProfileScenario] {
+        &self.scenarios
     }
 
     fn output_path(&self, scenario: ProfileScenario) -> PathBuf {
@@ -128,6 +148,88 @@ impl FlamegraphConfig {
         );
         std::fs::write(self.output_dir.join("README.md"), guide)
             .context("write flamegraph interpretation guide")
+    }
+
+    pub(super) fn write_metrics(&self, metrics: &[ProfileMetric]) -> Result<()> {
+        std::fs::create_dir_all(&self.output_dir).with_context(|| {
+            format!("create flamegraph directory {}", self.output_dir.display())
+        })?;
+        let report = ProfileMetrics {
+            schema_version: 1,
+            commit: std::env::var("GITHUB_SHA").ok(),
+            runner_os: std::env::var("RUNNER_OS").ok(),
+            runner_arch: std::env::var("RUNNER_ARCH").ok(),
+            scenarios: metrics,
+        };
+        let output = serde_json::to_vec_pretty(&report).context("serialize profile metrics")?;
+        std::fs::write(self.output_dir.join("metrics.json"), output)
+            .context("write profile metrics")
+    }
+}
+
+fn env_scenarios(key: &str) -> Result<Vec<ProfileScenario>> {
+    let raw = match std::env::var(key) {
+        Ok(raw) => raw,
+        Err(std::env::VarError::NotPresent) => return Ok(ProfileScenario::ALL.to_vec()),
+        Err(std::env::VarError::NotUnicode(_)) => bail!("{key} must contain valid UTF-8"),
+    };
+    parse_scenarios(key, &raw)
+}
+
+fn parse_scenarios(key: &str, raw: &str) -> Result<Vec<ProfileScenario>> {
+    if raw == "all" {
+        return Ok(ProfileScenario::ALL.to_vec());
+    }
+
+    let mut scenarios = Vec::new();
+    for raw_scenario in raw.split(',').map(str::trim) {
+        let scenario = ProfileScenario::parse(raw_scenario)?;
+        if scenarios.contains(&scenario) {
+            bail!("{key} must not contain duplicate scenarios");
+        }
+        scenarios.push(scenario);
+    }
+    if scenarios.is_empty() {
+        bail!("{key} must select at least one scenario");
+    }
+    Ok(scenarios)
+}
+
+#[derive(Serialize)]
+struct ProfileMetrics<'a> {
+    schema_version: u8,
+    commit: Option<String>,
+    runner_os: Option<String>,
+    runner_arch: Option<String>,
+    scenarios: &'a [ProfileMetric],
+}
+
+#[derive(Debug, Serialize)]
+pub(super) struct ProfileMetric {
+    scenario: &'static str,
+    requests: u64,
+    errors: u64,
+    requests_per_second: f64,
+    duration_seconds: u64,
+    concurrency: usize,
+    frequency_hz: i32,
+}
+
+impl ProfileMetric {
+    pub(super) fn new(
+        config: &FlamegraphConfig,
+        scenario: ProfileScenario,
+        snapshot: &Snapshot,
+    ) -> Self {
+        Self {
+            scenario: scenario.label(),
+            requests: snapshot.total,
+            errors: snapshot.errors,
+            requests_per_second: snapshot.requests_per_second,
+            duration_seconds: config.duration().as_secs(),
+            concurrency: config.concurrency(scenario).get(),
+            frequency_hz: config.frequency_hz(),
+        }
     }
 }
 
@@ -241,8 +343,40 @@ mod tests {
         let config = FlamegraphConfig::default();
         assert!(config.frequency_hz() > 0);
         assert!(!config.duration().is_zero());
-        for scenario in ProfileScenario::ALL {
+        for &scenario in config.scenarios() {
             assert!(config.concurrency(scenario).get() > 0);
+        }
+    }
+
+    #[test]
+    fn scenario_parser_accepts_known_values() {
+        assert_eq!(
+            ProfileScenario::parse("redirect-cached").unwrap(),
+            ProfileScenario::RedirectCached
+        );
+        assert_eq!(
+            ProfileScenario::parse("api-mixed").unwrap(),
+            ProfileScenario::ApiMixed
+        );
+        assert!(ProfileScenario::parse("unknown").is_err());
+    }
+
+    #[test]
+    fn scenario_list_parser_accepts_all_and_ordered_subsets() {
+        assert_eq!(
+            parse_scenarios("TEST", "all").unwrap(),
+            ProfileScenario::ALL
+        );
+        assert_eq!(
+            parse_scenarios("TEST", "api-mixed, redirect-cached").unwrap(),
+            [ProfileScenario::ApiMixed, ProfileScenario::RedirectCached]
+        );
+    }
+
+    #[test]
+    fn scenario_list_parser_rejects_empty_unknown_and_duplicate_values() {
+        for raw in ["", "unknown", "redirect-cached,redirect-cached"] {
+            assert!(parse_scenarios("TEST", raw).is_err(), "accepted {raw:?}");
         }
     }
 
