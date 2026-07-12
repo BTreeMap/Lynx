@@ -43,7 +43,7 @@ A 329-line workflow that:
   - Manual dispatch with configurable duration
 - **Environment Setup**:
   - Pulls Docker image from GHCR
-  - Starts PostgreSQL 17 container
+  - Starts PostgreSQL 18 container
   - Runs Lynx with `--network host` (bypasses userland proxy for max performance)
   - Configures production-like settings (500k cache, 50 connections)
 - **Execution**:

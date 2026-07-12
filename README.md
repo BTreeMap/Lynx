@@ -237,7 +237,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: lynx
       POSTGRES_PASSWORD: secure_password

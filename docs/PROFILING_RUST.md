@@ -133,7 +133,7 @@ The job:
 1. Runs the ignored integration test with release optimizations, the explicit
    `profiling` feature, debug symbols, and frame pointers.
 2. Starts both Axum servers and generates both workloads in-process against a
-   PostgreSQL 17 service at 99 Hz.
+   PostgreSQL 18 service at 99 Hz.
 3. Fails on setup, request, sampling, SVG generation, or validation errors.
 4. Uploads the two interactive SVGs and the generated interpretation guide in
    a commit-addressed artifact retained for 90 days.

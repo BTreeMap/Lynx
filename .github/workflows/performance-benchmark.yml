@@ -55,7 +55,7 @@ jobs:
             -e POSTGRES_PASSWORD=lynx_benchmark_pass \
             -e POSTGRES_DB=lynx \
             -p 5432:5432 \
-            postgres:17-alpine
+            postgres:18-alpine
 
           # Wait for PostgreSQL to be ready
           for i in {1..30}; do
@@ -156,7 +156,7 @@ jobs:
 
           ## Configuration
 
-          - **Database:** PostgreSQL 17
+          - **Database:** PostgreSQL 18
           - **Network Mode:** host (userland-proxy bypassed for maximum performance)
           - **Cache Settings:**
             - Max Entries: 500,000
@@ -489,6 +489,9 @@ jobs:
             grep -q '<svg' "$graph"
           done
           test -s target/flamegraphs/README.md
+          test -s target/flamegraphs/metrics.json
+          jq -e '.schema_version == 1 and (.scenarios | length == 2)' \
+            target/flamegraphs/metrics.json > /dev/null
 
       - name: Generate flamegraph GitHub Actions summary
         if: always()
@@ -501,22 +504,24 @@ jobs:
           if [[ -s target/flamegraphs/flamegraph-api-operations.svg ]]; then
             api_status="✅ $(du -h target/flamegraphs/flamegraph-api-operations.svg | cut -f1)"
           fi
+          redirect_rps=$(jq -r '.scenarios[] | select(.scenario == "redirect-cached") | .requests_per_second' target/flamegraphs/metrics.json)
+          api_rps=$(jq -r '.scenarios[] | select(.scenario == "api-mixed") | .requests_per_second' target/flamegraphs/metrics.json)
 
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           # CPU Flamegraphs
 
           **Profiled commit:** ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
-          **Database:** PostgreSQL 17
+          **Database:** PostgreSQL 18
 
           **Duration per scenario:** ${{ github.event.inputs.duration || '30s' }}
 
           **Sampling frequency:** 99 Hz
 
-          | Scenario | Result | Workload |
-          |---|---:|---|
-          | Cached redirect | $redirect_status | 256 async workers, warmed single URL |
-          | Mixed API | $api_status | 64 async workers, 50% create / 50% read |
+          | Scenario | Result | Sampled throughput | Workload |
+          |---|---:|---:|---|
+          | Cached redirect | $redirect_status | $redirect_rps req/s | 256 async workers, warmed single URL |
+          | Mixed API | $api_status | $api_rps req/s | 64 async workers, 50% create / 50% read |
 
           Download the artifact and open each SVG in a browser. Click a frame to zoom,
           search for wide application frames, and investigate unexpected database, lock,
@@ -571,7 +576,7 @@ jobs:
             -e POSTGRES_PASSWORD=lynx_benchmark_pass \
             -e POSTGRES_DB=lynx \
             -p 5432:5432 \
-            postgres:17-alpine
+            postgres:18-alpine
 
           # Wait for PostgreSQL to be ready
           for i in {1..30}; do
@@ -756,7 +761,7 @@ jobs:
 
           ## Configuration
 
-          - **Database:** PostgreSQL 17
+          - **Database:** PostgreSQL 18
           - **Network Mode:** host (userland-proxy bypassed)
           - **Cache Settings:**
             - Max Entries: 500,000
