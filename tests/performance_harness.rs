@@ -67,7 +67,12 @@ impl Harness {
         );
 
         let api = create_api_router(Arc::clone(&storage), auth, config, None);
-        let redirect = create_redirect_router(storage, None, false, StatusCode::PERMANENT_REDIRECT);
+        let redirect = create_redirect_router(
+            Arc::clone(&cached_storage),
+            None,
+            false,
+            StatusCode::PERMANENT_REDIRECT,
+        );
         let (api_base, api_server) = serve(api).await?;
         let (redirect_base, redirect_server) = serve_with_connect_info(redirect).await?;
         let client = reqwest::Client::builder()
@@ -184,7 +189,6 @@ impl Harness {
 
 impl Drop for Harness {
     fn drop(&mut self) {
-        self.cached_storage.shutdown();
         for server in &self.servers {
             server.abort();
         }
@@ -352,6 +356,7 @@ async fn representative_hot_path_flamegraphs() -> Result<()> {
 
     config.write_guide()?;
     config.write_metrics(&metrics)?;
+    harness.cached_storage.shutdown().await;
 
     Ok(())
 }

@@ -704,7 +704,7 @@ async fn run_server() -> Result<()> {
         )
     });
     let redirect_router = lynx::redirect::create_redirect_router(
-        Arc::clone(&storage),
+        Arc::clone(&cached_storage),
         redirect_analytics,
         enable_timing_headers,
         redirect_status,
@@ -788,9 +788,7 @@ async fn run_server() -> Result<()> {
 
     // Flush cached data on shutdown
     info!("Flushing cached data before shutdown...");
-    cached_storage.shutdown();
-    // Wait longer to ensure both fast and slow flushes complete
-    tokio::time::sleep(tokio::time::Duration::from_secs(6)).await;
+    cached_storage.shutdown().await;
     info!("Shutdown complete");
 
     result?;

@@ -16,7 +16,7 @@ use super::middleware::RequestStart;
 use crate::analytics::AnalyticsAggregator;
 use crate::config::AnalyticsConfig;
 use crate::models::ShortenedUrl;
-use crate::storage::{LookupMetadata, Storage};
+use crate::storage::{CachedStorage, LookupMetadata, Storage};
 
 #[derive(Clone)]
 pub struct RedirectAnalytics {
@@ -44,7 +44,7 @@ impl RedirectAnalytics {
 }
 
 pub struct RedirectState {
-    pub(super) storage: Arc<dyn Storage>,
+    pub(super) storage: Arc<CachedStorage>,
     pub(super) analytics: Option<RedirectAnalytics>,
     /// Configurable redirect status code (301/302/303/307/308).
     /// Stored as StatusCode for zero-cost access during redirects.
@@ -59,7 +59,7 @@ pub async fn redirect_url(
     match prepare_redirect(&state, &code).await {
         Ok(url) => {
             let response = redirect_response(&state, &url);
-            buffer_click(&state, code).await;
+            buffer_click(&state, code);
             response
         }
         Err(response) => response,
@@ -81,7 +81,7 @@ pub async fn redirect_url_with_analytics(
                 .expect("analytics handler requires analytics runtime")
                 .record(&url.short_code, &headers, addr.ip());
             let response = redirect_response(&state, &url);
-            buffer_click(&state, code).await;
+            buffer_click(&state, code);
             response
         }
         Err(response) => response,
@@ -99,7 +99,7 @@ pub async fn redirect_url_with_timing(
         Ok((url, metadata)) => {
             let response =
                 timed_redirect_response(&state, &url, metadata, handler_start, request_start);
-            buffer_click(&state, code).await;
+            buffer_click(&state, code);
             response
         }
         Err(response) => response,
@@ -124,7 +124,7 @@ pub async fn redirect_url_with_analytics_and_timing(
                 .record(&url.short_code, &headers, addr.ip());
             let response =
                 timed_redirect_response(&state, &url, metadata, handler_start, request_start);
-            buffer_click(&state, code).await;
+            buffer_click(&state, code);
             response
         }
         Err(response) => response,
@@ -169,8 +169,8 @@ fn accept_redirect(
     Ok(url)
 }
 
-async fn buffer_click(state: &RedirectState, code: String) {
-    if let Err(error) = state.storage.increment_click_owned(code).await {
+fn buffer_click(state: &RedirectState, code: String) {
+    if let Err(error) = state.storage.buffer_click_owned(code, 1) {
         tracing::warn!(short_code = %error.short_code(), error = %error, "failed to buffer click increment");
     }
 }

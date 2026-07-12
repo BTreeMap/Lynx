@@ -1,7 +1,7 @@
 use axum::{middleware, routing::get, Router};
 use std::sync::Arc;
 
-use crate::storage::Storage;
+use crate::storage::CachedStorage;
 use axum::http::StatusCode;
 
 use super::handlers::{
@@ -12,7 +12,7 @@ use super::handlers::{
 use super::middleware::record_request_start;
 
 pub fn create_redirect_router(
-    storage: Arc<dyn Storage>,
+    storage: Arc<CachedStorage>,
     analytics: Option<RedirectAnalytics>,
     enable_timing_headers: bool,
     redirect_status: StatusCode,

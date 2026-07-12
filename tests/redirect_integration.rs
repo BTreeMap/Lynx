@@ -11,7 +11,7 @@ use axum::{
 use lynx::analytics::AnalyticsAggregator;
 use lynx::config::AnalyticsConfig;
 use lynx::redirect::{self, RedirectAnalytics};
-use lynx::storage::{SqliteStorage, Storage};
+use lynx::storage::{CachedStorage, SqliteStorage, Storage};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -20,10 +20,10 @@ use tower::ServiceExt;
 const DEFAULT_REDIRECT_STATUS: StatusCode = StatusCode::PERMANENT_REDIRECT;
 
 /// Helper to create test storage
-async fn create_test_storage() -> Arc<dyn Storage> {
-    let storage = SqliteStorage::new("sqlite::memory:", 5).await.unwrap();
-    storage.init().await.unwrap();
-    Arc::new(storage)
+async fn create_test_storage() -> Arc<CachedStorage> {
+    let inner = Arc::new(SqliteStorage::new("sqlite::memory:", 5).await.unwrap());
+    inner.init().await.unwrap();
+    CachedStorage::new(inner, 1_000, 5, 1_000, 10).into()
 }
 
 #[tokio::test]

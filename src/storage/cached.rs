@@ -10,7 +10,8 @@ use moka::future::Cache;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, mpsc::error::TrySendError, Mutex};
+use tokio::task::JoinHandle;
 use tokio::time;
 
 /// Message types for the ClickCounterActor
@@ -21,8 +22,9 @@ enum ActorMessage {
     Shutdown,
 }
 
-async fn send_click_increment(
+fn enqueue_click_increment(
     actor_tx: &mpsc::Sender<ActorMessage>,
+    read_view: &DashMap<String, u64>,
     short_code: String,
     amount: u64,
 ) -> Result<(), OwnedClickError> {
@@ -30,13 +32,20 @@ async fn send_click_increment(
         return Ok(());
     }
 
-    match actor_tx
-        .send(ActorMessage::BatchIncrement(short_code, amount))
-        .await
-    {
+    match actor_tx.try_send(ActorMessage::BatchIncrement(short_code, amount)) {
         Ok(()) => Ok(()),
-        Err(error) => {
-            let ActorMessage::BatchIncrement(short_code, _) = error.0 else {
+        Err(TrySendError::Full(message)) => {
+            let ActorMessage::BatchIncrement(short_code, amount) = message else {
+                unreachable!("only batch increments are sent by this function")
+            };
+            read_view
+                .entry(short_code)
+                .and_modify(|count| *count += amount)
+                .or_insert(amount);
+            Ok(())
+        }
+        Err(TrySendError::Closed(message)) => {
+            let ActorMessage::BatchIncrement(short_code, _) = message else {
                 unreachable!("only batch increments are sent by this function")
             };
             Err(OwnedClickError::new(
@@ -67,6 +76,7 @@ impl ClickCounterActor {
     async fn run(mut self) {
         let mut fast_flush_ticker = time::interval(self.fast_flush_interval);
         let mut slow_flush_ticker = time::interval(self.slow_flush_interval);
+        let mut flush_tasks = Vec::new();
 
         // Skip the first tick which fires immediately
         fast_flush_ticker.tick().await;
@@ -85,14 +95,11 @@ impl ClickCounterActor {
                             tracing::info!("Actor received shutdown signal, flushing all data...");
                             // Flush Layer 1 → Layer 2
                             self.flush_buffer_to_read_view();
-                            // Flush Layer 2 → Layer 3 (spawns background task)
+                            // Flush Layer 2 → Layer 3 and await every in-flight write.
                             if let Some(handle) = self.flush_read_view_to_storage() {
-                                // Wait for the background flush task to complete
-                                // This ensures all data is persisted before shutdown
-                                if let Err(e) = handle.await {
-                                    tracing::error!("Background flush task panicked during shutdown: {}", e);
-                                }
+                                flush_tasks.push(handle);
                             }
+                            finish_flush_tasks(&mut flush_tasks).await;
                             tracing::info!("All data flushed successfully on shutdown");
                             break;
                         }
@@ -105,18 +112,20 @@ impl ClickCounterActor {
                 // Slow flush: Layer 2 → Layer 3 (5s default)
                 _ = slow_flush_ticker.tick() => {
                     // Spawns background task, doesn't block the actor
-                    self.flush_read_view_to_storage();
+                    if let Some(handle) = self.flush_read_view_to_storage() {
+                        flush_tasks.push(handle);
+                    }
+                    reap_finished_flush_tasks(&mut flush_tasks).await;
                 }
                 // Channel closed without shutdown message
                 else => {
                     tracing::warn!("Actor channel closed unexpectedly, flushing data...");
                     self.flush_buffer_to_read_view();
-                    // Flush to storage and wait for it to complete
+                    // Flush to storage and await every in-flight write.
                     if let Some(handle) = self.flush_read_view_to_storage() {
-                        if let Err(e) = handle.await {
-                            tracing::error!("Background flush task panicked during unexpected shutdown: {}", e);
-                        }
+                        flush_tasks.push(handle);
                     }
+                    finish_flush_tasks(&mut flush_tasks).await;
                     break;
                 }
             }
@@ -180,6 +189,23 @@ impl ClickCounterActor {
     }
 }
 
+async fn reap_finished_flush_tasks(flush_tasks: &mut Vec<JoinHandle<()>>) {
+    while let Some(index) = flush_tasks.iter().position(JoinHandle::is_finished) {
+        let handle = flush_tasks.swap_remove(index);
+        if let Err(error) = handle.await {
+            tracing::error!(%error, "background click flush task panicked");
+        }
+    }
+}
+
+async fn finish_flush_tasks(flush_tasks: &mut Vec<JoinHandle<()>>) {
+    for handle in flush_tasks.drain(..) {
+        if let Err(error) = handle.await {
+            tracing::error!(%error, "background click flush task panicked during shutdown");
+        }
+    }
+}
+
 /// Cached storage wrapper that implements read caching and write buffering
 pub struct CachedStorage {
     /// Underlying storage implementation
@@ -190,8 +216,8 @@ pub struct CachedStorage {
     read_view: Arc<DashMap<String, u64>>,
     /// Actor message sender
     actor_tx: mpsc::Sender<ActorMessage>,
-    /// Shutdown signal sender (for backward compatibility)
-    shutdown_tx: watch::Sender<bool>,
+    /// Long-lived actor task, joined during graceful shutdown.
+    actor_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl CachedStorage {
@@ -208,9 +234,6 @@ impl CachedStorage {
         // Create actor channel with large buffer to prevent message loss
         let (actor_tx, actor_rx) = mpsc::channel(actor_buffer_size);
 
-        // Backward compatibility shutdown channel
-        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-
         // Spawn the click counter actor
         let actor = ClickCounterActor {
             receiver: actor_rx,
@@ -221,7 +244,7 @@ impl CachedStorage {
             slow_flush_interval: Duration::from_secs(flush_interval_secs),
         };
 
-        tokio::spawn(async move {
+        let actor_handle = tokio::spawn(async move {
             actor.run().await;
         });
 
@@ -230,20 +253,36 @@ impl CachedStorage {
             read_cache,
             read_view,
             actor_tx,
-            shutdown_tx,
+            actor_handle: Mutex::new(Some(actor_handle)),
         }
     }
 
-    /// Signal shutdown to flush buffered data
-    pub fn shutdown(&self) {
-        // Send shutdown message to actor (blocking send to ensure delivery)
-        let tx = self.actor_tx.clone();
-        tokio::spawn(async move {
-            let _ = tx.send(ActorMessage::Shutdown).await;
-        });
+    /// Flush buffered clicks and wait for the long-lived actor to stop.
+    pub async fn shutdown(&self) {
+        let mut actor_handle = self.actor_handle.lock().await;
+        let Some(actor_handle) = actor_handle.take() else {
+            return;
+        };
 
-        // Also signal the old shutdown channel for backward compatibility
-        let _ = self.shutdown_tx.send(true);
+        if let Err(error) = self.actor_tx.send(ActorMessage::Shutdown).await {
+            tracing::warn!(%error, "click counter actor stopped before shutdown signal");
+        }
+        if let Err(error) = actor_handle.await {
+            tracing::error!(%error, "click counter actor panicked during shutdown");
+        }
+    }
+
+    /// Enqueue a click without awaiting channel capacity.
+    ///
+    /// The bounded actor queue is the uncontended fast path. Saturated queues
+    /// merge counts into the actor's existing shared flush layer, preserving
+    /// clicks without creating a task per redirect or growing an unbounded queue.
+    pub fn buffer_click_owned(
+        &self,
+        short_code: String,
+        amount: u64,
+    ) -> Result<(), OwnedClickError> {
+        enqueue_click_increment(&self.actor_tx, &self.read_view, short_code, amount)
     }
 
     /// Get buffered click count for a short code from Layer 2 (read_view)
@@ -412,23 +451,8 @@ impl Storage for CachedStorage {
     }
 
     async fn increment_clicks(&self, short_code: &str, amount: u64) -> Result<()> {
-        if amount == 0 {
-            return Ok(());
-        }
-
-        // Buffer the whole increment as a single message; the actor folds it into
-        // its lock-free Layer 1 buffer. Blocking send applies backpressure instead
-        // of dropping clicks when the actor channel is full.
-        if let Err(e) = self
-            .actor_tx
-            .send(ActorMessage::BatchIncrement(short_code.to_string(), amount))
-            .await
-        {
-            tracing::error!("Failed to send click to actor (channel closed): {}", e);
-            return Err(anyhow::anyhow!("Actor channel closed"));
-        }
-
-        Ok(())
+        self.buffer_click_owned(short_code.to_owned(), amount)
+            .map_err(anyhow::Error::from)
     }
 
     async fn increment_clicks_owned(
@@ -436,7 +460,7 @@ impl Storage for CachedStorage {
         short_code: String,
         amount: u64,
     ) -> Result<(), OwnedClickError> {
-        send_click_increment(&self.actor_tx, short_code, amount).await
+        self.buffer_click_owned(short_code, amount)
     }
 
     async fn list_with_cursor(
@@ -599,15 +623,16 @@ impl Storage for CachedStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::SqliteStorage;
 
     #[tokio::test]
     async fn owned_click_recovers_code_when_actor_is_closed() {
         let (actor_tx, actor_rx) = mpsc::channel(1);
         drop(actor_rx);
+        let read_view = DashMap::new();
 
-        let error = send_click_increment(&actor_tx, "recover-me".to_owned(), 1)
-            .await
-            .unwrap_err();
+        let error =
+            enqueue_click_increment(&actor_tx, &read_view, "recover-me".to_owned(), 1).unwrap_err();
 
         assert_eq!(error.short_code(), "recover-me");
     }
@@ -616,9 +641,63 @@ mod tests {
     async fn zero_owned_click_does_not_require_a_live_actor() {
         let (actor_tx, actor_rx) = mpsc::channel(1);
         drop(actor_rx);
+        let read_view = DashMap::new();
 
-        send_click_increment(&actor_tx, "no-op".to_owned(), 0)
+        enqueue_click_increment(&actor_tx, &read_view, "no-op".to_owned(), 0).unwrap();
+    }
+
+    #[tokio::test]
+    async fn full_actor_queue_merges_click_into_flush_layer() {
+        let (actor_tx, _actor_rx) = mpsc::channel(1);
+        let read_view = DashMap::new();
+        actor_tx
+            .try_send(ActorMessage::BatchIncrement("queued".to_owned(), 1))
+            .unwrap();
+
+        enqueue_click_increment(&actor_tx, &read_view, "overflow".to_owned(), 7).unwrap();
+
+        assert_eq!(read_view.get("overflow").map(|count| *count), Some(7));
+    }
+
+    #[tokio::test]
+    async fn concurrent_full_queue_merges_every_click() {
+        let (actor_tx, _actor_rx) = mpsc::channel(1);
+        actor_tx
+            .try_send(ActorMessage::BatchIncrement("queued".to_owned(), 1))
+            .unwrap();
+        let actor_tx = Arc::new(actor_tx);
+        let read_view = Arc::new(DashMap::new());
+        let mut workers = tokio::task::JoinSet::new();
+
+        for _ in 0..100 {
+            let actor_tx = Arc::clone(&actor_tx);
+            let read_view = Arc::clone(&read_view);
+            workers.spawn(async move {
+                enqueue_click_increment(&actor_tx, &read_view, "overflow".to_owned(), 1).unwrap();
+            });
+        }
+        while let Some(result) = workers.join_next().await {
+            result.unwrap();
+        }
+
+        assert_eq!(read_view.get("overflow").map(|count| *count), Some(100));
+    }
+
+    #[tokio::test]
+    async fn graceful_shutdown_persists_queued_and_overflow_clicks() {
+        let inner = Arc::new(SqliteStorage::new("sqlite::memory:", 1).await.unwrap());
+        inner.init().await.unwrap();
+        inner
+            .create_with_code("durable", "https://example.com", None)
             .await
             .unwrap();
+        let storage = CachedStorage::new(inner.clone(), 10, 3_600, 1, 3_600_000);
+
+        storage.buffer_click_owned("durable".to_owned(), 1).unwrap();
+        storage.buffer_click_owned("durable".to_owned(), 7).unwrap();
+        storage.shutdown().await;
+
+        let url = inner.get_authoritative("durable").await.unwrap().unwrap();
+        assert_eq!(url.clicks, 8);
     }
 }
