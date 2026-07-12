@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use anyhow::{ensure, Context, Result};
 use axum::http::StatusCode;
 use axum::Router;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use lynx::api::create_api_router;
 use lynx::auth::AuthService;
 use lynx::config::{
@@ -126,6 +127,20 @@ impl Harness {
         Ok(())
     }
 
+    async fn verify_api_reads(&self, scenario: ProfileScenario) -> Result<()> {
+        for index in 1..=SEED_URL_COUNT {
+            let code = scenario.code(index);
+            let url = api_url(&self.api_base, &code);
+            let response = self.client.get(&url).send().await?;
+            let status = response.status();
+            ensure!(
+                status.is_success(),
+                "seeded API read failed: {status} from {url}"
+            );
+        }
+        Ok(())
+    }
+
     async fn run(&self, scenario: ProfileScenario, config: &FlamegraphConfig) -> Result<Snapshot> {
         let deadline = Instant::now() + config.duration();
         let total = Arc::new(AtomicU64::new(0));
@@ -217,12 +232,16 @@ async fn send_request(
         ProfileScenario::ApiMixed => {
             let index = sequence as usize % SEED_URL_COUNT + 1;
             client
-                .get(format!("{api_base}/api/urls/{}", scenario.code(index)))
+                .get(api_url(api_base, &scenario.code(index)))
                 .send()
                 .await?
         }
     };
     Ok(response.status())
+}
+
+fn api_url(api_base: &str, code: &str) -> String {
+    format!("{api_base}/api/urls/{}", URL_SAFE_NO_PAD.encode(code))
 }
 
 async fn serve(router: Router) -> Result<(String, JoinHandle<()>)> {
@@ -301,8 +320,9 @@ async fn representative_hot_path_flamegraphs() -> Result<()> {
 
     for scenario in ProfileScenario::ALL {
         harness.seed(scenario).await?;
-        if scenario == ProfileScenario::RedirectCached {
-            harness.warm_redirect(scenario).await?;
+        match scenario {
+            ProfileScenario::RedirectCached => harness.warm_redirect(scenario).await?,
+            ProfileScenario::ApiMixed => harness.verify_api_reads(scenario).await?,
         }
 
         eprintln!(
@@ -353,6 +373,11 @@ mod tests {
         for scenario in ProfileScenario::ALL {
             assert!(config.concurrency(scenario) >= NonZeroUsize::MIN);
         }
+    }
+
+    #[test]
+    fn management_api_url_encodes_short_code() {
+        assert_eq!(api_url("http://api", "a/b"), "http://api/api/urls/YS9i");
     }
 
     #[tokio::test]
