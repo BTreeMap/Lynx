@@ -521,11 +521,14 @@ For Caddy, Apache, or advanced configurations, see the [deployment documentation
 # Unit and integration tests
 cargo test
 
-# Bash integration tests (requires running service)
-bash tests/integration_test.sh http://localhost:8080 http://localhost:3000
+# Typed HTTP, concurrency, and graceful-shutdown tests (requires a running service)
+LYNX_E2E_CONTAINER=lynx \
+LYNX_E2E_CONCURRENCY=100 \
+cargo test --test external_harness -- --ignored --test-threads=1 --nocapture
 
-# Concurrent load tests
-bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 100
+# Native Rust benchmark traffic and reports (requires a running service)
+BENCHMARK_SUITE=standard \
+cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
 ```
 
 See [tests/README.md](tests/README.md) for comprehensive testing documentation.

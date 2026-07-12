@@ -41,12 +41,19 @@ DATABASE_BACKEND=sqlite cargo test --test storage_integration_test <test_name>
 
 ## End-to-end (against a running instance)
 
-Start Lynx (Docker or `cargo run`), then:
+Start Lynx (Docker or `cargo run`) with the test-only `AUTH_MODE=none`, then
+run the typed external harness. Set `LYNX_E2E_CONTAINER` when the service is a
+Docker container so the suite can verify SIGTERM/SIGINT persistence exactly.
 
 ```bash
-bash tests/integration_test.sh http://localhost:8080 http://localhost:3000
-bash tests/concurrent_test.sh   http://localhost:8080 http://localhost:3000 100
+LYNX_E2E_CONTAINER=lynx \
+LYNX_E2E_CONCURRENCY=100 \
+cargo test --test external_harness -- --ignored --test-threads=1 --nocapture
 ```
+
+The suite owns HTTP requests, JSON validation, retries, concurrent traffic,
+and lifecycle effects in Rust. See [tests/README.md](../../tests/README.md) for
+configuration and native benchmark commands.
 
 ## Documentation drift
 

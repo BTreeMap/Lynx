@@ -1,5 +1,10 @@
 # Lynx Performance Optimization Results
 
+> Historical record: the measurements in this document predate the native Rust
+> benchmark harness and used a retired external generator. Do not compare them
+> directly with current CI artifacts; use [Native Rust Benchmarks](BENCHMARKS.md)
+> for the supported methodology.
+
 ## Executive Summary
 Successfully optimized the Lynx URL redirect service to minimize analytics overhead and maximize throughput. Analytics overhead reduced from 5.6% to 2.9%, while overall throughput increased 50% from 36k to 55k RPS.
 

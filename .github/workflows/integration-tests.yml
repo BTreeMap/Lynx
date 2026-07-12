@@ -3,24 +3,56 @@ name: Integration and Data Consistency Tests
 on:
   workflow_run:
     workflows: ["Build and Publish Docker image to GHCR"]
-    types:
-      - completed
+    types: [completed]
   workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
 
 jobs:
   test-sqlite:
-    name: Test SQLite Backend
+    name: External Harness (SQLite)
     runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
-    
+    env:
+      DATABASE_URL: sqlite:///home/lynx/lynx.db
     steps:
-      - name: Checkout repository
+      - name: Checkout profiled source
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           submodules: recursive
 
-      - name: Compute lowercase repository name
-        run: echo "REPO_LOWER=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      - name: Set image reference
+        id: image
+        run: echo "reference=ghcr.io/${GITHUB_REPOSITORY,,}:${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-external-harness-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -28,141 +60,42 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull Docker image
-        run: |
-          # Pull the latest AMD64 image (manifest will resolve to correct platform)
-          docker pull ghcr.io/${{ env.REPO_LOWER }}:latest
 
       - name: Start Lynx with SQLite
         run: |
-          docker run -d \
-            --name lynx-sqlite \
-            -p 8080:8080 \
-            -p 3000:3000 \
-            -e DATABASE_BACKEND=sqlite \
-            -e DATABASE_URL=sqlite:///home/lynx/lynx.db \
-            -e AUTH_MODE=none \
-            -e API_HOST=0.0.0.0 \
-            -e API_PORT=8080 \
-            -e REDIRECT_HOST=0.0.0.0 \
-            -e REDIRECT_PORT=3000 \
-            ghcr.io/${{ env.REPO_LOWER }}:latest
+          docker pull "${{ steps.image.outputs.reference }}"
+          docker run --detach --name lynx \
+            --publish 8080:8080 --publish 3000:3000 \
+            --env DATABASE_BACKEND=sqlite \
+            --env DATABASE_URL \
+            --env AUTH_MODE=none \
+            --env ANALYTICS_ENABLED=true --env ANALYTICS_FLUSH_INTERVAL_SECS=1 \
+            --env API_HOST=0.0.0.0 --env API_PORT=8080 \
+            --env REDIRECT_HOST=0.0.0.0 --env REDIRECT_PORT=3000 \
+            "${{ steps.image.outputs.reference }}"
 
-      - name: Wait for service to be ready
-        run: |
-          for i in {1..30}; do
-            if curl -f http://localhost:8080/api/health > /dev/null 2>&1; then
-              echo "Service is ready!"
-              break
-            fi
-            echo "Waiting for service... ($i/30)"
-            sleep 2
-          done
-          curl http://localhost:8080/api/health || exit 1
+      - name: Run typed external scenarios
+        run: cargo test --test external_harness -- --ignored --test-threads=1 --nocapture
+        env:
+          LYNX_E2E_CONTAINER: lynx
+          LYNX_E2E_CONCURRENCY: '100'
+          LYNX_E2E_EXPECT_ANALYTICS: 'true'
+          RUST_LOG: info
 
-      - name: Run comprehensive API tests
-        run: |
-          bash tests/integration_test.sh http://localhost:8080 http://localhost:3000
-
-      - name: Run concurrent load test
-        run: |
-          bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 100
-
-      - name: Test graceful shutdown with SIGTERM
-        run: |
-          # Create some links and generate traffic
-          for i in {1..10}; do
-            curl -X POST http://localhost:8080/api/urls \
-              -H "Content-Type: application/json" \
-              -d "{\"url\": \"https://example.com/sigterm-$i\", \"custom_code\": \"sigterm-$i\"}"
-          done
-          
-          # Generate concurrent traffic
-          for i in {1..10}; do
-            curl -L http://localhost:3000/sigterm-$i > /dev/null 2>&1 &
-          done
-          
-          sleep 1
-          
-          # Send SIGTERM
-          docker kill --signal=SIGTERM lynx-sqlite
-          
-          # Wait for graceful shutdown
-          sleep 7
-          
-          # Restart and verify data
-          docker start lynx-sqlite
-          sleep 5
-          
-          # Check that data was persisted
-          for i in {1..10}; do
-            encoded_code=$(printf %s "sigterm-$i" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
-            response=$(curl -s http://localhost:8080/api/urls/$encoded_code)
-            echo "Checking sigterm-$i: $response"
-            if echo "$response" | grep -q "sigterm-$i"; then
-              echo "✓ Data persisted for sigterm-$i"
-            else
-              echo "✗ Data lost for sigterm-$i"
-              exit 1
-            fi
-          done
-
-      - name: Test graceful shutdown with SIGINT
-        run: |
-          # Create some links and generate traffic
-          for i in {1..10}; do
-            curl -X POST http://localhost:8080/api/urls \
-              -H "Content-Type: application/json" \
-              -d "{\"url\": \"https://example.com/sigint-$i\", \"custom_code\": \"sigint-$i\"}"
-          done
-          
-          # Generate concurrent traffic
-          for i in {1..10}; do
-            curl -L http://localhost:3000/sigint-$i > /dev/null 2>&1 &
-          done
-          
-          sleep 1
-          
-          # Send SIGINT
-          docker kill --signal=SIGINT lynx-sqlite
-          
-          # Wait for graceful shutdown
-          sleep 7
-          
-          # Restart and verify data
-          docker start lynx-sqlite
-          sleep 5
-          
-          # Check that data was persisted
-          for i in {1..10}; do
-            encoded_code=$(printf %s "sigint-$i" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
-            response=$(curl -s http://localhost:8080/api/urls/$encoded_code)
-            echo "Checking sigint-$i: $response"
-            if echo "$response" | grep -q "sigint-$i"; then
-              echo "✓ Data persisted for sigint-$i"
-            else
-              echo "✗ Data lost for sigint-$i"
-              exit 1
-            fi
-          done
-
-      - name: Collect logs
+      - name: Collect service logs
         if: always()
-        run: |
-          docker logs lynx-sqlite || true
+        run: docker logs lynx || true
 
-      - name: Stop SQLite container
+      - name: Clean up service
         if: always()
-        run: |
-          docker stop lynx-sqlite || true
-          docker rm lynx-sqlite || true
+        run: docker rm --force lynx || true
 
   test-postgres:
-    name: Test PostgreSQL Backend
+    name: External Harness (PostgreSQL)
     runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
-    
+    env:
+      DATABASE_URL: postgresql://lynx:lynx_password@localhost:5432/lynx
     services:
       postgres:
         image: postgres:18-alpine
@@ -177,15 +110,42 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-
     steps:
-      - name: Checkout repository
+      - name: Checkout profiled source
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           submodules: recursive
 
-      - name: Compute lowercase repository name
-        run: echo "REPO_LOWER=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      - name: Set image reference
+        id: image
+        run: echo "reference=ghcr.io/${GITHUB_REPOSITORY,,}:${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-external-harness-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -194,235 +154,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull Docker image
-        run: |
-          # Pull the latest AMD64 image (manifest will resolve to correct platform)
-          docker pull ghcr.io/${{ env.REPO_LOWER }}:latest
-
       - name: Start Lynx with PostgreSQL
         run: |
-          docker run -d \
-            --name lynx-postgres \
-            --network host \
-            -e DATABASE_BACKEND=postgres \
-            -e DATABASE_URL=postgresql://lynx:lynx_password@localhost:5432/lynx \
-            -e AUTH_MODE=none \
-            -e API_HOST=0.0.0.0 \
-            -e API_PORT=8080 \
-            -e REDIRECT_HOST=0.0.0.0 \
-            -e REDIRECT_PORT=3000 \
-            ghcr.io/${{ env.REPO_LOWER }}:latest
+          docker pull "${{ steps.image.outputs.reference }}"
+          docker run --detach --name lynx --network host \
+            --env DATABASE_BACKEND=postgres --env DATABASE_URL \
+            --env AUTH_MODE=none \
+            --env ANALYTICS_ENABLED=true --env ANALYTICS_FLUSH_INTERVAL_SECS=1 \
+            --env API_HOST=0.0.0.0 --env API_PORT=8080 \
+            --env REDIRECT_HOST=0.0.0.0 --env REDIRECT_PORT=3000 \
+            "${{ steps.image.outputs.reference }}"
 
-      - name: Wait for service to be ready
-        run: |
-          for i in {1..30}; do
-            if curl -f http://localhost:8080/api/health > /dev/null 2>&1; then
-              echo "Service is ready!"
-              break
-            fi
-            echo "Waiting for service... ($i/30)"
-            sleep 2
-          done
-          curl http://localhost:8080/api/health || exit 1
-
-      - name: Run comprehensive API tests
-        run: |
-          bash tests/integration_test.sh http://localhost:8080 http://localhost:3000
-
-      - name: Run concurrent load test
-        run: |
-          bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 100
-
-      - name: Test graceful shutdown with SIGTERM
-        run: |
-          # Create some links and generate traffic
-          for i in {1..10}; do
-            curl -X POST http://localhost:8080/api/urls \
-              -H "Content-Type: application/json" \
-              -d "{\"url\": \"https://example.com/pg-sigterm-$i\", \"custom_code\": \"pg-sigterm-$i\"}"
-          done
-          
-          # Generate concurrent traffic
-          for i in {1..10}; do
-            curl -L http://localhost:3000/pg-sigterm-$i > /dev/null 2>&1 &
-          done
-          
-          sleep 1
-          
-          # Send SIGTERM
-          docker kill --signal=SIGTERM lynx-postgres
-          
-          # Wait for graceful shutdown
-          sleep 7
-          
-          # Restart and verify data
-          docker start lynx-postgres
-          sleep 5
-          
-          # Check that data was persisted
-          for i in {1..10}; do
-            encoded_code=$(printf %s "pg-sigterm-$i" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
-            response=$(curl -s http://localhost:8080/api/urls/$encoded_code)
-            echo "Checking pg-sigterm-$i: $response"
-            if echo "$response" | grep -q "pg-sigterm-$i"; then
-              echo "✓ Data persisted for pg-sigterm-$i"
-            else
-              echo "✗ Data lost for pg-sigterm-$i"
-              exit 1
-            fi
-          done
-
-      - name: Test graceful shutdown with SIGINT
-        run: |
-          # Create some links and generate traffic
-          for i in {1..10}; do
-            curl -X POST http://localhost:8080/api/urls \
-              -H "Content-Type: application/json" \
-              -d "{\"url\": \"https://example.com/pg-sigint-$i\", \"custom_code\": \"pg-sigint-$i\"}"
-          done
-          
-          # Generate concurrent traffic
-          for i in {1..10}; do
-            curl -L http://localhost:3000/pg-sigint-$i > /dev/null 2>&1 &
-          done
-          
-          sleep 1
-          
-          # Send SIGINT
-          docker kill --signal=SIGINT lynx-postgres
-          
-          # Wait for graceful shutdown
-          sleep 7
-          
-          # Restart and verify data
-          docker start lynx-postgres
-          sleep 5
-          
-          # Check that data was persisted
-          for i in {1..10}; do
-            encoded_code=$(printf %s "pg-sigint-$i" | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
-            response=$(curl -s http://localhost:8080/api/urls/$encoded_code)
-            echo "Checking pg-sigint-$i: $response"
-            if echo "$response" | grep -q "pg-sigint-$i"; then
-              echo "✓ Data persisted for pg-sigint-$i"
-            else
-              echo "✗ Data lost for pg-sigint-$i"
-              exit 1
-            fi
-          done
-
-      - name: Collect logs
-        if: always()
-        run: |
-          docker logs lynx-postgres || true
-
-      - name: Stop PostgreSQL container
-        if: always()
-        run: |
-          docker stop lynx-postgres || true
-          docker rm lynx-postgres || true
-
-  rust-integration-tests-sqlite:
-    name: Rust Integration Tests (SQLite)
-    runs-on: ubuntu-24.04
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          submodules: recursive
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Build frontend
-        run: |
-          cd frontend
-          npm install
-          npm run build
-          cd ..
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Run SQLite integration tests
-        run: |
-          DATABASE_BACKEND=sqlite cargo test --tests
+      - name: Run typed external scenarios
+        run: cargo test --test external_harness -- --ignored --test-threads=1 --nocapture
         env:
+          LYNX_E2E_CONTAINER: lynx
+          LYNX_E2E_CONCURRENCY: '100'
+          LYNX_E2E_EXPECT_ANALYTICS: 'true'
           RUST_LOG: info
 
-  rust-integration-tests-postgres:
-    name: Rust Integration Tests (PostgreSQL)
-    runs-on: ubuntu-24.04
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
-    permissions:
-      contents: read
+      - name: Collect service logs
+        if: always()
+        run: docker logs lynx || true
 
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: lynx
-          POSTGRES_PASSWORD: lynx_password
-          POSTGRES_DB: lynx
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          submodules: recursive
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Build frontend
-        run: |
-          cd frontend
-          npm install
-          npm run build
-          cd ..
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Run PostgreSQL integration tests
-        run: |
-          DATABASE_BACKEND=postgres DATABASE_URL=postgresql://lynx:lynx_password@localhost:5432/lynx cargo test --tests
-        env:
-          RUST_LOG: info
+      - name: Clean up service
+        if: always()
+        run: docker rm --force lynx || true

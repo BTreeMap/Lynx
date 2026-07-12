@@ -1,419 +1,31 @@
 name: Performance Benchmarks
 
-permissions:
-  contents: read
-  packages: read
-  pull-requests: write
-
 on:
   workflow_run:
     workflows: ["Build and Publish Docker image to GHCR"]
-    types:
-      - completed
+    types: [completed]
   workflow_dispatch:
     inputs:
-      duration:
-        description: 'Benchmark duration per test (e.g., 30s, 1m)'
+      duration_seconds:
+        description: Duration of each benchmark stage in seconds
         required: false
-        default: '30s'
-      concurrency:
-        description: 'Maximum concurrency level for tests'
+        default: '30'
+      max_concurrency:
+        description: Maximum native Rust worker count
         required: false
         default: '10000'
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   benchmark-postgres:
-    name: Performance Benchmark (PostgreSQL)
+    name: Native Benchmark (PostgreSQL)
     runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          submodules: recursive
-
-      - name: Compute lowercase repository name
-        run: echo "REPO_LOWER=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull Docker image
-        run: |
-          docker pull ghcr.io/${{ env.REPO_LOWER }}:latest
-
-      - name: Start PostgreSQL container
-        run: |
-          docker run -d \
-            --name postgres \
-            -e POSTGRES_USER=lynx \
-            -e POSTGRES_PASSWORD=lynx_benchmark_pass \
-            -e POSTGRES_DB=lynx \
-            -p 5432:5432 \
-            postgres:18-alpine
-
-          # Wait for PostgreSQL to be ready
-          for i in {1..30}; do
-            if docker exec postgres pg_isready -U lynx > /dev/null 2>&1; then
-              echo "PostgreSQL is ready!"
-              break
-            fi
-            echo "Waiting for PostgreSQL... ($i/30)"
-            sleep 2
-          done
-
-      - name: Start Lynx with PostgreSQL and userland-proxy disabled
-        run: |
-          # Run with --userland-proxy=false to disable the userland proxy
-          # This significantly improves performance
-          docker run -d \
-            --name lynx \
-            --network host \
-            --userns=host \
-            -e DATABASE_BACKEND=postgres \
-            -e DATABASE_URL=postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx \
-            -e DATABASE_MAX_CONNECTIONS=50 \
-            -e AUTH_MODE=none \
-            -e API_HOST=0.0.0.0 \
-            -e API_PORT=8080 \
-            -e REDIRECT_HOST=0.0.0.0 \
-            -e REDIRECT_PORT=3000 \
-            -e CACHE_MAX_ENTRIES=500000 \
-            -e CACHE_FLUSH_INTERVAL_SECS=5 \
-            -e ACTOR_BUFFER_SIZE=1000000 \
-            -e ACTOR_FLUSH_INTERVAL_MS=100 \
-            ghcr.io/${{ env.REPO_LOWER }}:latest
-
-          # Note: --userland-proxy=false is a Docker daemon setting, not a container flag
-          # We use --network host which bypasses the userland proxy entirely
-
-      - name: Wait for Lynx service to be ready
-        run: |
-          for i in {1..60}; do
-            if curl -f http://localhost:8080/api/health > /dev/null 2>&1; then
-              echo "Lynx service is ready!"
-              break
-            fi
-            echo "Waiting for Lynx service... ($i/60)"
-            sleep 2
-          done
-          curl http://localhost:8080/api/health || exit 1
-
-      - name: Install benchmarking tools
-        run: |
-          # Install wrk for high-performance HTTP benchmarking
-          sudo apt-get update
-          sudo apt-get install -y build-essential libssl-dev git jq
-
-          # Clone and build wrk
-          git clone https://github.com/wg/wrk.git /tmp/wrk
-          cd /tmp/wrk
-          make -j$(nproc)
-          sudo cp wrk /usr/local/bin/
-
-          # Verify installation
-          wrk --version || echo "wrk installed (no version flag)"
-
-          # Install Apache Bench as fallback
-          sudo apt-get install -y apache2-utils
-
-      - name: Install Rust toolchain
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          source $HOME/.cargo/env
-          cargo --version
-
-      - name: Create benchmark results directory
-        run: mkdir -p benchmark-results
-
-      - name: Run performance benchmarks
-        run: |
-          DURATION="${{ github.event.inputs.duration || '30s' }}"
-          bash tests/benchmark.sh http://localhost:8080 http://localhost:3000 ./benchmark-results "$DURATION"
-
-      - name: Generate performance report with actual results
-        if: always()
-        run: |
-          REPORT_FILE="benchmark-results/PERFORMANCE_REPORT.md"
-
-          # Find the benchmark results files
-          RESULTS_TXT=$(find benchmark-results -name "benchmark-results-*.txt" -type f | head -1)
-          RESULTS_JSON=$(find benchmark-results -name "benchmark-results-*.json" -type f | head -1)
-
-          # Start building the report
-          cat > "$REPORT_FILE" << 'EOREPORT'
-          # Lynx Performance Benchmark Report
-
-          **Date:** DATE_PLACEHOLDER
-          **Commit:** COMMIT_PLACEHOLDER
-          **Branch:** BRANCH_PLACEHOLDER
-          **Workflow Run:** [View Run](https://github.com/REPO_PLACEHOLDER/actions/runs/RUN_ID_PLACEHOLDER)
-
-          ## Configuration
-
-          - **Database:** PostgreSQL 18
-          - **Network Mode:** host (userland-proxy bypassed for maximum performance)
-          - **Cache Settings:**
-            - Max Entries: 500,000
-            - DB Flush Interval: 5 seconds
-            - Actor Buffer Size: 1,000,000
-            - Actor Flush Interval: 100ms
-          - **Database Connections:** 50
-
-          ## Test Environment
-
-          - **Runner:** ubuntu-24.04
-          - **CPU:** GitHub Actions hosted runner
-          - **Memory:** GitHub Actions hosted runner
-          - **Docker:** Host network mode (no userland proxy overhead)
-
-          ## Benchmark Results Summary
-
-          EOREPORT
-
-          # Parse and add actual benchmark results if available
-          if [ -f "$RESULTS_TXT" ]; then
-            echo "" >> "$REPORT_FILE"
-            echo "### Actual Performance Metrics" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            # Extract key metrics from wrk output
-            echo "#### Redirect Endpoint Tests" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            # Parse the results file for wrk output sections
-            grep -A 20 "Test 1.1:" "$RESULTS_TXT" | grep -E "Requests/sec:|Latency|requests in" | head -4 >> "$REPORT_FILE" 2>/dev/null || echo "_Results pending..._" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            echo "#### API Endpoint Tests" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            grep -A 20 "Test 2.1:" "$RESULTS_TXT" | grep -E "Requests/sec:|Latency|requests in" | head -4 >> "$REPORT_FILE" 2>/dev/null || echo "_Results pending..._" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-
-            echo "**For complete detailed results, see the benchmark-results-*.txt file in the artifacts.**" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-          else
-            echo "" >> "$REPORT_FILE"
-            echo "_Benchmark results file not found. See artifacts for raw output._" >> "$REPORT_FILE"
-            echo "" >> "$REPORT_FILE"
-          fi
-
-          # Continue with the rest of the report
-          cat >> "$REPORT_FILE" << 'EOREPORT2'
-
-          ### Key Performance Indicators
-
-          The benchmark focuses on:
-
-          1. **Redirect Endpoint** (Primary Focus)
-             - Single hot URL with 1000 concurrent connections
-             - Single hot URL with 5000 concurrent connections
-             - Distributed load across 100 URLs
-             - Extreme load with 10,000 concurrent connections
-
-          2. **Management Endpoints** (Expected Lower Performance)
-             - POST /api/urls (Create)
-             - GET /api/urls/:code (Read single)
-             - GET /api/urls (List)
-             - PUT /api/urls/:code/deactivate (Update)
-             - GET /api/health (Health check)
-
-          ### Expected Performance Characteristics
-
-          Based on caching optimizations documented in `docs/PERFORMANCE_OPTIMIZATIONS.md`:
-
-          - **Redirect endpoint (cached):**
-            - Target: ~70,000 requests/second with 1000 concurrency
-            - Expected slight drop with 5000 concurrency
-            - Zero lock contention on hot URLs (actor pattern)
-            - Sub-millisecond latency for cached hits
-
-          - **Management endpoints:**
-            - Lower throughput (involve database queries)
-            - POST: Database writes + validation
-            - GET single: May benefit from read cache
-            - GET list: Pagination queries
-            - PUT: State changes + cache invalidation
-
-          ### Performance Optimizations Verified
-
-          1. ✅ Moka read cache (500k entries, 5-minute TTL)
-          2. ✅ Actor pattern write buffering (zero lock contention)
-          3. ✅ Dual-layer flush system (100ms + 5s)
-          4. ✅ Non-blocking database writes
-          5. ✅ Connection pooling (50 connections)
-
-          ## Artifacts Generated
-
-          Throughput results are available in the `performance-benchmark-results` artifact:
-
-          - **`benchmark-results-*.txt`**: Complete wrk output with all test results
-          - **`benchmark-results-*.json`**: Structured JSON data for programmatic analysis
-          - **`PERFORMANCE_REPORT.md`**: This human-readable summary report
-          - **`lynx-logs.txt`**: Service logs from the benchmark run
-          - **`GRAPHS.txt`**: Guide for visualizing results
-
-          CPU profiles and interpretation guidance are published separately
-          in the commit-addressed `flamegraphs-*` artifact from the CPU Flamegraphs job.
-
-          ## Flamegraph Profiling
-
-          The companion CPU Flamegraphs job profiles two representative workloads:
-
-          - **Redirect Endpoint (Cached)**: Shows hot paths in cached request handling
-          - **API Operations**: Shows time distribution across database operations
-
-          Flamegraphs are interactive SVG files that can be opened in any browser.
-          Click on sections to zoom in, search for functions, and explore call stacks.
-
-          See the README bundled with that artifact for interpretation guidance.
-          For profiling documentation, see `docs/PROFILING_RUST.md`.
-
-          ## Analysis
-
-          The benchmark validates the caching and actor pattern optimizations implemented in Lynx.
-          For detailed performance optimization documentation, see `docs/PERFORMANCE_OPTIMIZATIONS.md`.
-
-          ---
-
-          *Generated by GitHub Actions Performance Benchmark workflow*
-          EOREPORT2
-
-          # Replace placeholders with actual values
-          sed -i "s|DATE_PLACEHOLDER|$(date -u +"%Y-%m-%d %H:%M:%S UTC")|g" "$REPORT_FILE"
-          sed -i "s|COMMIT_PLACEHOLDER|${{ github.sha }}|g" "$REPORT_FILE"
-          sed -i "s|BRANCH_PLACEHOLDER|${{ github.ref_name }}|g" "$REPORT_FILE"
-          sed -i "s|REPO_PLACEHOLDER|${{ github.repository }}|g" "$REPORT_FILE"
-          sed -i "s|RUN_ID_PLACEHOLDER|${{ github.run_id }}|g" "$REPORT_FILE"
-
-          echo "Generated performance report at $REPORT_FILE"
-
-          # Create an index file for easy navigation
-          cat > "benchmark-results/INDEX.md" << 'EOINDEX'
-          # Benchmark Results Index
-
-          This directory contains all performance benchmark results and analysis.
-
-          ## Quick Navigation
-
-          1. **[PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)** - Start here! Human-readable summary with key metrics
-          2. **benchmark-results-*.txt** - Complete detailed wrk output for all tests
-          3. **benchmark-results-*.json** - Structured JSON data for analysis
-          4. **lynx-logs.txt** - Service logs during benchmark execution
-
-          Interactive CPU profiles are published by the companion CPU Flamegraphs job
-          in a separate commit-addressed `flamegraphs-*` artifact.
-
-          ## How to Use These Results
-
-          ### For Quick Overview
-          Read `PERFORMANCE_REPORT.md` for a summary of key performance metrics and test outcomes.
-
-          ### For Detailed Analysis
-          1. Open the `.txt` file to see complete wrk output with all latency percentiles
-          2. Use the `.json` file for programmatic analysis or custom visualizations
-          3. Download the companion `flamegraphs-*` artifact to explore CPU usage
-
-          ### For Debugging Performance Issues
-          1. Check `lynx-logs.txt` for any errors or warnings during benchmark execution
-          2. Review the companion flamegraphs to identify CPU bottlenecks
-          3. Compare metrics against expected performance characteristics in the report
-
-          ## File Descriptions
-
-          | File | Description |
-          |------|-------------|
-          | PERFORMANCE_REPORT.md | Human-readable summary with configuration and key metrics |
-          | benchmark-results-*.txt | Raw wrk output with complete test details |
-          | benchmark-results-*.json | Structured test results for analysis |
-          | lynx-logs.txt | Service logs captured during benchmarks |
-          | GRAPHS.txt | Guide for creating visualizations |
-
-          ---
-
-          *All files generated by the Performance Benchmark workflow*
-          EOINDEX
-
-          echo "Created index file at benchmark-results/INDEX.md"
-
-      - name: Collect service logs
-        if: always()
-        run: |
-          echo "=== Lynx Service Logs ===" > benchmark-results/lynx-logs.txt
-          docker logs lynx >> benchmark-results/lynx-logs.txt 2>&1 || true
-
-      - name: Generate performance graphs
-        if: always()
-        run: |
-          # Create a simple ASCII graph summary
-          cat > benchmark-results/GRAPHS.txt << 'EOF'
-          Performance Graphs Summary
-          ==========================
-
-          For detailed graphs, analyze the JSON results file with your preferred visualization tool.
-
-          Recommended tools:
-          - gnuplot
-          - matplotlib (Python)
-          - Chart.js (JavaScript)
-          - Google Charts
-
-          JSON structure:
-          {
-            "timestamp": "...",
-            "api_url": "...",
-            "redirect_url": "...",
-            "tests": [
-              {
-                "name": "Test name",
-                "requests_per_second": "...",
-                "avg_latency_ms": "...",
-                "p50_latency_ms": "...",
-                "p90_latency_ms": "...",
-                "p99_latency_ms": "...",
-                "errors": "..."
-              }
-            ]
-          }
-          EOF
-
-      - name: Generate benchmark GitHub Actions summary
-        if: always()
-        run: |
-          if [[ -f benchmark-results/PERFORMANCE_REPORT.md ]]; then
-            cat benchmark-results/PERFORMANCE_REPORT.md >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "# Performance benchmark report unavailable" >> "$GITHUB_STEP_SUMMARY"
-            echo "Review the job logs and downloadable diagnostics." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Upload benchmark results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: performance-benchmark-results
-          path: benchmark-results/
-          retention-days: 90
-
-      - name: Stop containers
-        if: always()
-        run: |
-          docker stop lynx || true
-          docker rm lynx || true
-          docker stop postgres || true
-          docker rm postgres || true
-
-  flamegraph-postgres:
-    name: CPU Flamegraphs (PostgreSQL)
-    runs-on: ubuntu-24.04
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
-    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
     services:
       postgres:
         image: postgres:18-alpine
@@ -428,16 +40,18 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-
     steps:
-      - name: Checkout profiled commit
+      - name: Checkout benchmarked source
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           submodules: recursive
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - name: Set image reference
+        id: image
+        run: echo "reference=ghcr.io/${GITHUB_REPOSITORY,,}:${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
@@ -449,19 +63,251 @@ jobs:
           npm ci
           npm run build
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache profiling build
+      - name: Cache Rust dependencies
         uses: actions/cache@v6
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-flamegraph-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-native-benchmark-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start benchmark service
+        run: |
+          docker pull "${{ steps.image.outputs.reference }}"
+          docker run --detach --name lynx --network host --userns=host \
+            --env DATABASE_BACKEND=postgres --env DATABASE_URL \
+            --env DATABASE_MAX_CONNECTIONS=50 --env AUTH_MODE=none \
+            --env API_HOST=0.0.0.0 --env API_PORT=8080 \
+            --env REDIRECT_HOST=0.0.0.0 --env REDIRECT_PORT=3000 \
+            --env CACHE_MAX_ENTRIES=500000 \
+            --env CACHE_FLUSH_INTERVAL_SECS=5 \
+            --env ACTOR_BUFFER_SIZE=1000000 \
+            --env ACTOR_FLUSH_INTERVAL_MS=100 \
+            "${{ steps.image.outputs.reference }}"
+
+      - name: Run native benchmark suite
+        run: |
+          ulimit -n 65535
+          cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
+        env:
+          BENCHMARK_SUITE: standard
+          BENCHMARK_LABEL: postgres
+          BENCHMARK_OUTPUT_DIR: benchmark-results
+          BENCHMARK_DURATION_SECS: ${{ github.event.inputs.duration_seconds || '30' }}
+          BENCHMARK_MAX_CONCURRENCY: ${{ github.event.inputs.max_concurrency || '10000' }}
+          RUST_LOG: info
+
+      - name: Publish native report
+        if: always()
+        run: cat benchmark-results/native-benchmark-postgres.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect service logs
+        if: always()
+        run: docker logs lynx > benchmark-results/lynx-logs.txt 2>&1 || true
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-benchmark-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          path: benchmark-results/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Clean up service
+        if: always()
+        run: docker rm --force lynx || true
+
+  benchmark-analytics:
+    name: Native Analytics Impact Benchmark
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    env:
+      DATABASE_URL: postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: lynx
+          POSTGRES_PASSWORD: lynx_benchmark_pass
+          POSTGRES_DB: lynx
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Checkout benchmarked source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          submodules: recursive
+
+      - name: Set image reference
+        id: image
+        run: echo "reference=ghcr.io/${GITHUB_REPOSITORY,,}:${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-native-benchmark-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run baseline without analytics
+        run: |
+          docker pull "${{ steps.image.outputs.reference }}"
+          docker run --detach --name lynx-baseline --network host --userns=host \
+            --env DATABASE_BACKEND=postgres --env DATABASE_URL \
+            --env DATABASE_MAX_CONNECTIONS=50 --env AUTH_MODE=none \
+            --env API_HOST=0.0.0.0 --env API_PORT=8080 \
+            --env REDIRECT_HOST=0.0.0.0 --env REDIRECT_PORT=3000 \
+            --env CACHE_MAX_ENTRIES=500000 \
+            --env CACHE_FLUSH_INTERVAL_SECS=5 \
+            --env ACTOR_BUFFER_SIZE=1000000 \
+            --env ACTOR_FLUSH_INTERVAL_MS=100 \
+            --env ANALYTICS_ENABLED=false \
+            "${{ steps.image.outputs.reference }}"
+          ulimit -n 65535
+          cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
+        env:
+          BENCHMARK_SUITE: analytics
+          BENCHMARK_LABEL: baseline
+          BENCHMARK_OUTPUT_DIR: benchmark-results-analytics
+          BENCHMARK_DURATION_SECS: ${{ github.event.inputs.duration_seconds || '30' }}
+          BENCHMARK_MAX_CONCURRENCY: ${{ github.event.inputs.max_concurrency || '10000' }}
+          RUST_LOG: info
+
+      - name: Stop baseline service
+        if: always()
+        run: docker rm --force lynx-baseline || true
+
+      - name: Run analytics-enabled benchmark
+        run: |
+          docker run --detach --name lynx-analytics --network host --userns=host \
+            --env DATABASE_BACKEND=postgres --env DATABASE_URL \
+            --env DATABASE_MAX_CONNECTIONS=50 --env AUTH_MODE=none \
+            --env API_HOST=0.0.0.0 --env API_PORT=8080 \
+            --env REDIRECT_HOST=0.0.0.0 --env REDIRECT_PORT=3000 \
+            --env CACHE_MAX_ENTRIES=500000 \
+            --env CACHE_FLUSH_INTERVAL_SECS=5 \
+            --env ACTOR_BUFFER_SIZE=1000000 \
+            --env ACTOR_FLUSH_INTERVAL_MS=100 \
+            --env ANALYTICS_ENABLED=true \
+            --env ANALYTICS_IP_ANONYMIZATION=true \
+            --env ANALYTICS_TRUSTED_PROXY_MODE=none \
+            --env ANALYTICS_FLUSH_INTERVAL_SECS=60 \
+            "${{ steps.image.outputs.reference }}"
+          ulimit -n 65535
+          cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
+        env:
+          BENCHMARK_SUITE: analytics
+          BENCHMARK_LABEL: analytics
+          BENCHMARK_OUTPUT_DIR: benchmark-results-analytics
+          BENCHMARK_COMPARE_BASELINE: benchmark-results-analytics/native-benchmark-baseline.json
+          BENCHMARK_DURATION_SECS: ${{ github.event.inputs.duration_seconds || '30' }}
+          BENCHMARK_MAX_CONCURRENCY: ${{ github.event.inputs.max_concurrency || '10000' }}
+          RUST_LOG: info
+
+      - name: Publish native comparison report
+        if: always()
+        run: cat benchmark-results-analytics/native-benchmark-analytics.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect analytics logs
+        if: always()
+        run: docker logs lynx-analytics > benchmark-results-analytics/lynx-analytics-logs.txt 2>&1 || true
+
+      - name: Upload analytics benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-analytics-benchmark-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          path: benchmark-results-analytics/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Clean up analytics service
+        if: always()
+        run: docker rm --force lynx-analytics || true
+
+  flamegraph-postgres:
+    name: CPU Flamegraphs (PostgreSQL)
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: lynx
+          POSTGRES_PASSWORD: lynx_benchmark_pass
+          POSTGRES_DB: lynx
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Checkout profiled source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          submodules: recursive
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Capture representative flamegraphs
         run: >-
@@ -471,466 +317,18 @@ jobs:
           representative_hot_path_flamegraphs
           -- --ignored --nocapture
         env:
-          DATABASE_URL: postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
           RUSTFLAGS: -C force-frame-pointers=yes
           PERF_FLAMEGRAPH_OUTPUT_DIR: target/flamegraphs
-          PERF_FLAMEGRAPH_FREQUENCY_HZ: "99"
-          PERF_FLAMEGRAPH_DURATION: ${{ github.event.inputs.duration || '30s' }}
-          PERF_FLAMEGRAPH_REDIRECT_CONCURRENCY: "256"
-          PERF_FLAMEGRAPH_API_CONCURRENCY: "64"
+          PERF_FLAMEGRAPH_FREQUENCY_HZ: '99'
+          PERF_FLAMEGRAPH_DURATION: ${{ github.event.inputs.duration_seconds || '30' }}
+          PERF_FLAMEGRAPH_REDIRECT_CONCURRENCY: '256'
+          PERF_FLAMEGRAPH_API_CONCURRENCY: '64'
 
-      - name: Validate flamegraphs
-        if: always()
-        run: |
-          for graph in \
-            target/flamegraphs/flamegraph-redirect-cached.svg \
-            target/flamegraphs/flamegraph-api-operations.svg; do
-            test -s "$graph"
-            grep -q '<svg' "$graph"
-          done
-          test -s target/flamegraphs/README.md
-          test -s target/flamegraphs/metrics.json
-          jq -e '.schema_version == 1 and (.scenarios | length == 2)' \
-            target/flamegraphs/metrics.json > /dev/null
-
-      - name: Generate flamegraph GitHub Actions summary
-        if: always()
-        run: |
-          redirect_status="❌ missing"
-          api_status="❌ missing"
-          if [[ -s target/flamegraphs/flamegraph-redirect-cached.svg ]]; then
-            redirect_status="✅ $(du -h target/flamegraphs/flamegraph-redirect-cached.svg | cut -f1)"
-          fi
-          if [[ -s target/flamegraphs/flamegraph-api-operations.svg ]]; then
-            api_status="✅ $(du -h target/flamegraphs/flamegraph-api-operations.svg | cut -f1)"
-          fi
-          redirect_rps=$(jq -r '.scenarios[] | select(.scenario == "redirect-cached") | .requests_per_second' target/flamegraphs/metrics.json)
-          api_rps=$(jq -r '.scenarios[] | select(.scenario == "api-mixed") | .requests_per_second' target/flamegraphs/metrics.json)
-
-          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
-          # CPU Flamegraphs
-
-          **Profiled commit:** ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-
-          **Database:** PostgreSQL 18
-
-          **Duration per scenario:** ${{ github.event.inputs.duration || '30s' }}
-
-          **Sampling frequency:** 99 Hz
-
-          | Scenario | Result | Sampled throughput | Workload |
-          |---|---:|---:|---|
-          | Cached redirect | $redirect_status | $redirect_rps req/s | 256 async workers, warmed single URL |
-          | Mixed API | $api_status | $api_rps req/s | 64 async workers, 50% create / 50% read |
-
-          Download the artifact and open each SVG in a browser. Click a frame to zoom,
-          search for wide application frames, and investigate unexpected database, lock,
-          allocation, or scheduler stacks. Interpretation guidance accompanies the SVGs.
-          EOF
-
-      - name: Upload flamegraph results
-        id: flamegraph-artifact
+      - name: Upload flamegraph artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: flamegraphs-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           path: target/flamegraphs/
           if-no-files-found: error
-          retention-days: 90
-
-      - name: Link flamegraph artifact
-        if: always() && steps.flamegraph-artifact.outputs.artifact-id != ''
-        run: echo "[Download interactive flamegraphs and guide](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.flamegraph-artifact.outputs.artifact-id }})" >> "$GITHUB_STEP_SUMMARY"
-
-  benchmark-analytics:
-    name: Analytics Performance Impact Benchmark
-    runs-on: ubuntu-24.04
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          submodules: recursive
-
-      - name: Compute lowercase repository name
-        run: echo "REPO_LOWER=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull Docker image
-        run: |
-          docker pull ghcr.io/${{ env.REPO_LOWER }}:latest
-
-      - name: Start PostgreSQL container
-        run: |
-          docker run -d \
-            --name postgres \
-            -e POSTGRES_USER=lynx \
-            -e POSTGRES_PASSWORD=lynx_benchmark_pass \
-            -e POSTGRES_DB=lynx \
-            -p 5432:5432 \
-            postgres:18-alpine
-
-          # Wait for PostgreSQL to be ready
-          for i in {1..30}; do
-            if docker exec postgres pg_isready -U lynx > /dev/null 2>&1; then
-              echo "PostgreSQL is ready!"
-              break
-            fi
-            echo "Waiting for PostgreSQL... ($i/30)"
-            sleep 2
-          done
-
-      - name: Download GeoIP databases for analytics testing
-        run: |
-          mkdir -p /tmp/geoip
-
-          # Download GeoLite2 City database (free version)
-          # Note: In production, you would use your MaxMind license key
-          # For CI testing, we'll use a mock database or skip GeoIP lookups
-
-          echo "Note: GeoIP databases not downloaded for CI"
-          echo "Analytics will run without GeoIP lookups in this test"
-          echo "To test with GeoIP, add MaxMind license key to secrets"
-
-      - name: Create benchmark results directory
-        run: mkdir -p benchmark-results-analytics
-
-      - name: Install benchmarking tools
-        run: |
-          # Install wrk for high-performance HTTP benchmarking
-          sudo apt-get update
-          sudo apt-get install -y build-essential libssl-dev git jq
-
-          # Clone and build wrk
-          git clone https://github.com/wg/wrk.git /tmp/wrk
-          cd /tmp/wrk
-          make -j$(nproc)
-          sudo cp wrk /usr/local/bin/
-
-          # Verify installation
-          wrk --version || echo "wrk installed (no version flag)"
-
-      - name: Run baseline benchmark WITHOUT analytics
-        run: |
-          echo "=========================================="
-          echo "BASELINE: Running benchmarks WITHOUT analytics"
-          echo "=========================================="
-
-          # Start Lynx WITHOUT analytics
-          docker run -d \
-            --name lynx-baseline \
-            --network host \
-            --userns=host \
-            -e DATABASE_BACKEND=postgres \
-            -e DATABASE_URL=postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx \
-            -e DATABASE_MAX_CONNECTIONS=50 \
-            -e AUTH_MODE=none \
-            -e API_HOST=0.0.0.0 \
-            -e API_PORT=8080 \
-            -e REDIRECT_HOST=0.0.0.0 \
-            -e REDIRECT_PORT=3000 \
-            -e CACHE_MAX_ENTRIES=500000 \
-            -e CACHE_FLUSH_INTERVAL_SECS=5 \
-            -e ACTOR_BUFFER_SIZE=1000000 \
-            -e ACTOR_FLUSH_INTERVAL_MS=100 \
-            -e ANALYTICS_ENABLED=false \
-            ghcr.io/${{ env.REPO_LOWER }}:latest
-
-          # Wait for service to be ready
-          for i in {1..60}; do
-            if curl -f http://localhost:8080/api/health > /dev/null 2>&1; then
-              echo "Lynx service is ready (without analytics)!"
-              break
-            fi
-            echo "Waiting for Lynx service... ($i/60)"
-            sleep 2
-          done
-          curl http://localhost:8080/api/health || exit 1
-
-          # Create test URLs for analytics benchmarking
-          for i in $(seq 1 500); do
-            curl -s -X POST http://localhost:8080/api/urls \
-              -H "Content-Type: application/json" \
-              -d "{\"url\": \"https://example.com/analytics-target-$i\", \"custom_code\": \"analytics-bench-$i\"}" > /dev/null 2>&1 || true
-          done
-
-          echo "Created 500 test URLs for analytics benchmarking"
-
-          # Run analytics benchmark script
-          DURATION="${{ github.event.inputs.duration || '30s' }}"
-          bash tests/benchmark-analytics.sh http://localhost:8080 http://localhost:3000 ./benchmark-results-analytics "$DURATION" "without-analytics"
-
-          # Stop the baseline container
-          docker stop lynx-baseline || true
-          docker rm lynx-baseline || true
-
-          # Wait a bit for cleanup
-          sleep 5
-
-      - name: Run benchmark WITH analytics enabled
-        run: |
-          echo "=========================================="
-          echo "WITH ANALYTICS: Running benchmarks WITH analytics enabled"
-          echo "=========================================="
-
-          # Start Lynx WITH analytics enabled
-          docker run -d \
-            --name lynx-analytics \
-            --network host \
-            --userns=host \
-            -e DATABASE_BACKEND=postgres \
-            -e DATABASE_URL=postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx \
-            -e DATABASE_MAX_CONNECTIONS=50 \
-            -e AUTH_MODE=none \
-            -e API_HOST=0.0.0.0 \
-            -e API_PORT=8080 \
-            -e REDIRECT_HOST=0.0.0.0 \
-            -e REDIRECT_PORT=3000 \
-            -e CACHE_MAX_ENTRIES=500000 \
-            -e CACHE_FLUSH_INTERVAL_SECS=5 \
-            -e ACTOR_BUFFER_SIZE=1000000 \
-            -e ACTOR_FLUSH_INTERVAL_MS=100 \
-            -e ANALYTICS_ENABLED=true \
-            -e ANALYTICS_IP_ANONYMIZATION=true \
-            -e ANALYTICS_TRUSTED_PROXY_MODE=none \
-            -e ANALYTICS_FLUSH_INTERVAL_SECS=60 \
-            ghcr.io/${{ env.REPO_LOWER }}:latest
-
-          # Wait for service to be ready
-          for i in {1..60}; do
-            if curl -f http://localhost:8080/api/health > /dev/null 2>&1; then
-              echo "Lynx service is ready (with analytics)!"
-              break
-            fi
-            echo "Waiting for Lynx service... ($i/60)"
-            sleep 2
-          done
-          curl http://localhost:8080/api/health || exit 1
-
-          # Run analytics benchmark script
-          DURATION="${{ github.event.inputs.duration || '30s' }}"
-          bash tests/benchmark-analytics.sh http://localhost:8080 http://localhost:3000 ./benchmark-results-analytics "$DURATION" "with-analytics"
-
-          # Collect analytics logs
-          echo "=== Lynx Analytics Logs ===" > benchmark-results-analytics/lynx-analytics-logs.txt
-          docker logs lynx-analytics >> benchmark-results-analytics/lynx-analytics-logs.txt 2>&1 || true
-
-          # Stop the analytics container
-          docker stop lynx-analytics || true
-          docker rm lynx-analytics || true
-
-      - name: Generate analytics performance comparison report
-        if: always()
-        run: |
-          REPORT_FILE="benchmark-results-analytics/ANALYTICS_COMPARISON_REPORT.md"
-
-          cat > "$REPORT_FILE" << 'EOREPORT'
-          # Analytics Module Performance Impact Report
-
-          **Date:** DATE_PLACEHOLDER
-          **Commit:** COMMIT_PLACEHOLDER
-          **Branch:** BRANCH_PLACEHOLDER
-          **Workflow Run:** [View Run](https://github.com/REPO_PLACEHOLDER/actions/runs/RUN_ID_PLACEHOLDER)
-
-          ## Overview
-
-          This report analyzes the performance impact of enabling the analytics module
-          under various traffic patterns and load conditions.
-
-          ## Test Methodology
-
-          Two separate benchmark runs were performed:
-
-          1. **Baseline (WITHOUT Analytics):** `ANALYTICS_ENABLED=false`
-          2. **With Analytics:** `ANALYTICS_ENABLED=true` with IP anonymization
-
-          Each run tested:
-          - Single hot URL (maximum contention)
-          - Distributed traffic across 100-500 URLs (low contention, more cache misses)
-          - Mixed traffic patterns (hot spot, power law distribution)
-          - Peak load conditions (1000, 5000, 10000 concurrent connections)
-          - Sustained load tests
-
-          ## Configuration
-
-          - **Database:** PostgreSQL 18
-          - **Network Mode:** host (userland-proxy bypassed)
-          - **Cache Settings:**
-            - Max Entries: 500,000
-            - DB Flush Interval: 5 seconds
-            - Actor Buffer Size: 1,000,000
-            - Actor Flush Interval: 100ms
-          - **Analytics Settings (when enabled):**
-            - IP Anonymization: Enabled
-            - Flush Interval: 60 seconds
-            - Trusted Proxy Mode: none
-
-          ## Benchmark Results
-
-          ### Results Files
-
-          - **Baseline Results:** `analytics-benchmark-without-analytics-*.txt`
-          - **Analytics Enabled Results:** `analytics-benchmark-with-analytics-*.txt`
-          - **Detailed Logs:** `lynx-analytics-logs.txt`
-
-          ### Traffic Pattern Tests
-
-          #### 1. Single Hot URL (Maximum Contention)
-
-          Tests with 1000, 5000, and 10000 concurrent connections on a single URL.
-          This represents the worst-case scenario for lock contention.
-
-          **Expected Behavior:**
-          - Actor pattern should minimize contention impact
-          - Analytics aggregation happens asynchronously
-          - Minor performance impact expected
-
-          #### 2. Distributed Traffic (Low Contention, More Cache Misses)
-
-          Tests across 100 and 500 different URLs with high concurrency.
-
-          **Expected Behavior:**
-          - More cache misses lead to database lookups
-          - Analytics data stored for each unique URL
-          - Memory usage and I/O patterns differ from single hot URL
-
-          #### 3. Mixed Traffic Patterns
-
-          Realistic traffic distributions:
-          - **Hot Spot:** 80% on single URL, 20% distributed
-          - **Power Law:** 70% on top 10 URLs, 30% on remaining 90
-
-          **Expected Behavior:**
-          - Simulates real-world viral link scenarios
-          - Tests analytics effectiveness with realistic patterns
-
-          ## Performance Analysis
-
-          ### Key Metrics to Compare
-
-          1. **Requests per Second (RPS)**
-             - Baseline vs. Analytics enabled
-             - Impact percentage: `(Analytics_RPS - Baseline_RPS) / Baseline_RPS * 100`
-
-          2. **Latency**
-             - Average, P50, P90, P99 latencies
-             - Tail latency impact is crucial
-
-          3. **Resource Usage**
-             - Memory consumption with analytics
-             - Database I/O patterns
-
-          ### Expected Impact Summary
-
-          The analytics module is designed to have minimal impact on redirect performance:
-
-          - **Async Processing:** Analytics events processed asynchronously
-          - **Buffered Aggregation:** Events buffered and flushed periodically
-          - **Non-blocking:** Analytics doesn't block the redirect path
-          - **IP Anonymization:** Truncates IPs before storage for privacy
-
-          **Anticipated Performance Impact:**
-          - Single hot URL: < 5% RPS reduction
-          - Distributed traffic: < 10% RPS reduction (more analytics data)
-          - Latency: < 1ms average increase
-
-          ## Detailed Results
-
-          For detailed benchmark output, see the following files in the artifacts:
-
-          - `analytics-benchmark-without-analytics-*.txt` - Complete baseline results
-          - `analytics-benchmark-with-analytics-*.txt` - Complete analytics-enabled results
-          - `analytics-benchmark-*.json` - Structured JSON data for analysis
-
-          ## Recommendations
-
-          Based on the benchmark results:
-
-          1. **Analytics is acceptable if:** Performance impact < 10% and tail latency < 2ms increase
-          2. **Consider optimization if:** Performance impact > 15% or P99 latency increases significantly
-          3. **Monitor in production:** Real-world traffic patterns may differ from benchmarks
-
-          ## Files Generated
-
-          - `ANALYTICS_COMPARISON_REPORT.md` - This report
-          - `analytics-benchmark-without-analytics-*.txt` - Baseline benchmark results
-          - `analytics-benchmark-with-analytics-*.txt` - Analytics-enabled benchmark results
-          - `analytics-benchmark-*.json` - JSON structured data for both runs
-          - `lynx-analytics-logs.txt` - Service logs with analytics enabled
-
-          ---
-
-          *Generated by GitHub Actions Analytics Performance Benchmark workflow*
-          EOREPORT
-
-          # Replace placeholders
-          sed -i "s|DATE_PLACEHOLDER|$(date -u +"%Y-%m-%d %H:%M:%S UTC")|g" "$REPORT_FILE"
-          sed -i "s|COMMIT_PLACEHOLDER|${{ github.sha }}|g" "$REPORT_FILE"
-          sed -i "s|BRANCH_PLACEHOLDER|${{ github.ref_name }}|g" "$REPORT_FILE"
-          sed -i "s|REPO_PLACEHOLDER|${{ github.repository }}|g" "$REPORT_FILE"
-          sed -i "s|RUN_ID_PLACEHOLDER|${{ github.run_id }}|g" "$REPORT_FILE"
-
-          echo "Generated analytics comparison report"
-
-      - name: Stop PostgreSQL container
-        if: always()
-        run: |
-          docker stop postgres || true
-          docker rm postgres || true
-
-      - name: Generate GitHub Actions Summary for Analytics
-        if: always()
-        run: |
-          REPORT_FILE="benchmark-results-analytics/ANALYTICS_COMPARISON_REPORT.md"
-
-          if [ -f "$REPORT_FILE" ]; then
-            cat "$REPORT_FILE" >> $GITHUB_STEP_SUMMARY
-          else
-            cat >> $GITHUB_STEP_SUMMARY << 'EOSUMMARY'
-          # ⚠️ Analytics Performance Benchmark Results
-
-          **Status:** Analytics benchmark execution encountered an issue.
-
-          Please check the workflow logs and artifacts for detailed information.
-
-          ## Quick Links
-          - 📦 [Download Artifacts](../../actions/runs/${{ github.run_id }})
-          - 📋 [View Workflow Logs](../../actions/runs/${{ github.run_id }})
-
-          ---
-          *Generated by GitHub Actions Analytics Performance Benchmark workflow*
-          EOSUMMARY
-          fi
-
-          cat >> $GITHUB_STEP_SUMMARY << 'EOADDITIONAL'
-
-          ---
-
-          ## 📊 Analytics Benchmark Overview
-
-          This benchmark measures the performance impact of the analytics module:
-
-          - ✅ **Baseline tests** (analytics disabled)
-          - ✅ **Analytics tests** (analytics enabled with IP anonymization)
-          - 📈 **Traffic patterns:** Single hot URL, distributed traffic, mixed patterns
-          - 🔥 **Load conditions:** 1k, 5k, 10k concurrent connections
-          - ⏱️ **Sustained load tests** to verify aggregation behavior
-
-          Download artifacts to view detailed comparison results.
-
-          EOADDITIONAL
-
-      - name: Upload analytics benchmark results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: analytics-performance-results
-          path: benchmark-results-analytics/
           retention-days: 90

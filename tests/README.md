@@ -1,264 +1,98 @@
-# Lynx Integration and Data Consistency Tests
+# Lynx Test Harnesses
 
-This directory contains comprehensive integration and data consistency tests for the Lynx URL shortener.
+Lynx uses typed Rust test targets for component, black-box, lifecycle, and
+performance verification. Shell is deliberately limited to environment setup
+such as starting a Docker image or checking documentation drift; it does not
+parse HTTP responses, generate traffic, or encode test behavior.
 
-## Test Scripts
+## Test Layers
 
-### `integration_test.sh`
-Comprehensive integration test suite covering all API endpoints and functionality:
+| Target | Scope | Normal invocation |
+|---|---|---|
+| Existing `tests/*_integration.rs` targets | Storage, routing, cache, analytics, and API-component behavior | `cargo test --tests` |
+| `external_harness` | Real HTTP API/redirect behavior, concurrent operations, and exact restart durability | Ignored; requires a running service |
+| `benchmark_harness` | Deadline-bound native Rust traffic, latency sampling, and JSON/Markdown reports | Ignored; requires a running service |
+| `performance_harness` | In-process CPU-flamegraph capture | Ignored; run in profiling CI |
 
-**Test Coverage (20 tests):**
-1. Health check endpoint
-2. Auth mode endpoint
-3. URL creation with custom code
-4. URL creation with auto-generated code
-5. Get URL details
-6. Redirect functionality
-7. Click count verification
-8. List URLs endpoint
-9. URL deactivation
-10. Deactivated URL returns proper error code
-11. URL reactivation
-12. Reactivated URL works correctly
-13. Rapid URL creation (50 URLs stress test)
-14. Concurrent redirects to same URL
-15. URLs with special characters
-16. Pagination functionality
-17. Non-existent URL handling
-18. Duplicate code rejection
-19. Statistics accuracy
-20. Data consistency verification
+## External HTTP and Lifecycle Harness
 
-**Usage:**
-```bash
-bash tests/integration_test.sh [API_URL] [REDIRECT_URL]
+The external harness uses a non-following `reqwest` client, strongly typed JSON
+models, base64url route encoding, bounded eventual assertions, and native
+Tokio concurrency. It replaces the former curl/grep/sleep scripts.
 
-# Examples:
-bash tests/integration_test.sh http://localhost:8080 http://localhost:3000
-bash tests/integration_test.sh http://api.example.com http://r.example.com
+It verifies, without tolerances for isolated URLs:
+
+- health, auth mode, URL CRUD, cursor pagination, search, history, and restore;
+- redirect status and exact `Location` header;
+- exact click totals after concurrent redirects;
+- all concurrent creates succeed for distinct codes;
+- mixed reads/writes/redirects, state changes under traffic, and concurrent lists;
+- SIGTERM and SIGINT process shutdown: exit success, `Shutdown complete`, restart,
+  and exact persisted click totals.
+
+### Run against a locally started service
+
+`AUTH_MODE=none` is test-only. Start Lynx or a Docker image with test settings,
+then run:
+
+```text
+LYNX_E2E_CONTAINER=lynx \
+LYNX_E2E_CONCURRENCY=100 \
+cargo test --test external_harness -- --ignored --test-threads=1 --nocapture
 ```
 
-### `concurrent_test.sh`
-Concurrent load and stress testing to verify data consistency under high load:
+Configuration is typed and validated before test execution:
 
-**Test Coverage (6 tests):**
-1. Concurrent URL creation (configurable concurrency level)
-2. Concurrent redirects to same URL (click counting accuracy)
-3. Mixed concurrent operations (creates, gets, redirects)
-4. Rapid state changes under concurrent load
-5. High-frequency statistics updates (200 redirects)
-6. List endpoint under concurrent load
+| Variable | Default | Meaning |
+|---|---:|---|
+| `LYNX_E2E_API_URL` | `http://127.0.0.1:8080` | API origin |
+| `LYNX_E2E_REDIRECT_URL` | `http://127.0.0.1:3000` | Redirect origin |
+| `LYNX_E2E_CONTAINER` | none | Required for SIGTERM/SIGINT lifecycle verification |
+| `LYNX_E2E_CONCURRENCY` | `100` | Concurrent functional-load workers; must be non-zero |
+| `LYNX_E2E_REQUEST_TIMEOUT_SECS` | `15` | Per-request timeout |
+| `LYNX_E2E_READINESS_TIMEOUT_SECS` | `45` | Bounded health-check wait |
+| `LYNX_E2E_EXPECT_ANALYTICS` | `false` | Additionally require exact persisted analytics for the isolated stats URL |
 
-**Usage:**
-```bash
-bash tests/concurrent_test.sh [API_URL] [REDIRECT_URL] [CONCURRENCY]
+## Native Traffic Benchmarks
 
-# Examples:
-bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 100
-bash tests/concurrent_test.sh http://api.example.com http://r.example.com 200
+`benchmark_harness` replaces `wrk`, Lua scripts, Apache Bench fallback, and
+shell report parsing. It uses deadline-bound Tokio workers with a shared
+`reqwest` connection pool. Request counters use relaxed atomics; latency is
+sampled every 256 requests to keep measurement overhead bounded. Workers
+self-stop at the deadline and a bounded join aborts stuck stages.
+
+The standard suite covers hot and distributed redirects, URL creation/read/list,
+deactivation, health, and the previously skipped 80/15/5 mixed workload. The
+analytics suite covers hot, distributed, hotspot, power-law, sustained, and
+analytics-API traffic. Every run emits a typed JSON report and a Markdown
+summary in the chosen output directory.
+
+```text
+BENCHMARK_SUITE=standard \
+BENCHMARK_LABEL=local \
+BENCHMARK_OUTPUT_DIR=benchmark-results \
+BENCHMARK_DURATION_SECS=30 \
+BENCHMARK_MAX_CONCURRENCY=10000 \
+cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
 ```
 
-### `benchmark.sh`
-Performance benchmark suite to measure throughput and latency under various load conditions:
+Use `BENCHMARK_SUITE=analytics` for analytics traffic. A second run can compare
+itself to a baseline report without shell parsing:
 
-**Focus Areas:**
-1. **Redirect Endpoint** (primary focus - caching optimizations)
-   - Single hot URL @ 1000 concurrency
-   - Single hot URL @ 5000 concurrency  
-   - Distributed load across 100 URLs
-   - Extreme load @ 10,000 concurrency
-2. **Management Endpoints** (expected lower performance - database queries)
-   - POST /api/urls (create)
-   - GET /api/urls/:code (read single)
-   - GET /api/urls (list)
-   - PUT /api/urls/:code/deactivate (update)
-   - GET /api/health (health check)
-
-**Tools Used:**
-- **wrk**: High-performance HTTP benchmarking (primary)
-- **Apache Bench (ab)**: Fallback for simple scenarios
-
-**Metrics Collected:**
-- Requests per second (RPS)
-- Latency percentiles (p50, p90, p99)
-- Error rates
-- Transfer rates
-
-**Usage:**
-```bash
-bash tests/benchmark.sh [API_URL] [REDIRECT_URL] [OUTPUT_DIR] [DURATION]
-
-# Examples:
-bash tests/benchmark.sh http://localhost:8080 http://localhost:3000 ./results 30s
-bash tests/benchmark.sh http://localhost:8080 http://localhost:3000 ./results 60s
+```text
+BENCHMARK_SUITE=analytics \
+BENCHMARK_LABEL=analytics \
+BENCHMARK_COMPARE_BASELINE=benchmark-results/native-benchmark-baseline.json \
+cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
 ```
 
-**See Also:** [BENCHMARKS.md](../docs/BENCHMARKS.md) for detailed documentation
+## CI
 
-## GitHub Actions Workflows
+- The PR quality gate builds a Docker image, then runs `external_harness` on
+  SQLite and PostgreSQL 18.
+- The published-image integration workflow runs the same suites against the
+  commit-addressed GHCR image.
+- The performance workflow runs the Rust-native standard and analytics suites
+  and retains the independent Rust flamegraph harness.
 
-### Integration Tests (`.github/workflows/integration-tests.yml`)
-
-Automatically runs functional and data consistency tests:
-
-**Triggers:**
-- After successful Docker image build
-- Manual workflow dispatch
-
-**Test Matrix:**
-- **SQLite Backend:** Full integration and concurrent tests
-- **PostgreSQL Backend:** Full integration and concurrent tests
-
-**Graceful Shutdown Tests:**
-Both backends are tested with:
-- SIGTERM signal handling
-- SIGINT signal handling  
-- Data persistence verification after restart
-- Buffered write flush validation
-
-**Requirements:**
-- Docker image must be published to GHCR
-- Tests run on ubuntu-24.04 (linux/amd64)
-
-### Performance Benchmarks (`.github/workflows/performance-benchmark.yml`)
-
-Automatically runs performance benchmarks to validate caching optimizations:
-
-**Triggers:**
-- After successful Docker image build
-- Manual workflow dispatch (with configurable duration)
-
-**Configuration:**
-- Database: PostgreSQL 18
-- Network: `--network host` (bypasses userland proxy for max performance)
-- Cache: 500k entries, 5s flush interval, 100ms actor flush
-- Connections: 50 database connections
-
-**Tests:**
-- Redirect endpoint at various concurrency levels (1k, 5k, 10k)
-- All management endpoints (POST, GET, PUT)
-- Mixed workload scenarios
-
-**Outputs:**
-- Detailed wrk benchmark results
-- JSON structured data for analysis
-- Performance report (markdown)
-- Service logs
-- Artifacts retained for 90 days
-
-**See:** [BENCHMARKS.md](../docs/BENCHMARKS.md) for complete documentation
-
-## Test Features
-
-### Data Consistency Validation
-- Verifies click counting accuracy under concurrent load
-- Tests buffer flush behavior (Layer 1→2→3)
-- Validates data persistence across restarts
-- Checks graceful shutdown data integrity
-
-### Concurrency Testing
-- Simulates 100+ concurrent requests
-- Tests race conditions in click counting
-- Validates atomic operations
-- Stress tests database connection pooling
-
-### API Coverage
-- All CRUD operations for URLs
-- Authentication modes
-- Pagination
-- Error handling
-- Special character handling
-
-## Running Tests Locally
-
-### Prerequisites
-1. Lynx service running (or use Docker)
-2. bash shell
-3. curl command available
-
-### With Docker
-```bash
-# Start Lynx with SQLite
-docker run -d \
-  -p 8080:8080 \
-  -p 3000:3000 \
-  -e DATABASE_BACKEND=sqlite \
-  -e AUTH_MODE=none \
-  ghcr.io/btreemap/lynx:latest
-
-# Run tests
-bash tests/integration_test.sh http://localhost:8080 http://localhost:3000
-bash tests/concurrent_test.sh http://localhost:8080 http://localhost:3000 50
-```
-
-### With Local Binary
-```bash
-# Start Lynx
-DATABASE_BACKEND=sqlite \
-DATABASE_URL="sqlite://./test.db" \
-AUTH_MODE=none \
-API_HOST=127.0.0.1 \
-API_PORT=8080 \
-REDIRECT_HOST=127.0.0.1 \
-REDIRECT_PORT=3000 \
-./target/release/lynx
-
-# Run tests
-bash tests/integration_test.sh http://127.0.0.1:8080 http://127.0.0.1:3000
-bash tests/concurrent_test.sh http://127.0.0.1:8080 http://127.0.0.1:3000 50
-```
-
-## Expected Output
-
-### Successful Test Run
-```
-==========================================
-Running Comprehensive Integration Tests
-API URL: http://localhost:8080
-Redirect URL: http://localhost:3000
-==========================================
-
-Test 1: Health Check
-✓ Health check endpoint
-
-Test 2: Get Auth Mode
-✓ Auth mode endpoint
-
-...
-
-==========================================
-All Integration Tests Passed!
-==========================================
-```
-
-### Failed Test
-Tests will exit with code 1 and show:
-```
-Test X: Description
-✗ Error message explaining failure
-```
-
-## Troubleshooting
-
-### Tests fail with connection errors
-- Ensure Lynx service is running
-- Check firewall settings
-- Verify correct ports (default: 8080 for API, 3000 for redirects)
-
-### Database errors
-- For SQLite: Ensure write permissions to database directory
-- For PostgreSQL: Verify connection string and database exists
-
-### Timeout issues
-- Tests have built-in delays for buffer flushes (2-6 seconds)
-- Increase sleep times if running on slower systems
-- Check CACHE_FLUSH_INTERVAL_SECS and ACTOR_FLUSH_INTERVAL_MS settings
-
-## Contributing
-
-When adding new tests:
-1. Follow existing test numbering and format
-2. Add descriptive test names
-3. Include both positive and negative test cases
-4. Test concurrent scenarios where applicable
-5. Update this README with new test coverage
+No browser/Playwright tests are required by these harnesses.
