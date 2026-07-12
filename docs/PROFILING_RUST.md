@@ -1,246 +1,162 @@
 # Rust Performance Profiling with Flamegraphs
 
-This document explains how to profile Lynx performance using flamegraphs for detailed timing breakdowns and CPU profiling.
+Lynx generates CPU flamegraphs with a Rust-native, in-process profiling
+harness. Flamegraphs visualize sampled call stacks: frame width represents the
+relative CPU time in a function and its callees, while height represents stack
+depth.
 
-## What are Flamegraphs?
+## Architecture
 
-Flamegraphs are visual representations of profiled software, showing which code paths consume the most CPU time. They help identify performance bottlenecks by displaying:
+The ignored integration test in `tests/performance_harness.rs` starts the real
+API and redirect Axum routers on ephemeral loopback ports, generates load with
+Tokio and Reqwest, and samples the entire process with `pprof`. PostgreSQL
+remains external so database behavior is production-representative.
 
-- **Width**: Represents the total time spent in a function (including its callees)
-- **Height**: Represents the call stack depth
-- **Color**: Usually randomized for visual separation, but can encode other information
+The `profiling` Cargo feature is the compile-time capability boundary. It
+enables the optional `pprof` dependency only for explicit profiling builds.
+Normal tests, release binaries, and Docker images neither compile nor link the
+profiler.
 
-## Tools Used
-
-### cargo-flamegraph
-
-`cargo-flamegraph` is a Rust tool that simplifies the process of generating flamegraphs from Rust programs. It handles:
-
-- Building the binary with appropriate symbols
-- Running the profiler (perf on Linux, dtrace on macOS, others on different platforms)
-- Collecting stack traces
-- Generating SVG flamegraph visualizations
-
-### perf (Linux)
-
-On Linux, `cargo-flamegraph` uses `perf`, a powerful performance analysis tool that:
-
-- Records CPU performance counters
-- Captures stack traces at regular intervals
-- Provides low-overhead profiling suitable for production-like benchmarks
-
-## Prerequisites
-
-### On Linux (Ubuntu/Debian)
-
-```bash
-# Install perf
-sudo apt-get update
-sudo apt-get install -y linux-tools-common linux-tools-generic linux-tools-$(uname -r)
-
-# Install cargo-flamegraph
-cargo install flamegraph
-
-# Allow perf to run without sudo (optional but recommended for CI)
-echo 'kernel.perf_event_paranoid = -1' | sudo tee -a /etc/sysctl.conf
-sudo sysctl -p
-```
-
-### On macOS
-
-```bash
-# Install cargo-flamegraph (uses dtrace)
-cargo install flamegraph
-
-# Note: May require running with sudo due to dtrace privileges
-```
+No `perf`, `cargo-flamegraph`, `wrk`, Lua, Bash lifecycle script, root
+permissions, or kernel setting changes are required.
 
 ## Profiling Configuration
 
-### Cargo Profile
-
-To get meaningful flamegraphs, the binary needs to include debug symbols while maintaining release-level optimizations. Add this to `Cargo.toml`:
+The dedicated Cargo profile inherits release optimizations while retaining
+enough symbols for useful stacks:
 
 ```toml
 [profile.profiling]
 inherits = "release"
-debug = true
+debug = 1
+strip = "none"
 ```
 
-This creates a `profiling` profile that:
-- Inherits all optimizations from `release` profile
-- Includes debug symbols for stack trace resolution
-- Maintains performance characteristics close to production
+The normal release profile is unchanged. CI sets
+`RUSTFLAGS=-C force-frame-pointers=yes` only while compiling the profiling
+harness so sampled stacks remain reliable.
 
-The normal release profile is not modified. Release binaries, Docker images, and
-downloadable artifacts continue to use `cargo build --release`, so they contain
-neither profiling symbols nor profiling tools. CI additionally sets
-`RUSTFLAGS=-C force-frame-pointers=yes` only while building the profiling binary
-to make sampled stacks reliable.
+Configuration uses positive, typed values. Zero, malformed, or overflowing
+values fail before either server starts:
 
-### Building for Profiling
+| Variable | Default | Meaning |
+|---|---:|---|
+| `PERF_FLAMEGRAPH_OUTPUT_DIR` | `target/flamegraphs` | Artifact directory |
+| `PERF_FLAMEGRAPH_FREQUENCY_HZ` | `99` | Samples per second |
+| `PERF_FLAMEGRAPH_DURATION` | `15s` | Duration per scenario (`s` or `m`) |
+| `PERF_FLAMEGRAPH_REDIRECT_CONCURRENCY` | `256` | Cached redirect workers |
+| `PERF_FLAMEGRAPH_API_CONCURRENCY` | `64` | Mixed API workers |
 
-```bash
-cargo build --profile profiling
-```
+## Running Locally
 
-## Running Flamegraph Profiling
-
-The repository provides `scripts/profile-flamegraph.sh` so local and CI runs use
-the same lifecycle, deterministic fixtures, and workload definitions. It owns an
-isolated process group, waits for health, stops the profiler cleanly, and rejects
-missing or malformed SVG output.
-
-Build the frontend and profiling binary first:
+Build the embedded frontend, provide PostgreSQL, and run the ignored harness:
 
 ```bash
 cd frontend && npm ci && npm run build && cd ..
-RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling
-```
-
-With PostgreSQL already available and `perf`, `flamegraph`, and `wrk` installed,
-run either representative scenario:
-
-```bash
 export DATABASE_URL=postgresql://lynx:lynx_password@localhost:5432/lynx
-
-scripts/profile-flamegraph.sh \
-	redirect-cached results/flamegraph-redirect-cached.svg 30s
-
-scripts/profile-flamegraph.sh \
-	api-mixed results/flamegraph-api-operations.svg 30s
+RUSTFLAGS="-C force-frame-pointers=yes" \
+PERF_FLAMEGRAPH_DURATION=30s \
+cargo test --profile profiling --features profiling \
+  --test performance_harness representative_hot_path_flamegraphs \
+  -- --ignored --nocapture
 ```
 
-The scenarios form a closed set; unknown names and malformed durations fail
-before a server starts:
+The exhaustive `ProfileScenario` enum runs both representative workloads:
 
-- `redirect-cached`: warms one short code, then drives 4 threads and 256
-	connections through the dominant cache-hit and click-counting path.
-- `api-mixed`: drives 4 threads and 64 connections with an even deterministic
-	mix of URL creation and detail reads, exercising validation, SQLx, PostgreSQL,
-	connection pooling, and serialization.
+- `redirect-cached`: deadline-driven workers repeatedly read one warmed short
+  code, exercising routing, Moka lookup, response construction, and the
+  click-counter actor.
+- `api-mixed`: deadline-driven workers alternate URL creation and detail reads,
+  exercising validation, SQLx, PostgreSQL pooling, and serialization.
 
-Linux performance counters are commonly unavailable in rootless development
-containers. In that environment, build and test the profiling profile locally,
-but rely on the hosted CI job to collect samples; do not attempt privileged
-workarounds.
+The harness writes these artifacts:
+
+- `target/flamegraphs/flamegraph-redirect-cached.svg`
+- `target/flamegraphs/flamegraph-api-operations.svg`
+- `target/flamegraphs/README.md`
+
+Because servers and load generators deliberately share one process, graphs
+contain both Lynx hot-path and harness client frames. Search for Lynx handler,
+storage, cache, SQLx, and Tokio frames when investigating server behavior.
 
 ## Interpreting Flamegraphs
 
-### Key Areas to Analyze
+Open an SVG in a browser to zoom and search. Prioritize:
 
-1. **Wide Plateaus**: Functions that appear wide indicate they consume significant CPU time
-2. **Tall Stacks**: Deep call stacks may indicate recursion or complex call chains
-3. **System Calls**: Look for time spent in syscalls (network I/O, disk I/O)
-4. **Lock Contention**: Search for mutex/lock-related functions
-5. **Allocation**: Time spent in allocator functions
+1. Wide plateaus, which identify CPU-heavy call paths.
+2. Allocator frames, which may reveal avoidable allocation or copying.
+3. Scheduler and synchronization frames, which may reveal contention.
+4. SQLx and PostgreSQL frames in database-backed paths.
+5. Moka and response-construction frames in the cached redirect path.
 
-### Common Patterns in Lynx
+Expected high-level paths include:
 
-**Efficient Cache Path (Expected)**
+```text
+tokio runtime → axum redirect handler → moka cache → response
+tokio runtime → axum API handler → sqlx → PostgreSQL → serialization
 ```
-tokio runtime → axum handler → moka cache lookup → immediate return
-```
-- Should be shallow and fast
-- Minimal time in database-related functions
 
-**Database Path**
-```
-tokio runtime → axum handler → sqlx query → postgres driver → network I/O
-```
-- Expected for cache misses
-- Should be optimized but inherently slower than cache
+Flamegraphs measure CPU samples, not wall-clock latency. Pair them with the
+throughput and latency benchmark artifacts before drawing conclusions about
+network or database waits.
 
-**Actor Write Path**
-```
-tokio runtime → axum handler → actor channel send → background flush
-```
-- Non-blocking write path
-- Most time should be in the background actor, not request handler
-
-### Performance Targets
-
-Based on Lynx's architecture:
-
-- **Redirect (cached)**: Minimal time in handler, most in tokio runtime scheduling
-- **Redirect (uncached)**: Significant time in sqlx and database I/O
-- **Create URL**: Time split between validation, actor send, and response
-- **List URLs**: Time in database query and serialization
-
-## Continuous Profiling in CI/CD
+## Continuous Profiling
 
 The `CPU Flamegraphs (PostgreSQL)` job in the Performance Benchmarks workflow
-runs after a successful Docker publish and on manual workflow dispatch. It is
-independent of the throughput and analytics jobs and profiles the exact commit
-that triggered the workflow.
+runs after a successful Docker publish and on manual dispatch. It is separate
+from throughput and analytics jobs and profiles the triggering commit.
 
 The job:
 
-1. Builds `target/profiling/lynx` once with release optimizations, debug symbols,
-	and frame pointers.
-2. Runs the cached-redirect and mixed-API scenarios against PostgreSQL 17 at a
-	499 Hz sampling frequency.
-3. Fails if service startup, load generation, profiling, or SVG validation fails.
-4. Uploads both interactive SVGs, profiler/service logs, and an interpretation
-	README in a commit-addressed `flamegraphs-*` artifact retained for 90 days.
-5. Adds workload metadata, graph status and sizes, and a direct artifact link to
-	the GitHub Actions job summary.
-
-Open the downloaded SVGs in a browser to zoom and search. The separate
-`performance-benchmark-results` artifact remains dedicated to throughput and
-latency measurements.
+1. Runs the ignored integration test with release optimizations, the explicit
+   `profiling` feature, debug symbols, and frame pointers.
+2. Starts both Axum servers and generates both workloads in-process against a
+   PostgreSQL 17 service at 99 Hz.
+3. Fails on setup, request, sampling, SVG generation, or validation errors.
+4. Uploads the two interactive SVGs and the generated interpretation guide in
+   a commit-addressed artifact retained for 90 days.
+5. Reports workload metadata, graph sizes, and the artifact link in the GitHub
+   Actions job summary.
 
 ## Troubleshooting
 
-### "Permission denied" errors with perf
+### PostgreSQL connection failure
+
+Confirm that `DATABASE_URL` points to a reachable, empty test database. The
+harness initializes Lynx's schema before seeding deterministic fixtures.
+
+### Missing or unresolved stack frames
+
+Compile the dedicated profile with its feature and frame pointers:
 
 ```bash
-# Temporarily allow perf access
-sudo sysctl -w kernel.perf_event_paranoid=-1
-
-# Or permanently in /etc/sysctl.conf
-echo 'kernel.perf_event_paranoid = -1' | sudo tee -a /etc/sysctl.conf
+RUSTFLAGS="-C force-frame-pointers=yes" \
+cargo test --profile profiling --features profiling \
+  --test performance_harness --no-run
 ```
 
-### Missing stack traces
+### Sparse graph
 
-Ensure the binary is built with debug symbols:
-```bash
-cargo clean
-cargo build --profile profiling
-```
-
-### Flamegraph is empty or shows only `[unknown]`
-
-This usually means:
-- Binary lacks debug symbols
-- Process exited before profiling could capture data
-- Insufficient permissions to capture stack traces
-
-### High overhead during profiling
-
-Flamegraph profiling has minimal overhead (~1-5%) but if you notice issues:
-- Reduce sampling frequency
-- Use `--freq` parameter: `cargo flamegraph --freq 99`
-- Profile for longer duration to amortize startup costs
+Increase `PERF_FLAMEGRAPH_DURATION` to collect more samples. If profiling
+overhead affects results, reduce `PERF_FLAMEGRAPH_FREQUENCY_HZ`; the default
+99 Hz balances resolution and perturbation.
 
 ## Best Practices
 
-1. **Profile Under Load**: Always profile with realistic benchmark load
-2. **Multiple Scenarios**: Generate separate flamegraphs for different workloads
-3. **Compare Over Time**: Keep historical flamegraphs to track performance changes
-4. **Focus on Wide Patterns**: Optimization wins come from addressing wide functions
-5. **Verify Changes**: Always profile before and after optimization changes
+1. Profile representative load rather than startup.
+2. Compare the same scenario and configuration before and after a change.
+3. Optimize wide application frames, not incidental narrow stacks.
+4. Confirm suspected improvements with throughput and latency benchmarks.
+5. Keep profiling opt-in so instrumentation never reaches release artifacts.
 
 ## Additional Resources
 
-- [cargo-flamegraph GitHub](https://github.com/flamegraph-rs/flamegraph)
-- [Flamegraph Official Site](http://www.brendangregg.com/flamegraphs.html)
-- [Perf Wiki](https://perf.wiki.kernel.org/)
+- [pprof-rs](https://github.com/tikv/pprof-rs)
+- [Flame Graphs](https://www.brendangregg.com/flamegraphs.html)
 - [Rust Performance Book](https://nnethercote.github.io/perf-book/)
 
 ## Related Documentation
 
-- [Performance Optimizations](PERFORMANCE_OPTIMIZATIONS.md) - Architecture and caching strategies
-- [Benchmarks](BENCHMARKS.md) - Benchmark methodology and metrics
-- [Benchmark Results](BENCHMARK_RESULTS.md) - Interpreting benchmark output
+- [Performance Optimizations](PERFORMANCE_OPTIMIZATIONS.md)
+- [Benchmarks](BENCHMARKS.md)
+- [Benchmark Results](BENCHMARK_RESULTS.md)

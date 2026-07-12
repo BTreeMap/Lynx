@@ -11,6 +11,11 @@ path = "src/lib.rs"
 name = "lynx"
 path = "src/main.rs"
 
+[features]
+# Rootless, in-process CPU sampling for the ignored performance harness only.
+# Normal builds and release artifacts do not enable or compile this dependency.
+profiling = ["dep:pprof"]
+
 [dependencies]
 # Web framework
 axum = "0.8"
@@ -72,12 +77,16 @@ maxminddb = { version = "0.27", features = ["mmap", "simdutf8"] }
 # IP address and CIDR manipulation
 ipnet = "2"
 
+# In-process sampling for the opt-in performance harness.
+pprof = { version = "0.15", default-features = false, features = ["flamegraph"], optional = true }
+
 [build-dependencies]
 statrs = "0.18"
 
 [profile.profiling]
 inherits = "release"
-debug = true
+debug = 1
+strip = "none"
 
 [dev-dependencies]
 # Use same version as main dependency to avoid conflicts

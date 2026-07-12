@@ -259,7 +259,7 @@ jobs:
           - **`lynx-logs.txt`**: Service logs from the benchmark run
           - **`GRAPHS.txt`**: Guide for visualizing results
 
-          CPU profiles, service logs, and interpretation guidance are published separately
+          CPU profiles and interpretation guidance are published separately
           in the commit-addressed `flamegraphs-*` artifact from the CPU Flamegraphs job.
 
           ## Flamegraph Profiling
@@ -414,6 +414,20 @@ jobs:
     runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: lynx
+          POSTGRES_PASSWORD: lynx_benchmark_pass
+          POSTGRES_DB: lynx
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
 
     steps:
       - name: Checkout profiled commit
@@ -449,238 +463,43 @@ jobs:
             target/
           key: ${{ runner.os }}-flamegraph-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install profiling and load tools
-        run: |
-          cargo install flamegraph --version 0.6.13 --locked
-          sudo apt-get update
-          sudo apt-get install -y linux-tools-common linux-tools-generic linux-tools-$(uname -r) wrk
-          sudo sysctl -w kernel.perf_event_paranoid=-1
-          flamegraph --version
-          perf --version
-          wrk --version || true
-
-      - name: Build Lynx with profiling symbols
+      - name: Capture representative flamegraphs
+        run: >-
+          cargo test --profile profiling --locked
+          --features profiling
+          --test performance_harness
+          representative_hot_path_flamegraphs
+          -- --ignored --nocapture
         env:
+          DATABASE_URL: postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
           RUSTFLAGS: -C force-frame-pointers=yes
-        run: |
-          cargo build --profile profiling
-          echo "Built Lynx with profiling profile"
+          PERF_FLAMEGRAPH_OUTPUT_DIR: target/flamegraphs
+          PERF_FLAMEGRAPH_FREQUENCY_HZ: "99"
+          PERF_FLAMEGRAPH_DURATION: ${{ github.event.inputs.duration || '30s' }}
+          PERF_FLAMEGRAPH_REDIRECT_CONCURRENCY: "256"
+          PERF_FLAMEGRAPH_API_CONCURRENCY: "64"
 
-      - name: Setup environment for profiling
+      - name: Validate flamegraphs
+        if: always()
         run: |
-          mkdir -p benchmark-results/flamegraphs/logs
-
-      - name: Start PostgreSQL for profiling run
-        run: |
-          docker run -d \
-            --name postgres-profiling \
-            -e POSTGRES_USER=lynx \
-            -e POSTGRES_PASSWORD=lynx_benchmark_pass \
-            -e POSTGRES_DB=lynx \
-            -p 5432:5432 \
-            postgres:17-alpine
-
-          # Wait for PostgreSQL to be ready
-          for i in {1..30}; do
-            if docker exec postgres-profiling pg_isready -U lynx > /dev/null 2>&1; then
-              echo "PostgreSQL is ready for profiling!"
-              break
-            fi
-            echo "Waiting for PostgreSQL... ($i/30)"
-            sleep 2
+          for graph in \
+            target/flamegraphs/flamegraph-redirect-cached.svg \
+            target/flamegraphs/flamegraph-api-operations.svg; do
+            test -s "$graph"
+            grep -q '<svg' "$graph"
           done
-          docker exec postgres-profiling pg_isready -U lynx
-
-      - name: Profile redirect endpoint (cached requests)
-        env:
-          DATABASE_URL: postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
-        run: |
-          scripts/profile-flamegraph.sh \
-            redirect-cached \
-            benchmark-results/flamegraphs/flamegraph-redirect-cached.svg \
-            "${{ github.event.inputs.duration || '30s' }}"
-
-      - name: Profile API endpoint (database operations)
-        env:
-          DATABASE_URL: postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
-        run: |
-          scripts/profile-flamegraph.sh \
-            api-mixed \
-            benchmark-results/flamegraphs/flamegraph-api-operations.svg \
-            "${{ github.event.inputs.duration || '30s' }}"
-
-      - name: Stop PostgreSQL profiling container
-        if: always()
-        run: |
-          docker stop postgres-profiling || true
-          docker rm postgres-profiling || true
-
-      - name: Generate flamegraph summary and analysis
-        if: always()
-        run: |
-          # Check if flamegraph files were generated
-          REDIRECT_SVG="benchmark-results/flamegraphs/flamegraph-redirect-cached.svg"
-          API_SVG="benchmark-results/flamegraphs/flamegraph-api-operations.svg"
-
-          cat > benchmark-results/flamegraphs/README.md << 'EOREADME'
-          # Flamegraph Profiling Results
-
-          This directory contains flamegraph visualizations of Lynx performance under load.
-
-          ## What are Flamegraphs?
-
-          Flamegraphs show CPU usage over time and call stacks:
-          - **Width**: Represents the total time spent in a function (including its callees)
-          - **Height**: Represents the call stack depth
-          - **Color**: Randomized for visual separation
-
-          ## Files Generated
-
-          EOREADME
-
-          # Add file status
-          if [ -f "$REDIRECT_SVG" ]; then
-            FILE_SIZE=$(du -h "$REDIRECT_SVG" | cut -f1)
-            echo "### ✅ flamegraph-redirect-cached.svg (${FILE_SIZE})" >> benchmark-results/flamegraphs/README.md
-          else
-            echo "### ⚠️ flamegraph-redirect-cached.svg (not generated)" >> benchmark-results/flamegraphs/README.md
-          fi
-
-          cat >> benchmark-results/flamegraphs/README.md << 'EOREADME2'
-          Profiling data from the redirect endpoint with cached requests.
-
-          **Test Configuration:**
-          - 4 threads, 256 concurrent connections
-          - Workflow-configured duration (30 seconds by default)
-          - 499 Hz CPU sampling
-          - Single hot URL (maximum cache effectiveness)
-
-          **Expected Patterns:**
-          - Wide sections in tokio runtime and axum handlers
-          - Minimal time in database operations (cache hits)
-          - Fast cache lookup paths
-          - Moka cache operations should dominate
-
-          EOREADME2
-
-          if [ -f "$API_SVG" ]; then
-            FILE_SIZE=$(du -h "$API_SVG" | cut -f1)
-            echo "### ✅ flamegraph-api-operations.svg (${FILE_SIZE})" >> benchmark-results/flamegraphs/README.md
-          else
-            echo "### ⚠️ flamegraph-api-operations.svg (not generated)" >> benchmark-results/flamegraphs/README.md
-          fi
-
-          cat >> benchmark-results/flamegraphs/README.md << 'EOREADME3'
-          Profiling data from API endpoints with database operations.
-
-          **Test Configuration:**
-          - 4 threads, 64 concurrent connections
-          - Workflow-configured duration (30 seconds by default)
-          - 499 Hz CPU sampling
-          - Mixed workload: 50% creates (POST), 50% reads (GET)
-
-          **Expected Patterns:**
-          - Time in sqlx and database drivers
-          - Serialization/deserialization overhead
-          - Database connection pool management
-          - Actor pattern write buffering
-
-          ## How to Use
-
-          1. Download the SVG files from the artifacts
-          2. Open in a web browser (Chrome, Firefox, Safari, Edge)
-          3. **Click on any section** to zoom in and focus on that code path
-          4. Use the **search box** (top right) to find specific function names
-          5. Hover over sections to see function names and time percentages
-
-          ## Interpreting Results
-
-          ### What to Look For
-
-          ✅ **Good Patterns:**
-          - Wide sections in cache operations (for redirect endpoint)
-          - Minimal database time for cached requests
-          - Non-blocking I/O patterns in tokio
-          - Balanced distribution across threads
-
-          ⚠️ **Potential Issues:**
-          - Unexpected database calls in cached paths
-          - Lock contention (functions with "lock" or "mutex")
-          - Excessive time in serialization/deserialization
-          - Deep call stacks with many levels
-
-          ### Analysis Tips
-
-          1. **Start at the bottom**: The bottom of the flamegraph shows the entry points
-          2. **Look for plateaus**: Wide, flat sections indicate time-consuming operations
-          3. **Compare widths**: Wider sections consume more CPU time
-          4. **Check ratios**: Compare time in application code vs. runtime/system code
-          5. **Search for specifics**: Use search to find critical functions
-
-          ### Common Function Patterns
-
-          - **`tokio::runtime`**: Async runtime overhead (expected)
-          - **`moka::cache`**: Cache operations (should be fast)
-          - **`sqlx::postgres`**: Database queries (slower, expected for API ops)
-          - **`serde::serialize`**: JSON serialization (moderate)
-          - **`axum::handler`**: HTTP request handling (should be thin)
-
-          ## Comparing Flamegraphs
-
-          When comparing across commits:
-          1. Look for changes in width of key functions
-          2. Check if new functions appear in hot paths
-          3. Verify cache hit paths remain efficient
-          4. Ensure database operations don't increase unexpectedly
-
-          ## Troubleshooting
-
-          **If flamegraphs are missing:**
-          - Check workflow logs for profiling step errors
-          - Verify perf was available on the runner
-          - Ensure the service started successfully
-          - Check if profiling timeout was sufficient
-
-          **If flamegraphs show mostly `[unknown]`:**
-          - Debug symbols may be missing
-          - Profiling profile may not have built correctly
-          - Stack traces may have been truncated
-
-          For more information, see `docs/PROFILING_RUST.md` in the repository.
-
-          ---
-
-          *Generated by Performance Benchmark workflow*
-          EOREADME3
-
-          # List generated flamegraphs with details
-          echo ""
-          echo "Flamegraph Generation Summary:"
-          echo "=============================="
-          if [ -f "$REDIRECT_SVG" ]; then
-            echo "✅ Redirect flamegraph: $(du -h $REDIRECT_SVG | cut -f1)"
-          else
-            echo "❌ Redirect flamegraph: NOT GENERATED"
-          fi
-
-          if [ -f "$API_SVG" ]; then
-            echo "✅ API flamegraph: $(du -h $API_SVG | cut -f1)"
-          else
-            echo "❌ API flamegraph: NOT GENERATED"
-          fi
-
-          ls -lh benchmark-results/flamegraphs/*.svg 2>/dev/null || echo "⚠️ No SVG files found in flamegraphs directory"
+          test -s target/flamegraphs/README.md
 
       - name: Generate flamegraph GitHub Actions summary
         if: always()
         run: |
           redirect_status="❌ missing"
           api_status="❌ missing"
-          if [[ -s benchmark-results/flamegraphs/flamegraph-redirect-cached.svg ]]; then
-            redirect_status="✅ $(du -h benchmark-results/flamegraphs/flamegraph-redirect-cached.svg | cut -f1)"
+          if [[ -s target/flamegraphs/flamegraph-redirect-cached.svg ]]; then
+            redirect_status="✅ $(du -h target/flamegraphs/flamegraph-redirect-cached.svg | cut -f1)"
           fi
-          if [[ -s benchmark-results/flamegraphs/flamegraph-api-operations.svg ]]; then
-            api_status="✅ $(du -h benchmark-results/flamegraphs/flamegraph-api-operations.svg | cut -f1)"
+          if [[ -s target/flamegraphs/flamegraph-api-operations.svg ]]; then
+            api_status="✅ $(du -h target/flamegraphs/flamegraph-api-operations.svg | cut -f1)"
           fi
 
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
@@ -692,16 +511,16 @@ jobs:
 
           **Duration per scenario:** ${{ github.event.inputs.duration || '30s' }}
 
-          **Sampling frequency:** 499 Hz
+          **Sampling frequency:** 99 Hz
 
           | Scenario | Result | Workload |
           |---|---:|---|
-          | Cached redirect | $redirect_status | 4 threads, 256 connections, warmed single URL |
-          | Mixed API | $api_status | 4 threads, 64 connections, 50% create / 50% read |
+          | Cached redirect | $redirect_status | 256 async workers, warmed single URL |
+          | Mixed API | $api_status | 64 async workers, 50% create / 50% read |
 
           Download the artifact and open each SVG in a browser. Click a frame to zoom,
           search for wide application frames, and investigate unexpected database, lock,
-          allocation, or scheduler stacks. Logs and interpretation guidance accompany the SVGs.
+          allocation, or scheduler stacks. Interpretation guidance accompanies the SVGs.
           EOF
 
       - name: Upload flamegraph results
@@ -710,12 +529,13 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: flamegraphs-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-          path: benchmark-results/flamegraphs/
+          path: target/flamegraphs/
+          if-no-files-found: error
           retention-days: 90
 
       - name: Link flamegraph artifact
         if: always() && steps.flamegraph-artifact.outputs.artifact-id != ''
-        run: echo "[Download interactive flamegraphs and logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.flamegraph-artifact.outputs.artifact-id }})" >> "$GITHUB_STEP_SUMMARY"
+        run: echo "[Download interactive flamegraphs and guide](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.flamegraph-artifact.outputs.artifact-id }})" >> "$GITHUB_STEP_SUMMARY"
 
   benchmark-analytics:
     name: Analytics Performance Impact Benchmark

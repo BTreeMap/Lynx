@@ -132,10 +132,12 @@ The benchmark runs automatically after the Docker image is built and published:
 5. Duration: Configurable (default 30s per test)
 
 The workflow also runs an independent **CPU Flamegraphs (PostgreSQL)** job for
-the exact triggering commit. It profiles a warmed cached redirect and a mixed
-create/read API workload without adding instrumentation to release builds. See
-[Rust Performance Profiling](PROFILING_RUST.md) for workload and interpretation
-details.
+the exact triggering commit. Its ignored Rust integration test starts both Axum
+servers, generates a warmed cached-redirect workload and a mixed create/read API
+workload, and samples them in-process with the feature-gated `pprof` profiler.
+It needs no privileged kernel profiler or external load generator and adds no
+instrumentation to release builds. See [Rust Performance
+Profiling](PROFILING_RUST.md) for workload and interpretation details.
 
 **Manual Trigger**:
 
