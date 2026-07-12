@@ -541,6 +541,7 @@ RUST_LOG=debug cargo run
 ### Core Documentation
 - [Performance Optimizations](docs/PERFORMANCE_OPTIMIZATIONS.md) - Caching strategies and actor pattern
 - [Performance Benchmarks](docs/BENCHMARKS.md) - Benchmarking guide and methodology
+- [Rust Performance Profiling](docs/PROFILING_RUST.md) - CI flamegraphs and hot-path analysis
 - [Analytics Guide](docs/ANALYTICS.md) - GeoIP-based visitor analytics
 - [Delete Protection](docs/DELETE_PROTECTION.md) - Database-level delete prevention
 - [Cloudflare Setup Guide](docs/CLOUDFLARE_SETUP.md) - Cloudflare Zero Trust configuration

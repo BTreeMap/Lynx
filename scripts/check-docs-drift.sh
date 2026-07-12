@@ -33,7 +33,7 @@ for rf in "${ROUTE_FILES[@]}"; do
   while IFS= read -r route_path; do
     if ! grep -qF "$route_path" "$README"; then
       # Try with {param} converted to a grep-compatible regex
-      alt_path=$(echo "$route_path" | sed 's/{[^}]*}/[^/]*/g')
+      alt_path=$(echo "$route_path" | sed 's|{[^}]*}|[^/]*|g')
       if ! grep -qP "$alt_path" "$README" 2>/dev/null; then
         echo "DRIFT: Route '$route_path' (from $(basename "$rf")) not found in README.md"
         DRIFT=1

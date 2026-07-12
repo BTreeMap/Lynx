@@ -72,6 +72,12 @@ This creates a `profiling` profile that:
 - Includes debug symbols for stack trace resolution
 - Maintains performance characteristics close to production
 
+The normal release profile is not modified. Release binaries, Docker images, and
+downloadable artifacts continue to use `cargo build --release`, so they contain
+neither profiling symbols nor profiling tools. CI additionally sets
+`RUSTFLAGS=-C force-frame-pointers=yes` only while building the profiling binary
+to make sampled stacks reliable.
+
 ### Building for Profiling
 
 ```bash
@@ -80,51 +86,44 @@ cargo build --profile profiling
 
 ## Running Flamegraph Profiling
 
-### Basic Usage
+The repository provides `scripts/profile-flamegraph.sh` so local and CI runs use
+the same lifecycle, deterministic fixtures, and workload definitions. It owns an
+isolated process group, waits for health, stops the profiler cleanly, and rejects
+missing or malformed SVG output.
+
+Build the frontend and profiling binary first:
 
 ```bash
-# Profile a running server
-cargo flamegraph --profile profiling
-
-# Profile with specific duration
-cargo flamegraph --profile profiling -- --duration 60
+cd frontend && npm ci && npm run build && cd ..
+RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling
 ```
 
-### During Benchmarks
-
-When running performance benchmarks, profile the server while the benchmark load is being applied:
+With PostgreSQL already available and `perf`, `flamegraph`, and `wrk` installed,
+run either representative scenario:
 
 ```bash
-# Terminal 1: Start server under profiling
-cargo flamegraph --profile profiling -o flamegraph-redirect.svg &
-FLAMEGRAPH_PID=$!
+export DATABASE_URL=postgresql://lynx:lynx_password@localhost:5432/lynx
 
-# Terminal 2: Run benchmark
-wrk -t 8 -c 1000 -d 30s http://localhost:3000/bench-1
+scripts/profile-flamegraph.sh \
+	redirect-cached results/flamegraph-redirect-cached.svg 30s
 
-# Terminal 1: Stop profiling
-kill -SIGINT $FLAMEGRAPH_PID
+scripts/profile-flamegraph.sh \
+	api-mixed results/flamegraph-api-operations.svg 30s
 ```
 
-### Profiling Specific Scenarios
+The scenarios form a closed set; unknown names and malformed durations fail
+before a server starts:
 
-Generate separate flamegraphs for different workload types:
+- `redirect-cached`: warms one short code, then drives 4 threads and 256
+	connections through the dominant cache-hit and click-counting path.
+- `api-mixed`: drives 4 threads and 64 connections with an even deterministic
+	mix of URL creation and detail reads, exercising validation, SQLx, PostgreSQL,
+	connection pooling, and serialization.
 
-**Redirect Endpoint (Cache Hits)**
-```bash
-cargo flamegraph --profile profiling -o flamegraph-redirect-cached.svg &
-FLAMEGRAPH_PID=$!
-wrk -t 8 -c 1000 -d 30s http://localhost:3000/bench-1
-kill -SIGINT $FLAMEGRAPH_PID
-```
-
-**API Endpoints (Database Operations)**
-```bash
-cargo flamegraph --profile profiling -o flamegraph-api-create.svg &
-FLAMEGRAPH_PID=$!
-wrk -t 4 -c 100 -d 30s -s create-url.lua http://localhost:8080
-kill -SIGINT $FLAMEGRAPH_PID
-```
+Linux performance counters are commonly unavailable in rootless development
+containers. In that environment, build and test the profiling profile locally,
+but rely on the hosted CI job to collect samples; do not attempt privileged
+workarounds.
 
 ## Interpreting Flamegraphs
 
@@ -170,15 +169,26 @@ Based on Lynx's architecture:
 
 ## Continuous Profiling in CI/CD
 
-The performance benchmark workflow automatically generates flamegraphs:
+The `CPU Flamegraphs (PostgreSQL)` job in the Performance Benchmarks workflow
+runs after a successful Docker publish and on manual workflow dispatch. It is
+independent of the throughput and analytics jobs and profiles the exact commit
+that triggered the workflow.
 
-1. **Builds** with profiling profile
-2. **Starts** server under flamegraph
-3. **Runs** benchmark suite
-4. **Captures** flamegraph SVGs
-5. **Uploads** as artifacts
+The job:
 
-View flamegraphs in GitHub Actions artifacts after each benchmark run.
+1. Builds `target/profiling/lynx` once with release optimizations, debug symbols,
+	and frame pointers.
+2. Runs the cached-redirect and mixed-API scenarios against PostgreSQL 17 at a
+	499 Hz sampling frequency.
+3. Fails if service startup, load generation, profiling, or SVG validation fails.
+4. Uploads both interactive SVGs, profiler/service logs, and an interpretation
+	README in a commit-addressed `flamegraphs-*` artifact retained for 90 days.
+5. Adds workload metadata, graph status and sizes, and a direct artifact link to
+	the GitHub Actions job summary.
+
+Open the downloaded SVGs in a browser to zoom and search. The separate
+`performance-benchmark-results` artifact remains dedicated to throughput and
+latency measurements.
 
 ## Troubleshooting
 

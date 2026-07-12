@@ -131,6 +131,12 @@ The benchmark runs automatically after the Docker image is built and published:
 4. Network: Uses `--network host` to bypass Docker userland proxy
 5. Duration: Configurable (default 30s per test)
 
+The workflow also runs an independent **CPU Flamegraphs (PostgreSQL)** job for
+the exact triggering commit. It profiles a warmed cached redirect and a mixed
+create/read API workload without adding instrumentation to release builds. See
+[Rust Performance Profiling](PROFILING_RUST.md) for workload and interpretation
+details.
+
 **Manual Trigger**:
 
 ```bash
@@ -235,6 +241,10 @@ All results are uploaded as GitHub Actions artifacts:
 - **Retention**: 90 days
 - **Name**: `performance-benchmark-results`
 - **Size**: Typically < 10 MB
+
+CPU profiles are uploaded separately as `flamegraphs-COMMIT_SHA`. That artifact
+contains two interactive SVGs, profiler logs, and an interpretation guide. The
+CPU Flamegraphs job summary provides a direct download link and scenario status.
 
 ## Performance Targets
 
