@@ -8,7 +8,7 @@ use lynx::analytics::{
     AnalyticsAggregator, AnalyticsEvent, AnalyticsGroupBy, AnalyticsRecord, AnalyticsRollup,
     GeoLocation, IpVersion,
 };
-use lynx::storage::{SqliteStorage, Storage};
+use lynx::storage::{PostgresStorage, SqliteStorage, Storage};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
@@ -40,6 +40,57 @@ async fn create_test_storage() -> Arc<dyn Storage> {
     let storage = SqliteStorage::new("sqlite::memory:", 5).await.unwrap();
     storage.init().await.unwrap();
     Arc::new(storage)
+}
+
+async fn create_backend_storage() -> Arc<dyn Storage> {
+    if std::env::var("DATABASE_BACKEND").as_deref() == Ok("postgres") {
+        let url = std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must be set for PostgreSQL integration tests");
+        let storage = PostgresStorage::new(&url, 5).await.unwrap();
+        storage.init().await.unwrap();
+        Arc::new(storage)
+    } else {
+        create_test_storage().await
+    }
+}
+
+#[tokio::test]
+async fn test_graceful_shutdown_persists_saturated_analytics_exactly() {
+    let storage = create_backend_storage().await;
+    let code = format!("analytics_shutdown_{}", std::process::id());
+    storage
+        .create_with_code(&code, "https://example.com", None)
+        .await
+        .unwrap();
+
+    let aggregator = AnalyticsAggregator::new_with_config(1, 3_600_000);
+    let flush_storage = Arc::clone(&storage);
+    let flush_handle = aggregator.start_flush_task_with_storage(3_600, move |entries| {
+        let storage = Arc::clone(&flush_storage);
+        Box::pin(async move {
+            let records = entries
+                .into_iter()
+                .map(|(key, value)| AnalyticsRollup::from_aggregate(key, value))
+                .collect();
+            storage.upsert_analytics_batch(records).await
+        })
+    });
+
+    for _ in 0..1_000 {
+        aggregator.record_event(AnalyticsEvent {
+            short_code: code.as_str().into(),
+            timestamp: 1_000_000,
+            client_ip: "127.0.0.1".parse().unwrap(),
+        });
+    }
+    aggregator.shutdown().await;
+    flush_handle.await.unwrap();
+
+    let persisted = storage.get_analytics(&code, None, None, 100).await.unwrap();
+    assert_eq!(
+        persisted.iter().map(|entry| entry.visit_count).sum::<i64>(),
+        1_000
+    );
 }
 
 #[tokio::test]

@@ -8,7 +8,7 @@
 //! - `DATABASE_BACKEND=postgres cargo test` - Run only PostgreSQL tests
 //! - By default, both backends are tested
 
-use lynx::storage::{ClickIncrement, PostgresStorage, SqliteStorage, Storage};
+use lynx::storage::{CachedStorage, ClickIncrement, PostgresStorage, SqliteStorage, Storage};
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
@@ -379,6 +379,57 @@ async fn test_atomic_click_batch_updates_multiple_urls() {
     let second = storage.get_authoritative("batch-b").await.unwrap().unwrap();
     assert_eq!(first.clicks, 3);
     assert_eq!(second.clicks, 5);
+}
+
+async fn assert_cached_shutdown_persists_exact_clicks(inner: Arc<dyn Storage>, code: &str) {
+    inner
+        .create_with_code(code, "https://example.com", None)
+        .await
+        .unwrap();
+    let cached = CachedStorage::new(Arc::clone(&inner), 10, 3_600, 1, 3_600_000);
+
+    // A capacity-one channel plus a synchronous burst exercises both normal
+    // actor ingestion and the lossless saturation fallback.
+    for _ in 0..1_000 {
+        cached.buffer_click_owned(code.to_owned(), 1).unwrap();
+    }
+    cached.shutdown().await;
+
+    let persisted = inner.get_authoritative(code).await.unwrap().unwrap();
+    assert_eq!(persisted.clicks, 1_000);
+}
+
+#[tokio::test]
+async fn test_cached_shutdown_persists_exact_clicks_sqlite() {
+    if !should_test_backend("sqlite") {
+        return;
+    }
+
+    assert_cached_shutdown_persists_exact_clicks(create_sqlite_storage().await, "shutdown_sqlite")
+        .await;
+}
+
+#[tokio::test]
+async fn test_cached_shutdown_persists_exact_clicks_postgres() {
+    if !should_test_backend("postgres") {
+        return;
+    }
+
+    let lock = POSTGRES_TABLE_LOCK
+        .get_or_init(|| async { Arc::new(tokio::sync::Mutex::new(())) })
+        .await;
+    let _guard = lock.lock().await;
+    let Some(storage) = create_postgres_storage().await else {
+        assert_ne!(
+            std::env::var("DATABASE_BACKEND").as_deref(),
+            Ok("postgres"),
+            "DATABASE_URL must be set for PostgreSQL integration tests"
+        );
+        return;
+    };
+    let code = format!("shutdown_pg_{}", std::process::id());
+
+    assert_cached_shutdown_persists_exact_clicks(storage, &code).await;
 }
 
 #[tokio::test]
