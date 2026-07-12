@@ -83,6 +83,12 @@ pprof = { version = "0.15", default-features = false, features = ["flamegraph"],
 [build-dependencies]
 statrs = "0.18"
 
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
 [profile.profiling]
 inherits = "release"
 debug = 1
