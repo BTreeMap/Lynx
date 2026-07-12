@@ -8,7 +8,8 @@
 //! - `DATABASE_BACKEND=postgres cargo test` - Run only PostgreSQL tests
 //! - By default, both backends are tested
 
-use lynx::storage::{PostgresStorage, SqliteStorage, Storage};
+use lynx::storage::{ClickIncrement, PostgresStorage, SqliteStorage, Storage};
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 
@@ -356,6 +357,28 @@ async fn test_owned_click_batch_and_zero_amount() {
 
     let url = storage.get_authoritative("owned").await.unwrap().unwrap();
     assert_eq!(url.clicks, 7);
+}
+
+#[tokio::test]
+async fn test_atomic_click_batch_updates_multiple_urls() {
+    let storage = create_sqlite_storage().await;
+    for code in ["batch-a", "batch-b"] {
+        storage
+            .create_with_code(code, "https://example.com", None)
+            .await
+            .unwrap();
+    }
+    let increments = [
+        ClickIncrement::new("batch-a".to_owned(), NonZeroU64::new(3).unwrap()),
+        ClickIncrement::new("batch-b".to_owned(), NonZeroU64::new(5).unwrap()),
+    ];
+
+    storage.increment_clicks_batch(&increments).await.unwrap();
+
+    let first = storage.get_authoritative("batch-a").await.unwrap().unwrap();
+    let second = storage.get_authoritative("batch-b").await.unwrap().unwrap();
+    assert_eq!(first.clicks, 3);
+    assert_eq!(second.clicks, 5);
 }
 
 #[tokio::test]

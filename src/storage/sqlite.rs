@@ -2,7 +2,9 @@ use crate::analytics::{
     AnalyticsGroupBy, AnalyticsRollup, DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER,
 };
 use crate::models::{ShortenedUrl, UrlHistoryEntry};
-use crate::storage::{SearchParams, SearchResult, Storage, StorageError, StorageResult};
+use crate::storage::{
+    ClickIncrement, SearchParams, SearchResult, Storage, StorageError, StorageResult,
+};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -1683,6 +1685,32 @@ impl Storage for SqliteStorage {
         Ok(())
     }
 
+    async fn increment_clicks_batch(&self, increments: &[ClickIncrement]) -> Result<()> {
+        if increments.is_empty() {
+            return Ok(());
+        }
+
+        let mut transaction = self.pool.begin().await?;
+        for increment in increments {
+            let amount = i64::try_from(increment.amount().get())
+                .map_err(|_| anyhow!("increment amount exceeds i64"))?;
+            sqlx::query(
+                r#"
+                UPDATE urls
+                SET clicks = clicks + ?
+                WHERE short_code = ?
+                "#,
+            )
+            .bind(amount)
+            .bind(increment.short_code())
+            .execute(&mut *transaction)
+            .await?;
+        }
+        transaction.commit().await?;
+
+        Ok(())
+    }
+
     async fn list_with_cursor(
         &self,
         limit: i64,
@@ -1987,11 +2015,16 @@ impl Storage for SqliteStorage {
     }
 
     async fn upsert_analytics_batch(&self, records: Vec<AnalyticsRollup>) -> Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| anyhow!(e))?
             .as_secs() as i64;
 
+        let mut transaction = self.pool.begin().await?;
         for record in records {
             sqlx::query(
                 r#"
@@ -2013,9 +2046,10 @@ impl Storage for SqliteStorage {
             .bind(now)
             .bind(record.visit_count)
             .bind(now)
-            .execute(self.pool.as_ref())
+            .execute(&mut *transaction)
             .await?;
         }
+        transaction.commit().await?;
 
         Ok(())
     }

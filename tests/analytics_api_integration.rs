@@ -372,7 +372,7 @@ async fn test_analytics_aggregate_with_unknown_pending_events() {
 
     for _ in 0..7 {
         let event = AnalyticsEvent {
-            short_code: "pending".to_string(),
+            short_code: "pending".into(),
             timestamp: chrono::Utc::now().timestamp(),
             client_ip: "8.8.8.8".parse::<IpAddr>().unwrap(),
         };

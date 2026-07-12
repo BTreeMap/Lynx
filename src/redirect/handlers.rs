@@ -15,8 +15,7 @@ use std::time::Instant;
 use super::middleware::RequestStart;
 use crate::analytics::AnalyticsAggregator;
 use crate::config::AnalyticsConfig;
-use crate::models::ShortenedUrl;
-use crate::storage::{CachedStorage, LookupMetadata, Storage};
+use crate::storage::{CachedStorage, LookupMetadata, RedirectTarget};
 
 #[derive(Clone)]
 pub struct RedirectAnalytics {
@@ -32,7 +31,7 @@ impl RedirectAnalytics {
         config.enabled.then_some(Self { config, aggregator })
     }
 
-    fn record(&self, short_code: &str, headers: &HeaderMap, socket_ip: std::net::IpAddr) {
+    fn record(&self, short_code: Arc<str>, headers: &HeaderMap, socket_ip: std::net::IpAddr) {
         record_analytics(
             short_code,
             headers,
@@ -79,7 +78,7 @@ pub async fn redirect_url_with_analytics(
                 .analytics
                 .as_ref()
                 .expect("analytics handler requires analytics runtime")
-                .record(&url.short_code, &headers, addr.ip());
+                .record(Arc::clone(&url.analytics_code), &headers, addr.ip());
             let response = redirect_response(&state, &url);
             buffer_click(&state, code);
             response
@@ -121,7 +120,7 @@ pub async fn redirect_url_with_analytics_and_timing(
                 .analytics
                 .as_ref()
                 .expect("analytics handler requires analytics runtime")
-                .record(&url.short_code, &headers, addr.ip());
+                .record(Arc::clone(&url.analytics_code), &headers, addr.ip());
             let response =
                 timed_redirect_response(&state, &url, metadata, handler_start, request_start);
             buffer_click(&state, code);
@@ -131,13 +130,10 @@ pub async fn redirect_url_with_analytics_and_timing(
     }
 }
 
-async fn prepare_redirect(
-    state: &RedirectState,
-    code: &str,
-) -> Result<Arc<ShortenedUrl>, Response> {
+async fn prepare_redirect(state: &RedirectState, code: &str) -> Result<RedirectTarget, Response> {
     let url = state
         .storage
-        .get(code)
+        .get_redirect(code)
         .await
         .map_err(|_| internal_error())?;
     accept_redirect(url).map_err(IntoResponse::into_response)
@@ -146,27 +142,27 @@ async fn prepare_redirect(
 async fn prepare_measured_redirect(
     state: &RedirectState,
     code: &str,
-) -> Result<(Arc<ShortenedUrl>, LookupMetadata), Response> {
+) -> Result<(RedirectTarget, LookupMetadata), Response> {
     let result = state
         .storage
-        .get_with_metadata(code)
+        .get_redirect_with_metadata(code)
         .await
         .map_err(|_| internal_error())?;
-    let url = accept_redirect(result.url).map_err(IntoResponse::into_response)?;
+    let url = accept_redirect(result.target).map_err(IntoResponse::into_response)?;
     Ok((url, result.metadata))
 }
 
 fn accept_redirect(
-    url: Option<Arc<ShortenedUrl>>,
-) -> Result<Arc<ShortenedUrl>, (StatusCode, &'static str)> {
-    let Some(url) = url else {
+    target: Option<RedirectTarget>,
+) -> Result<RedirectTarget, (StatusCode, &'static str)> {
+    let Some(target) = target else {
         return Err((StatusCode::NOT_FOUND, "URL not found"));
     };
-    if !url.is_active {
+    if !target.url.is_active {
         return Err((StatusCode::GONE, "This link has been deactivated"));
     }
 
-    Ok(url)
+    Ok(target)
 }
 
 fn buffer_click(state: &RedirectState, code: String) {
@@ -175,8 +171,8 @@ fn buffer_click(state: &RedirectState, code: String) {
     }
 }
 
-fn redirect_response(state: &RedirectState, url: &ShortenedUrl) -> Response {
-    match location_header(url) {
+fn redirect_response(state: &RedirectState, target: &RedirectTarget) -> Response {
+    match location_header(target) {
         Some(location) => (state.redirect_status, [(LOCATION, location)]).into_response(),
         None => internal_error(),
     }
@@ -184,12 +180,12 @@ fn redirect_response(state: &RedirectState, url: &ShortenedUrl) -> Response {
 
 fn timed_redirect_response(
     state: &RedirectState,
-    url: &ShortenedUrl,
+    target: &RedirectTarget,
     metadata: LookupMetadata,
     handler_start: Instant,
     request_start: Instant,
 ) -> Response {
-    let location = match location_header(url) {
+    let location = match location_header(target) {
         Some(location) => location,
         None => return internal_error(),
     };
@@ -220,19 +216,15 @@ fn timed_redirect_response(
     (state.redirect_status, headers).into_response()
 }
 
-fn location_header(url: &ShortenedUrl) -> Option<HeaderValue> {
-    match HeaderValue::try_from(&url.original_url) {
-        Ok(location) => Some(location),
-        Err(error) => {
-            tracing::error!(
-                short_code = %url.short_code,
-                url = %url.original_url,
-                error = %error,
-                "Failed to create Location header - URL contains invalid characters"
-            );
-            None
-        }
+fn location_header(target: &RedirectTarget) -> Option<HeaderValue> {
+    if target.location.is_none() {
+        tracing::error!(
+            short_code = %target.url.short_code,
+            url = %target.url.original_url,
+            "Failed to create Location header - URL contains invalid characters"
+        );
     }
+    target.location.clone()
 }
 
 fn internal_error() -> Response {
@@ -240,7 +232,7 @@ fn internal_error() -> Response {
 }
 
 fn record_analytics(
-    short_code: &str,
+    short_code: Arc<str>,
     headers: &HeaderMap,
     socket_ip: std::net::IpAddr,
     config: &AnalyticsConfig,
@@ -260,7 +252,7 @@ fn record_analytics(
     // Create lightweight event WITHOUT GeoIP lookup (deferred to flush time)
     // This keeps the hot path fast!
     let event = AnalyticsEvent {
-        short_code: short_code.to_string(),
+        short_code,
         timestamp: chrono::Utc::now().timestamp(),
         client_ip,
     };

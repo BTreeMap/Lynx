@@ -11,9 +11,11 @@
 
 use dashmap::DashMap;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, mpsc::error::TrySendError, Mutex, Notify};
+use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use crate::analytics::models::{AnalyticsEvent, AnalyticsKey, AnalyticsRecord, AnalyticsValue};
@@ -28,6 +30,34 @@ enum ActorMessage {
     Shutdown,
 }
 
+fn enqueue_event(
+    actor_tx: &mpsc::Sender<ActorMessage>,
+    shared_buffer: &DashMap<Arc<str>, Vec<AnalyticsEvent>>,
+    event: AnalyticsEvent,
+) {
+    match actor_tx.try_send(ActorMessage::RecordEvent(event)) {
+        Ok(()) => {}
+        Err(TrySendError::Full(ActorMessage::RecordEvent(event))) => {
+            use dashmap::mapref::entry::Entry;
+            match shared_buffer.entry(Arc::clone(&event.short_code)) {
+                Entry::Occupied(mut events) => events.get_mut().push(event),
+                Entry::Vacant(events) => {
+                    events.insert(vec![event]);
+                }
+            }
+        }
+        Err(TrySendError::Closed(ActorMessage::RecordEvent(event))) => {
+            warn!(short_code = %event.short_code, "analytics actor closed; dropping event");
+        }
+        Err(
+            TrySendError::Full(ActorMessage::Shutdown)
+            | TrySendError::Closed(ActorMessage::Shutdown),
+        ) => {
+            unreachable!("enqueue_event only sends analytics events")
+        }
+    }
+}
+
 /// Actor that manages analytics event buffering with zero lock contention
 ///
 /// Uses a 2-layer architecture:
@@ -37,9 +67,9 @@ struct AnalyticsActor {
     /// Channel receiver for incoming analytics events
     receiver: mpsc::Receiver<ActorMessage>,
     /// Layer 1: Lock-free event buffer (single-threaded access only in actor)
-    buffer: HashMap<String, Vec<AnalyticsEvent>>,
+    buffer: HashMap<Arc<str>, Vec<AnalyticsEvent>>,
     /// Layer 2: Shared buffer for concurrent reads during flush
-    shared_buffer: Arc<DashMap<String, Vec<AnalyticsEvent>>>,
+    shared_buffer: Arc<DashMap<Arc<str>, Vec<AnalyticsEvent>>>,
     /// Fast flush interval (Layer 1 → Layer 2)
     fast_flush_interval: Duration,
 }
@@ -114,17 +144,19 @@ pub struct AnalyticsAggregator {
     actor_tx: mpsc::Sender<ActorMessage>,
 
     /// Shared event buffer (Layer 2) for concurrent flush access
-    shared_buffer: Arc<DashMap<String, Vec<AnalyticsEvent>>>,
+    shared_buffer: Arc<DashMap<Arc<str>, Vec<AnalyticsEvent>>>,
 
-    /// Shutdown signal
-    shutdown: Arc<Mutex<bool>>,
+    shutdown: Arc<AtomicBool>,
+    shutdown_notify: Arc<Notify>,
+    actor_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl AnalyticsAggregator {
     /// Create a new analytics aggregator with configurable parameters
     pub fn new_with_config(buffer_size: usize, fast_flush_interval_ms: u64) -> Self {
         let (actor_tx, actor_rx) = mpsc::channel(buffer_size);
-        let shutdown = Arc::new(Mutex::new(false));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_notify = Arc::new(Notify::new());
         let shared_buffer = Arc::new(DashMap::new());
 
         // Spawn the analytics actor
@@ -135,7 +167,7 @@ impl AnalyticsAggregator {
             fast_flush_interval: Duration::from_millis(fast_flush_interval_ms),
         };
 
-        tokio::spawn(async move {
+        let actor_handle = tokio::spawn(async move {
             actor.run().await;
         });
 
@@ -144,6 +176,8 @@ impl AnalyticsAggregator {
             actor_tx,
             shared_buffer,
             shutdown,
+            shutdown_notify,
+            actor_handle: Mutex::new(Some(actor_handle)),
         }
     }
 
@@ -161,15 +195,7 @@ impl AnalyticsAggregator {
     /// Uses lock-free mpsc channel to avoid contention on hot keys.
     /// The GeoIP lookups are deferred until flush time.
     pub fn record_event(&self, event: AnalyticsEvent) {
-        // Send to actor channel (lock-free, non-blocking)
-        // If channel is full, log warning and drop event
-        if self
-            .actor_tx
-            .try_send(ActorMessage::RecordEvent(event))
-            .is_err()
-        {
-            warn!("Analytics event buffer full, dropping event");
-        }
+        enqueue_event(&self.actor_tx, &self.shared_buffer, event);
     }
 
     /// Record a visit event (legacy - with GeoIP lookup already done)
@@ -217,7 +243,7 @@ impl AnalyticsAggregator {
         let mut result = Vec::new();
 
         // Collect all keys from shared buffer (Layer 2)
-        let keys: Vec<String> = self
+        let keys: Vec<Arc<str>> = self
             .shared_buffer
             .iter()
             .map(|entry| entry.key().clone())
@@ -245,25 +271,48 @@ impl AnalyticsAggregator {
     where
         F: Fn(
                 Vec<(AnalyticsKey, AnalyticsValue)>,
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+            )
+                -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>
             + Send
             + 'static,
     {
         let aggregates = Arc::clone(&self.aggregates);
+        let shared_buffer = Arc::clone(&self.shared_buffer);
         let shutdown = Arc::clone(&self.shutdown);
+        let shutdown_notify = Arc::clone(&self.shutdown_notify);
 
         tokio::spawn(async move {
             let mut interval =
                 tokio::time::interval(tokio::time::Duration::from_secs(flush_interval_secs));
 
             loop {
-                interval.tick().await;
-
-                // Check shutdown signal
-                if *shutdown.lock().await {
-                    info!("Analytics aggregator flush task shutting down");
-                    break;
+                tokio::select! {
+                    _ = interval.tick() => {}
+                    _ = shutdown_notify.notified() => {}
                 }
+
+                // Without GeoIP, preserve events using the explicit unknown
+                // geography bucket before flushing aggregates.
+                let event_keys: Vec<Arc<str>> = shared_buffer
+                    .iter()
+                    .map(|entry| Arc::clone(entry.key()))
+                    .collect();
+                for key in event_keys {
+                    if let Some((_, events)) = shared_buffer.remove(&key) {
+                        for event in events {
+                            let analytics_key = AnalyticsKey::from_event(
+                                &event,
+                                &crate::analytics::GeoLocation::default(),
+                            );
+                            aggregates
+                                .entry(analytics_key)
+                                .and_modify(|value| value.count += 1)
+                                .or_insert_with(|| AnalyticsValue { count: 1 });
+                        }
+                    }
+                }
+
+                let mut flush_failed = false;
 
                 // Drain aggregates
                 let count = aggregates.len();
@@ -283,8 +332,22 @@ impl AnalyticsAggregator {
 
                     // Call flush function
                     if !entries.is_empty() {
-                        flush_fn(entries).await;
+                        let retry = entries.clone();
+                        if let Err(error) = flush_fn(entries).await {
+                            tracing::error!(%error, "analytics flush failed; requeueing aggregates");
+                            merge_aggregates(&aggregates, retry);
+                            flush_failed = true;
+                        }
                     }
+                }
+
+                if shutdown.load(Ordering::Acquire) {
+                    if flush_failed {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
+                    info!("Analytics aggregator flush task shut down");
+                    break;
                 }
             }
         })
@@ -304,25 +367,24 @@ impl AnalyticsAggregator {
     where
         F: Fn(
                 Vec<(AnalyticsKey, AnalyticsValue)>,
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+            )
+                -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>>
             + Send
             + 'static,
     {
         let shared_buffer = Arc::clone(&self.shared_buffer);
         let aggregates = Arc::clone(&self.aggregates);
         let shutdown = Arc::clone(&self.shutdown);
+        let shutdown_notify = Arc::clone(&self.shutdown_notify);
 
         tokio::spawn(async move {
             let mut interval =
                 tokio::time::interval(tokio::time::Duration::from_secs(flush_interval_secs));
 
             loop {
-                interval.tick().await;
-
-                // Check shutdown signal
-                if *shutdown.lock().await {
-                    info!("Analytics aggregator flush task shutting down");
-                    break;
+                tokio::select! {
+                    _ = interval.tick() => {}
+                    _ = shutdown_notify.notified() => {}
                 }
 
                 // Drain events from shared buffer (Layer 2) and process with GeoIP
@@ -331,7 +393,7 @@ impl AnalyticsAggregator {
                     debug!("Processing {} analytics event buffers", event_count);
 
                     // Collect all event buffers from shared buffer
-                    let keys: Vec<String> = shared_buffer
+                    let keys: Vec<Arc<str>> = shared_buffer
                         .iter()
                         .map(|entry| entry.key().clone())
                         .collect();
@@ -354,6 +416,8 @@ impl AnalyticsAggregator {
                     }
                 }
 
+                let mut flush_failed = false;
+
                 // Now drain and flush aggregates
                 let agg_count = aggregates.len();
                 if agg_count > 0 {
@@ -371,8 +435,22 @@ impl AnalyticsAggregator {
 
                     // Call flush function
                     if !entries.is_empty() {
-                        flush_fn(entries).await;
+                        let retry = entries.clone();
+                        if let Err(error) = flush_fn(entries).await {
+                            tracing::error!(%error, "analytics flush failed; requeueing aggregates");
+                            merge_aggregates(&aggregates, retry);
+                            flush_failed = true;
+                        }
                     }
+                }
+
+                if shutdown.load(Ordering::Acquire) {
+                    if flush_failed {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
+                    info!("Analytics aggregator GeoIP flush task shut down");
+                    break;
                 }
             }
         })
@@ -395,7 +473,7 @@ impl AnalyticsAggregator {
         // Process from aggregates (already GeoIP resolved)
         for entry in self.aggregates.iter() {
             let key = entry.key();
-            if key.short_code != short_code {
+            if key.short_code.as_ref() != short_code {
                 continue;
             }
 
@@ -468,7 +546,7 @@ impl AnalyticsAggregator {
         let unknown_count: i64 = self
             .shared_buffer
             .iter()
-            .filter(|entry| entry.key() == short_code)
+            .filter(|entry| entry.key().as_ref() == short_code)
             .map(|entry| entry.value().len() as i64)
             .sum();
 
@@ -484,12 +562,15 @@ impl AnalyticsAggregator {
 
     /// Signal shutdown to the flush task and actor
     pub async fn shutdown(&self) {
-        // Send shutdown message to actor
-        let _ = self.actor_tx.send(ActorMessage::Shutdown).await;
-
-        // Signal shutdown to flush task
-        let mut shutdown = self.shutdown.lock().await;
-        *shutdown = true;
+        let mut actor_handle = self.actor_handle.lock().await;
+        if let Some(actor_handle) = actor_handle.take() {
+            let _ = self.actor_tx.send(ActorMessage::Shutdown).await;
+            if let Err(error) = actor_handle.await {
+                tracing::error!(%error, "analytics actor panicked during shutdown");
+            }
+        }
+        self.shutdown.store(true, Ordering::Release);
+        self.shutdown_notify.notify_waiters();
     }
 
     /// Get the current number of aggregated entries
@@ -503,6 +584,18 @@ impl AnalyticsAggregator {
     }
 }
 
+fn merge_aggregates(
+    aggregates: &DashMap<AnalyticsKey, AnalyticsValue>,
+    entries: Vec<(AnalyticsKey, AnalyticsValue)>,
+) {
+    for (key, value) in entries {
+        aggregates
+            .entry(key)
+            .and_modify(|current| current.count += value.count)
+            .or_insert(value);
+    }
+}
+
 impl Default for AnalyticsAggregator {
     fn default() -> Self {
         Self::new()
@@ -513,6 +606,7 @@ impl Default for AnalyticsAggregator {
 mod tests {
     use super::*;
     use crate::analytics::models::GeoLocation;
+    use std::sync::atomic::AtomicI64;
 
     #[tokio::test]
     async fn test_aggregator_record() {
@@ -559,5 +653,87 @@ mod tests {
         assert_eq!(drained.len(), 1);
         assert_eq!(drained[0].1.count, 2);
         assert_eq!(aggregator.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn full_event_channel_preserves_event_in_shared_buffer() {
+        let (actor_tx, _actor_rx) = mpsc::channel(1);
+        actor_tx
+            .try_send(ActorMessage::RecordEvent(AnalyticsEvent {
+                short_code: "queued".into(),
+                timestamp: 1,
+                client_ip: "127.0.0.1".parse().unwrap(),
+            }))
+            .unwrap();
+        let shared_buffer = DashMap::new();
+
+        enqueue_event(
+            &actor_tx,
+            &shared_buffer,
+            AnalyticsEvent {
+                short_code: "overflow".into(),
+                timestamp: 2,
+                client_ip: "127.0.0.1".parse().unwrap(),
+            },
+        );
+
+        assert_eq!(shared_buffer.get("overflow").unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn shutdown_flushes_pending_events_without_geoip() {
+        let aggregator = AnalyticsAggregator::new();
+        let persisted = Arc::new(AtomicI64::new(0));
+        let persisted_by_flush = Arc::clone(&persisted);
+        let flush_handle = aggregator.start_flush_task_with_storage(3_600, move |entries| {
+            let persisted = Arc::clone(&persisted_by_flush);
+            Box::pin(async move {
+                let count = entries.into_iter().map(|(_, value)| value.count).sum();
+                persisted.fetch_add(count, Ordering::Relaxed);
+                Ok(())
+            })
+        });
+        aggregator.record_event(AnalyticsEvent {
+            short_code: "shutdown".into(),
+            timestamp: 1,
+            client_ip: "127.0.0.1".parse().unwrap(),
+        });
+
+        aggregator.shutdown().await;
+        flush_handle.await.unwrap();
+
+        assert_eq!(persisted.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn shutdown_retries_failed_final_flush() {
+        let aggregator = AnalyticsAggregator::new();
+        let attempts = Arc::new(AtomicI64::new(0));
+        let attempts_by_flush = Arc::clone(&attempts);
+        let persisted = Arc::new(AtomicI64::new(0));
+        let persisted_by_flush = Arc::clone(&persisted);
+        let flush_handle = aggregator.start_flush_task_with_storage(3_600, move |entries| {
+            let attempts = Arc::clone(&attempts_by_flush);
+            let persisted = Arc::clone(&persisted_by_flush);
+            Box::pin(async move {
+                if attempts.fetch_add(1, Ordering::Relaxed) == 0 {
+                    anyhow::bail!("transient failure");
+                }
+                let count = entries.into_iter().map(|(_, value)| value.count).sum();
+                persisted.fetch_add(count, Ordering::Relaxed);
+                Ok(())
+            })
+        });
+        aggregator.record_event(AnalyticsEvent {
+            short_code: "retry".into(),
+            timestamp: 1,
+            client_ip: "127.0.0.1".parse().unwrap(),
+        });
+
+        aggregator.shutdown().await;
+        flush_handle.await.unwrap();
+
+        assert_eq!(attempts.load(Ordering::Relaxed), 2);
+        assert_eq!(persisted.load(Ordering::Relaxed), 1);
     }
 }

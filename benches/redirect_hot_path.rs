@@ -24,6 +24,7 @@ static SHORT_LOCATION: LazyLock<HeaderValue> =
 static LONG_LOCATION: LazyLock<HeaderValue> =
     LazyLock::new(|| HeaderValue::try_from(LONG_DESTINATION.as_str()).unwrap());
 static SHORT_CODE: LazyLock<String> = LazyLock::new(|| "abc12345".to_owned());
+static SHARED_SHORT_CODE: LazyLock<Arc<str>> = LazyLock::new(|| Arc::from(SHORT_CODE.as_str()));
 static MAX_LENGTH_CODE: LazyLock<String> = LazyLock::new(|| "x".repeat(50));
 
 fn main() {
@@ -68,6 +69,11 @@ fn short_code_clone_common_length() {
 #[divan::bench]
 fn short_code_clone_max_length() {
     black_box(black_box(&*MAX_LENGTH_CODE).clone());
+}
+
+#[divan::bench]
+fn analytics_short_code_arc_clone() {
+    black_box(Arc::clone(black_box(&*SHARED_SHORT_CODE)));
 }
 
 #[divan::bench]

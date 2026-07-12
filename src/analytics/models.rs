@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+use std::sync::Arc;
 
 /// Geographic location information derived from IP address
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,7 +64,7 @@ pub struct AnalyticsRecord {
 #[derive(Debug, Clone)]
 pub struct AnalyticsEvent {
     /// Short code that was accessed
-    pub short_code: String,
+    pub short_code: Arc<str>,
 
     /// Timestamp of the visit (Unix timestamp)
     pub timestamp: i64,
@@ -76,7 +77,7 @@ pub struct AnalyticsEvent {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct AnalyticsKey {
     /// Short code
-    pub short_code: String,
+    pub short_code: Arc<str>,
 
     /// Time bucket (hour granularity - Unix timestamp truncated to hour)
     pub time_bucket: i64,
@@ -104,7 +105,7 @@ impl AnalyticsKey {
         let time_bucket = (record.timestamp / 3600) * 3600;
 
         Self {
-            short_code: record.short_code.clone(),
+            short_code: Arc::from(record.short_code.as_str()),
             time_bucket,
             country_code: record.geo_location.country_code.clone(),
             region: record.geo_location.region.clone(),
@@ -192,7 +193,7 @@ impl AnalyticsRollup {
     /// in-memory aggregator.
     pub fn from_aggregate(key: AnalyticsKey, value: AnalyticsValue) -> Self {
         Self {
-            short_code: key.short_code,
+            short_code: key.short_code.to_string(),
             time_bucket: key.time_bucket,
             country_code: key.country_code,
             region: key.region,

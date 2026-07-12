@@ -571,6 +571,7 @@ async fn run_server() -> Result<()> {
     );
 
     // Initialize analytics if enabled
+    let mut analytics_flush_handle = None;
     let analytics_aggregator = if config.analytics.enabled {
         use lynx::analytics::{AnalyticsAggregator, AnalyticsRollup, GeoIpService};
 
@@ -602,7 +603,7 @@ async fn run_server() -> Result<()> {
 
         // Start optimized flush task with GeoIP service (if available)
         let storage_clone = Arc::clone(&storage);
-        let _flush_handle = if let Some(ref geoip_svc) = geoip {
+        let flush_handle = if let Some(ref geoip_svc) = geoip {
             // OPTIMIZED PATH: Use deferred GeoIP lookups
             let geoip_clone = Arc::clone(geoip_svc);
             aggregator.start_flush_task_with_geoip(
@@ -612,7 +613,7 @@ async fn run_server() -> Result<()> {
                     let storage = Arc::clone(&storage_clone);
                     Box::pin(async move {
                         if entries.is_empty() {
-                            return;
+                            return Ok(());
                         }
 
                         // Convert entries to storage format
@@ -622,11 +623,9 @@ async fn run_server() -> Result<()> {
                             .collect();
 
                         // Batch insert to storage
-                        if let Err(e) = storage.upsert_analytics_batch(records).await {
-                            tracing::error!("Failed to flush analytics to storage: {}", e);
-                        } else {
-                            tracing::debug!("Successfully flushed analytics to storage");
-                        }
+                        storage.upsert_analytics_batch(records).await?;
+                        tracing::debug!("Successfully flushed analytics to storage");
+                        Ok(())
                     })
                 },
             )
@@ -638,7 +637,7 @@ async fn run_server() -> Result<()> {
                     let storage = Arc::clone(&storage_clone);
                     Box::pin(async move {
                         if entries.is_empty() {
-                            return;
+                            return Ok(());
                         }
 
                         // Convert entries to storage format
@@ -648,15 +647,14 @@ async fn run_server() -> Result<()> {
                             .collect();
 
                         // Batch insert to storage
-                        if let Err(e) = storage.upsert_analytics_batch(records).await {
-                            tracing::error!("Failed to flush analytics to storage: {}", e);
-                        } else {
-                            tracing::debug!("Successfully flushed analytics to storage");
-                        }
+                        storage.upsert_analytics_batch(records).await?;
+                        tracing::debug!("Successfully flushed analytics to storage");
+                        Ok(())
                     })
                 },
             )
         };
+        analytics_flush_handle = Some(flush_handle);
 
         info!(
             "   - IP anonymization: {}",
@@ -788,6 +786,14 @@ async fn run_server() -> Result<()> {
 
     // Flush cached data on shutdown
     info!("Flushing cached data before shutdown...");
+    if let Some(aggregator) = analytics_aggregator.as_ref() {
+        aggregator.shutdown().await;
+    }
+    if let Some(flush_handle) = analytics_flush_handle {
+        if let Err(error) = flush_handle.await {
+            tracing::error!(%error, "analytics flush task panicked during shutdown");
+        }
+    }
     cached_storage.shutdown().await;
     info!("Shutdown complete");
 

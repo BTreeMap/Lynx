@@ -144,7 +144,7 @@ async fn test_analytics_route_records_without_geoip() {
     tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
     let events = aggregator.drain_events();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].short_code, "observed");
+    assert_eq!(events[0].short_code.as_ref(), "observed");
 }
 
 #[tokio::test]
@@ -180,6 +180,49 @@ async fn test_redirect_inactive_url() {
         StatusCode::GONE,
         "Inactive URL should return 410 GONE"
     );
+}
+
+#[tokio::test]
+async fn bulk_deactivation_invalidates_warmed_redirect_cache() {
+    let storage = create_test_storage().await;
+    storage
+        .create_with_code("bulk-cached", "https://example.com", Some("owner"))
+        .await
+        .unwrap();
+    let app = redirect::routes::create_redirect_router(
+        Arc::clone(&storage),
+        None,
+        false,
+        DEFAULT_REDIRECT_STATUS,
+    );
+
+    let warm_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/bulk-cached")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(warm_response.status(), DEFAULT_REDIRECT_STATUS);
+
+    assert_eq!(
+        storage.bulk_deactivate_user_links("owner").await.unwrap(),
+        1
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bulk-cached")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::GONE);
 }
 
 #[tokio::test]

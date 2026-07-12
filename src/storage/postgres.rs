@@ -2,7 +2,9 @@ use crate::analytics::{
     AnalyticsGroupBy, AnalyticsRollup, DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER,
 };
 use crate::models::{ShortenedUrl, UrlHistoryEntry};
-use crate::storage::{SearchParams, SearchResult, Storage, StorageError, StorageResult};
+use crate::storage::{
+    ClickIncrement, SearchParams, SearchResult, Storage, StorageError, StorageResult,
+};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::postgres::PgPoolOptions;
@@ -1541,6 +1543,36 @@ impl Storage for PostgresStorage {
         Ok(())
     }
 
+    async fn increment_clicks_batch(&self, increments: &[ClickIncrement]) -> Result<()> {
+        if increments.is_empty() {
+            return Ok(());
+        }
+
+        let short_codes: Vec<&str> = increments.iter().map(ClickIncrement::short_code).collect();
+        let amounts: Vec<i64> = increments
+            .iter()
+            .map(|increment| {
+                i64::try_from(increment.amount().get())
+                    .map_err(|_| anyhow!("increment amount exceeds i64"))
+            })
+            .collect::<Result<_>>()?;
+
+        sqlx::query(
+            r#"
+            UPDATE urls AS url
+            SET clicks = url.clicks + increment.amount
+            FROM UNNEST($1::text[], $2::bigint[]) AS increment(short_code, amount)
+            WHERE url.short_code = increment.short_code
+            "#,
+        )
+        .bind(short_codes)
+        .bind(amounts)
+        .execute(self.pool.as_ref())
+        .await?;
+
+        Ok(())
+    }
+
     async fn list_with_cursor(
         &self,
         limit: i64,
@@ -1843,35 +1875,65 @@ impl Storage for PostgresStorage {
     }
 
     async fn upsert_analytics_batch(&self, records: Vec<AnalyticsRollup>) -> Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| anyhow!(e))?
             .as_secs() as i64;
 
+        let mut short_codes = Vec::with_capacity(records.len());
+        let mut time_buckets = Vec::with_capacity(records.len());
+        let mut country_codes = Vec::with_capacity(records.len());
+        let mut regions = Vec::with_capacity(records.len());
+        let mut cities = Vec::with_capacity(records.len());
+        let mut asns = Vec::with_capacity(records.len());
+        let mut ip_versions = Vec::with_capacity(records.len());
+        let mut visit_counts = Vec::with_capacity(records.len());
         for record in records {
-            sqlx::query(
-                r#"
-                INSERT INTO analytics (short_code, time_bucket, country_code, region, city, asn, ip_version, visit_count, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                ON CONFLICT(short_code, time_bucket, country_code, region, city, asn, ip_version)
-                DO UPDATE SET visit_count = analytics.visit_count + $11, updated_at = $12
-                "#,
-            )
-            .bind(&record.short_code)
-            .bind(record.time_bucket)
-            .bind(&record.country_code)
-            .bind(&record.region)
-            .bind(&record.city)
-            .bind(record.asn)
-            .bind(record.ip_version.as_i32())
-            .bind(record.visit_count)
-            .bind(now)
-            .bind(now)
-            .bind(record.visit_count)
-            .bind(now)
-            .execute(self.pool.as_ref())
-            .await?;
+            short_codes.push(record.short_code);
+            time_buckets.push(record.time_bucket);
+            country_codes.push(record.country_code);
+            regions.push(record.region);
+            cities.push(record.city);
+            asns.push(record.asn);
+            ip_versions.push(record.ip_version.as_i32());
+            visit_counts.push(record.visit_count);
         }
+
+        sqlx::query(
+            r#"
+            INSERT INTO analytics (
+                short_code, time_bucket, country_code, region, city, asn,
+                ip_version, visit_count, created_at, updated_at
+            )
+            SELECT batch.*, $9, $9
+            FROM UNNEST(
+                $1::text[], $2::bigint[], $3::text[], $4::text[],
+                $5::text[], $6::bigint[], $7::integer[], $8::bigint[]
+            ) AS batch(
+                short_code, time_bucket, country_code, region, city, asn,
+                ip_version, visit_count
+            )
+            ON CONFLICT(short_code, time_bucket, country_code, region, city, asn, ip_version)
+            DO UPDATE SET
+                visit_count = analytics.visit_count + EXCLUDED.visit_count,
+                updated_at = EXCLUDED.updated_at
+            "#,
+        )
+        .bind(short_codes)
+        .bind(time_buckets)
+        .bind(country_codes)
+        .bind(regions)
+        .bind(cities)
+        .bind(asns)
+        .bind(ip_versions)
+        .bind(visit_counts)
+        .bind(now)
+        .execute(self.pool.as_ref())
+        .await?;
 
         Ok(())
     }

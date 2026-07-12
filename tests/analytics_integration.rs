@@ -228,13 +228,13 @@ async fn test_auto_flush() {
         let s = Arc::clone(&storage_clone);
         Box::pin(async move {
             if entries.is_empty() {
-                return;
+                return Ok(());
             }
             let recs: Vec<_> = entries
                 .into_iter()
                 .map(|(k, v)| AnalyticsRollup::from_aggregate(k, v))
                 .collect();
-            let _ = s.upsert_analytics_batch(recs).await;
+            s.upsert_analytics_batch(recs).await
         })
     });
 

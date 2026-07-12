@@ -55,7 +55,7 @@ async fn test_concurrent_event_recording() {
         let handle = tokio::spawn(async move {
             for i in 0..100 {
                 let event = AnalyticsEvent {
-                    short_code: format!("code{}", task_id % 3),
+                    short_code: format!("code{}", task_id % 3).into(),
                     client_ip: "192.168.1.1".parse().unwrap(),
                     timestamp: 1000000 + i,
                 };

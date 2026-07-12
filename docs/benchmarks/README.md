@@ -28,6 +28,7 @@ cargo bench --bench redirect_hot_path
 | Case family | Question answered |
 |---|---|
 | `short_code_clone_*` / `short_code_transfer_*` | What allocation cost is avoided by transferring Axum's owned path string? |
+| `analytics_short_code_arc_clone` | What is the isolated cost of sharing a cache-resident analytics code instead of allocating per event? |
 | `click_enqueue_bounded_available` | What is the uncontended cost of ownership transfer through a bounded Tokio channel? |
 | `click_enqueue_full_merge_existing` | What is the synchronous lossless fallback cost when that channel is saturated? |
 | `plain_lookup_result_shape` / `measured_lookup_result_shape` | What local work is removed when timing metadata is disabled? |
@@ -38,3 +39,6 @@ The transfer input is created outside Divan's timed region. This is deliberate:
 the path `String` already exists after Axum extraction, so the production choice
 is between moving that allocation and creating a second allocation with
 `String::clone`.
+
+The complete serving-path and contention model is documented in
+[`REDIRECT_HOT_PATH.md`](../REDIRECT_HOT_PATH.md).

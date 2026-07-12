@@ -2,6 +2,7 @@ use crate::models::{ShortenedUrl, UrlHistoryEntry};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -31,6 +32,30 @@ impl OwnedClickError {
 
     pub fn short_code(&self) -> &str {
         &self.short_code
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClickIncrement {
+    short_code: String,
+    amount: NonZeroU64,
+}
+
+impl ClickIncrement {
+    pub fn new(short_code: String, amount: NonZeroU64) -> Self {
+        Self { short_code, amount }
+    }
+
+    pub fn short_code(&self) -> &str {
+        &self.short_code
+    }
+
+    pub fn amount(&self) -> NonZeroU64 {
+        self.amount
+    }
+
+    pub fn into_parts(self) -> (String, NonZeroU64) {
+        (self.short_code, self.amount)
     }
 }
 
@@ -150,6 +175,9 @@ pub trait Storage: Send + Sync {
 
     /// Increment click count by the provided amount
     async fn increment_clicks(&self, short_code: &str, amount: u64) -> Result<()>;
+
+    /// Atomically persist a batch of nonzero click increments.
+    async fn increment_clicks_batch(&self, increments: &[ClickIncrement]) -> Result<()>;
 
     /// Increment clicks while transferring ownership of the short code.
     ///

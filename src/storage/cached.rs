@@ -1,13 +1,15 @@
 use crate::models::{ShortenedUrl, UrlHistoryEntry};
 use crate::storage::{
-    LookupMetadata, LookupResult, OwnedClickError, SearchParams, SearchResult, Storage,
-    StorageResult,
+    ClickIncrement, LookupMetadata, LookupResult, OwnedClickError, SearchParams, SearchResult,
+    Storage, StorageResult,
 };
 use anyhow::Result;
 use async_trait::async_trait;
+use axum::http::HeaderValue;
 use dashmap::DashMap;
 use moka::future::Cache;
 use std::collections::HashMap;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, mpsc::error::TrySendError, Mutex};
@@ -153,7 +155,7 @@ impl ClickCounterActor {
     fn flush_read_view_to_storage(&self) -> Option<tokio::task::JoinHandle<()>> {
         // Atomically collect and zero out counts from DashMap
         // This is fast and happens synchronously to maintain data consistency
-        let pending_updates: Vec<(String, u64)> = self
+        let pending_updates: Vec<ClickIncrement> = self
             .read_view
             .iter_mut()
             .filter_map(|mut entry| {
@@ -163,7 +165,10 @@ impl ClickCounterActor {
                 }
                 // Atomically zero the entry - any new increments will be added to 0
                 *entry.value_mut() = 0;
-                Some((entry.key().clone(), count))
+                Some(ClickIncrement::new(
+                    entry.key().clone(),
+                    NonZeroU64::new(count).expect("zero counts were filtered"),
+                ))
             })
             .collect();
 
@@ -179,10 +184,16 @@ impl ClickCounterActor {
         // This doesn't block the actor from processing new clicks
         // Return the JoinHandle so callers can optionally wait for completion
         let storage = Arc::clone(&self.storage);
+        let read_view = Arc::clone(&self.read_view);
         Some(tokio::spawn(async move {
-            for (short_code, count) in pending_updates {
-                if let Err(e) = storage.increment_clicks(&short_code, count).await {
-                    tracing::error!("Failed to persist click count for '{}': {}", short_code, e);
+            if let Err(error) = storage.increment_clicks_batch(&pending_updates).await {
+                tracing::error!(%error, "failed to persist click batch; requeueing it");
+                for increment in pending_updates {
+                    let (short_code, amount) = increment.into_parts();
+                    read_view
+                        .entry(short_code)
+                        .and_modify(|count| *count += amount.get())
+                        .or_insert(amount.get());
                 }
             }
         }))
@@ -211,13 +222,48 @@ pub struct CachedStorage {
     /// Underlying storage implementation
     inner: Arc<dyn Storage>,
     /// Read cache for URL lookups (Moka cache)
-    read_cache: Cache<String, Option<Arc<ShortenedUrl>>>,
+    read_cache: Cache<String, Option<Arc<CachedUrl>>>,
     /// Shared read view for real-time click statistics (Layer 2)
     read_view: Arc<DashMap<String, u64>>,
     /// Actor message sender
     actor_tx: mpsc::Sender<ActorMessage>,
     /// Long-lived actor task, joined during graceful shutdown.
     actor_handle: Mutex<Option<JoinHandle<()>>>,
+}
+
+struct CachedUrl {
+    url: Arc<ShortenedUrl>,
+    location: Option<HeaderValue>,
+    analytics_code: Arc<str>,
+}
+
+impl CachedUrl {
+    fn new(url: Arc<ShortenedUrl>) -> Arc<Self> {
+        Arc::new(Self {
+            location: HeaderValue::try_from(&url.original_url).ok(),
+            analytics_code: Arc::from(url.short_code.as_str()),
+            url,
+        })
+    }
+
+    fn redirect_target(&self) -> RedirectTarget {
+        RedirectTarget {
+            url: Arc::clone(&self.url),
+            location: self.location.clone(),
+            analytics_code: Arc::clone(&self.analytics_code),
+        }
+    }
+}
+
+pub struct RedirectTarget {
+    pub url: Arc<ShortenedUrl>,
+    pub location: Option<HeaderValue>,
+    pub analytics_code: Arc<str>,
+}
+
+pub struct RedirectLookup {
+    pub target: Option<RedirectTarget>,
+    pub metadata: LookupMetadata,
 }
 
 impl CachedStorage {
@@ -285,6 +331,55 @@ impl CachedStorage {
         enqueue_click_increment(&self.actor_tx, &self.read_view, short_code, amount)
     }
 
+    async fn get_cached(&self, short_code: &str) -> Result<Option<Arc<CachedUrl>>> {
+        let inner = Arc::clone(&self.inner);
+        self.read_cache
+            .try_get_with_by_ref(short_code, async move {
+                inner
+                    .get(short_code)
+                    .await
+                    .map(|url| url.map(CachedUrl::new))
+            })
+            .await
+            .map_err(|error| anyhow::anyhow!(error.to_string()))
+    }
+
+    pub async fn get_redirect(&self, short_code: &str) -> Result<Option<RedirectTarget>> {
+        Ok(self
+            .get_cached(short_code)
+            .await?
+            .map(|cached| cached.redirect_target()))
+    }
+
+    pub async fn get_redirect_with_metadata(&self, short_code: &str) -> Result<RedirectLookup> {
+        let cache_start = Instant::now();
+        if let Some(cached) = self.read_cache.get(short_code).await {
+            return Ok(RedirectLookup {
+                target: cached.map(|cached| cached.redirect_target()),
+                metadata: LookupMetadata {
+                    cache_hit: true,
+                    cache_duration: Some(cache_start.elapsed()),
+                    db_duration: None,
+                },
+            });
+        }
+        let cache_duration = cache_start.elapsed();
+        let db_start = Instant::now();
+        let target = self
+            .get_cached(short_code)
+            .await?
+            .map(|cached| cached.redirect_target());
+
+        Ok(RedirectLookup {
+            target,
+            metadata: LookupMetadata {
+                cache_hit: false,
+                cache_duration: Some(cache_duration),
+                db_duration: Some(db_start.elapsed()),
+            },
+        })
+    }
+
     /// Get buffered click count for a short code from Layer 2 (read_view)
     fn get_buffered_clicks(&self, short_code: &str) -> u64 {
         self.read_view
@@ -318,22 +413,20 @@ impl Storage for CachedStorage {
 
         // Cache the newly created URL
         self.read_cache
-            .insert(short_code.to_string(), Some(Arc::clone(&result)))
+            .insert(
+                short_code.to_string(),
+                Some(CachedUrl::new(Arc::clone(&result))),
+            )
             .await;
 
         Ok(result)
     }
 
     async fn get(&self, short_code: &str) -> Result<Option<Arc<ShortenedUrl>>> {
-        if let Some(cached) = self.read_cache.get(short_code).await {
-            return Ok(cached);
-        }
-
-        let url = self.inner.get(short_code).await?;
-        self.read_cache
-            .insert(short_code.to_string(), url.clone())
-            .await;
-        Ok(url)
+        Ok(self
+            .get_cached(short_code)
+            .await?
+            .map(|cached| Arc::clone(&cached.url)))
     }
 
     async fn get_with_metadata(&self, short_code: &str) -> Result<LookupResult> {
@@ -341,7 +434,7 @@ impl Storage for CachedStorage {
         if let Some(cached) = self.read_cache.get(short_code).await {
             let cache_duration = cache_start.elapsed();
             return Ok(LookupResult {
-                url: cached,
+                url: cached.map(|cached| Arc::clone(&cached.url)),
                 metadata: LookupMetadata {
                     cache_hit: true,
                     cache_duration: Some(cache_duration),
@@ -351,18 +444,14 @@ impl Storage for CachedStorage {
         }
         let cache_duration = cache_start.elapsed();
 
-        // Cache miss - fetch from underlying storage
+        // Cache miss - fetch from underlying storage. Moka coalesces concurrent
+        // misses for the same code into this single fallible initialization.
         let db_start = Instant::now();
-        let url = self.inner.get(short_code).await?;
+        let url = self.get_cached(short_code).await?;
         let db_duration = db_start.elapsed();
 
-        // Cache the result from database (for both Some and None)
-        self.read_cache
-            .insert(short_code.to_string(), url.clone())
-            .await;
-
         Ok(LookupResult {
-            url,
+            url: url.map(|cached| Arc::clone(&cached.url)),
             metadata: LookupMetadata {
                 cache_hit: false,
                 cache_duration: Some(cache_duration),
@@ -381,7 +470,10 @@ impl Storage for CachedStorage {
             }
 
             self.read_cache
-                .insert(short_code.to_string(), Some(Arc::clone(url)))
+                .insert(
+                    short_code.to_string(),
+                    Some(CachedUrl::new(Arc::clone(url))),
+                )
                 .await;
         } else {
             self.read_cache.insert(short_code.to_string(), None).await;
@@ -461,6 +553,14 @@ impl Storage for CachedStorage {
         amount: u64,
     ) -> Result<(), OwnedClickError> {
         self.buffer_click_owned(short_code, amount)
+    }
+
+    async fn increment_clicks_batch(&self, increments: &[ClickIncrement]) -> Result<()> {
+        for increment in increments {
+            self.buffer_click_owned(increment.short_code().to_owned(), increment.amount().get())
+                .map_err(anyhow::Error::from)?;
+        }
+        Ok(())
     }
 
     async fn list_with_cursor(
@@ -544,13 +644,21 @@ impl Storage for CachedStorage {
     }
 
     async fn bulk_deactivate_user_links(&self, user_id: &str) -> Result<i64> {
-        // Note: This does not invalidate cache - cache purge happens on instance restart
-        self.inner.bulk_deactivate_user_links(user_id).await
+        let changed = self.inner.bulk_deactivate_user_links(user_id).await?;
+        if changed > 0 {
+            self.read_cache.invalidate_all();
+            self.read_cache.run_pending_tasks().await;
+        }
+        Ok(changed)
     }
 
     async fn bulk_reactivate_user_links(&self, user_id: &str) -> Result<i64> {
-        // Note: This does not invalidate cache - cache purge happens on instance restart
-        self.inner.bulk_reactivate_user_links(user_id).await
+        let changed = self.inner.bulk_reactivate_user_links(user_id).await?;
+        if changed > 0 {
+            self.read_cache.invalidate_all();
+            self.read_cache.run_pending_tasks().await;
+        }
+        Ok(changed)
     }
 
     async fn upsert_analytics_batch(
