@@ -115,6 +115,10 @@ throughput:
 ```bash
 cargo bench --bench redirect_hot_path
 ```
+The case definitions and dated observed-result snapshots are tracked in
+[docs/benchmarks/](benchmarks/README.md). Add a snapshot whenever a local
+microbenchmark is used to justify a hot-path change; do not rely on ephemeral
+terminal output.
 
 The suite compares destination-header parsing and cloning, short-code copying,
 lookup timing metadata, and lean versus timing-header response construction.

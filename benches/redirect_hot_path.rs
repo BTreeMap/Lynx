@@ -4,8 +4,10 @@ use std::time::Instant;
 use axum::http::header::{HeaderMap, HeaderValue, LOCATION};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use dashmap::DashMap;
 use divan::{black_box, Bencher};
 use lynx::storage::{LookupMetadata, LookupResult};
+use tokio::sync::mpsc;
 
 static SHORT_DESTINATION: &str = "https://example.com/target";
 static LONG_DESTINATION: LazyLock<String> = LazyLock::new(|| {
@@ -80,6 +82,39 @@ fn short_code_transfer_max_length(bencher: Bencher) {
     bencher
         .with_inputs(|| MAX_LENGTH_CODE.clone())
         .bench_values(black_box);
+}
+
+#[divan::bench]
+fn click_enqueue_bounded_available(bencher: Bencher) {
+    let (sender, mut receiver) = mpsc::channel(1);
+    let mut message = Some((SHORT_CODE.clone(), 1_u64));
+    bencher.bench_local(move || {
+        sender.try_send(message.take().unwrap()).unwrap();
+        message = Some(receiver.try_recv().unwrap());
+        black_box(&message);
+    });
+}
+
+#[divan::bench]
+fn click_enqueue_full_merge_existing(bencher: Bencher) {
+    let (sender, _receiver) = mpsc::channel(1);
+    sender.try_send(("queued".to_owned(), 1_u64)).unwrap();
+    let overflow = DashMap::new();
+    overflow.insert(SHORT_CODE.clone(), 0_u64);
+
+    bencher
+        .with_inputs(|| SHORT_CODE.clone())
+        .bench_values(move |short_code| {
+            let (short_code, amount) = sender
+                .try_send((short_code, 1_u64))
+                .unwrap_err()
+                .into_inner();
+            overflow
+                .entry(short_code)
+                .and_modify(|count| *count += amount)
+                .or_insert(amount);
+            black_box(());
+        });
 }
 
 #[divan::bench]
