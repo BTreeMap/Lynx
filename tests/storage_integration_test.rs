@@ -337,6 +337,28 @@ async fn test_click_increment_consistency() {
 }
 
 #[tokio::test]
+async fn test_owned_click_batch_and_zero_amount() {
+    let storage = create_sqlite_storage().await;
+
+    storage
+        .create_with_code("owned", "https://example.com", Some("user1"))
+        .await
+        .unwrap();
+
+    storage
+        .increment_clicks_owned("owned".to_owned(), 7)
+        .await
+        .unwrap();
+    storage
+        .increment_clicks_owned("owned".to_owned(), 0)
+        .await
+        .unwrap();
+
+    let url = storage.get_authoritative("owned").await.unwrap().unwrap();
+    assert_eq!(url.clicks, 7);
+}
+
+#[tokio::test]
 async fn test_patch_operations_isolation() {
     // Test that patch operations don't affect unrelated URLs
     let storage = create_sqlite_storage().await;

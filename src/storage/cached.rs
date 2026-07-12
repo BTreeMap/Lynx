@@ -1,6 +1,7 @@
 use crate::models::{ShortenedUrl, UrlHistoryEntry};
 use crate::storage::{
-    LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageResult,
+    LookupMetadata, LookupResult, OwnedClickError, SearchParams, SearchResult, Storage,
+    StorageResult,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -18,6 +19,32 @@ enum ActorMessage {
     BatchIncrement(String, u64),
     /// Shutdown signal - flush all data
     Shutdown,
+}
+
+async fn send_click_increment(
+    actor_tx: &mpsc::Sender<ActorMessage>,
+    short_code: String,
+    amount: u64,
+) -> Result<(), OwnedClickError> {
+    if amount == 0 {
+        return Ok(());
+    }
+
+    match actor_tx
+        .send(ActorMessage::BatchIncrement(short_code, amount))
+        .await
+    {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let ActorMessage::BatchIncrement(short_code, _) = error.0 else {
+                unreachable!("only batch increments are sent by this function")
+            };
+            Err(OwnedClickError::new(
+                short_code,
+                anyhow::anyhow!("click counter actor channel closed"),
+            ))
+        }
+    }
 }
 
 /// Actor that manages click counting with a lock-free buffer
@@ -404,6 +431,14 @@ impl Storage for CachedStorage {
         Ok(())
     }
 
+    async fn increment_clicks_owned(
+        &self,
+        short_code: String,
+        amount: u64,
+    ) -> Result<(), OwnedClickError> {
+        send_click_increment(&self.actor_tx, short_code, amount).await
+    }
+
     async fn list_with_cursor(
         &self,
         limit: i64,
@@ -558,5 +593,32 @@ impl Storage for CachedStorage {
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn owned_click_recovers_code_when_actor_is_closed() {
+        let (actor_tx, actor_rx) = mpsc::channel(1);
+        drop(actor_rx);
+
+        let error = send_click_increment(&actor_tx, "recover-me".to_owned(), 1)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.short_code(), "recover-me");
+    }
+
+    #[tokio::test]
+    async fn zero_owned_click_does_not_require_a_live_actor() {
+        let (actor_tx, actor_rx) = mpsc::channel(1);
+        drop(actor_rx);
+
+        send_click_increment(&actor_tx, "no-op".to_owned(), 0)
+            .await
+            .unwrap();
     }
 }

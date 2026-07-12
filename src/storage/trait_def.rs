@@ -16,6 +16,24 @@ pub enum StorageError {
 
 pub type StorageResult<T> = Result<T, StorageError>;
 
+#[derive(Debug, Error)]
+#[error("failed to increment clicks for {short_code}: {source}")]
+pub struct OwnedClickError {
+    short_code: String,
+    #[source]
+    source: anyhow::Error,
+}
+
+impl OwnedClickError {
+    pub fn new(short_code: String, source: anyhow::Error) -> Self {
+        Self { short_code, source }
+    }
+
+    pub fn short_code(&self) -> &str {
+        &self.short_code
+    }
+}
+
 /// Metadata about a storage lookup operation
 #[derive(Debug, Clone)]
 pub struct LookupMetadata {
@@ -133,9 +151,28 @@ pub trait Storage: Send + Sync {
     /// Increment click count by the provided amount
     async fn increment_clicks(&self, short_code: &str, amount: u64) -> Result<()>;
 
+    /// Increment clicks while transferring ownership of the short code.
+    ///
+    /// Failures retain the code so callers can report or retry without a clone.
+    async fn increment_clicks_owned(
+        &self,
+        short_code: String,
+        amount: u64,
+    ) -> Result<(), OwnedClickError> {
+        match self.increment_clicks(&short_code, amount).await {
+            Ok(()) => Ok(()),
+            Err(source) => Err(OwnedClickError::new(short_code, source)),
+        }
+    }
+
     /// Increment click count by 1 (convenience helper)
     async fn increment_click(&self, short_code: &str) -> Result<()> {
         self.increment_clicks(short_code, 1).await
+    }
+
+    /// Increment click count by 1 while transferring code ownership.
+    async fn increment_click_owned(&self, short_code: String) -> Result<(), OwnedClickError> {
+        self.increment_clicks_owned(short_code, 1).await
     }
 
     /// List URLs with cursor-based pagination

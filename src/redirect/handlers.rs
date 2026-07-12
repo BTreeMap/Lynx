@@ -57,7 +57,11 @@ pub async fn redirect_url(
     Path(code): Path<String>,
 ) -> Response {
     match prepare_redirect(&state, &code).await {
-        Ok(url) => redirect_response(&state, &code, &url),
+        Ok(url) => {
+            let response = redirect_response(&state, &url);
+            buffer_click(&state, code).await;
+            response
+        }
         Err(response) => response,
     }
 }
@@ -75,8 +79,10 @@ pub async fn redirect_url_with_analytics(
                 .analytics
                 .as_ref()
                 .expect("analytics handler requires analytics runtime")
-                .record(&code, &headers, addr.ip());
-            redirect_response(&state, &code, &url)
+                .record(&url.short_code, &headers, addr.ip());
+            let response = redirect_response(&state, &url);
+            buffer_click(&state, code).await;
+            response
         }
         Err(response) => response,
     }
@@ -91,7 +97,10 @@ pub async fn redirect_url_with_timing(
     let handler_start = Instant::now();
     match prepare_measured_redirect(&state, &code).await {
         Ok((url, metadata)) => {
-            timed_redirect_response(&state, &code, &url, metadata, handler_start, request_start)
+            let response =
+                timed_redirect_response(&state, &url, metadata, handler_start, request_start);
+            buffer_click(&state, code).await;
+            response
         }
         Err(response) => response,
     }
@@ -112,8 +121,11 @@ pub async fn redirect_url_with_analytics_and_timing(
                 .analytics
                 .as_ref()
                 .expect("analytics handler requires analytics runtime")
-                .record(&code, &headers, addr.ip());
-            timed_redirect_response(&state, &code, &url, metadata, handler_start, request_start)
+                .record(&url.short_code, &headers, addr.ip());
+            let response =
+                timed_redirect_response(&state, &url, metadata, handler_start, request_start);
+            buffer_click(&state, code).await;
+            response
         }
         Err(response) => response,
     }
@@ -128,7 +140,7 @@ async fn prepare_redirect(
         .get(code)
         .await
         .map_err(|_| internal_error())?;
-    accept_redirect(state, code, url).await
+    accept_redirect(url).map_err(IntoResponse::into_response)
 }
 
 async fn prepare_measured_redirect(
@@ -140,30 +152,31 @@ async fn prepare_measured_redirect(
         .get_with_metadata(code)
         .await
         .map_err(|_| internal_error())?;
-    let url = accept_redirect(state, code, result.url).await?;
+    let url = accept_redirect(result.url).map_err(IntoResponse::into_response)?;
     Ok((url, result.metadata))
 }
 
-async fn accept_redirect(
-    state: &RedirectState,
-    code: &str,
+fn accept_redirect(
     url: Option<Arc<ShortenedUrl>>,
-) -> Result<Arc<ShortenedUrl>, Response> {
+) -> Result<Arc<ShortenedUrl>, (StatusCode, &'static str)> {
     let Some(url) = url else {
-        return Err((StatusCode::NOT_FOUND, "URL not found").into_response());
+        return Err((StatusCode::NOT_FOUND, "URL not found"));
     };
     if !url.is_active {
-        return Err((StatusCode::GONE, "This link has been deactivated").into_response());
+        return Err((StatusCode::GONE, "This link has been deactivated"));
     }
 
-    if let Err(err) = state.storage.increment_click(code).await {
-        tracing::warn!(short_code = %code, error = %err, "failed to buffer click increment");
-    }
     Ok(url)
 }
 
-fn redirect_response(state: &RedirectState, code: &str, url: &ShortenedUrl) -> Response {
-    match location_header(code, url) {
+async fn buffer_click(state: &RedirectState, code: String) {
+    if let Err(error) = state.storage.increment_click_owned(code).await {
+        tracing::warn!(short_code = %error.short_code(), error = %error, "failed to buffer click increment");
+    }
+}
+
+fn redirect_response(state: &RedirectState, url: &ShortenedUrl) -> Response {
+    match location_header(url) {
         Some(location) => (state.redirect_status, [(LOCATION, location)]).into_response(),
         None => internal_error(),
     }
@@ -171,13 +184,12 @@ fn redirect_response(state: &RedirectState, code: &str, url: &ShortenedUrl) -> R
 
 fn timed_redirect_response(
     state: &RedirectState,
-    code: &str,
     url: &ShortenedUrl,
     metadata: LookupMetadata,
     handler_start: Instant,
     request_start: Instant,
 ) -> Response {
-    let location = match location_header(code, url) {
+    let location = match location_header(url) {
         Some(location) => location,
         None => return internal_error(),
     };
@@ -208,12 +220,12 @@ fn timed_redirect_response(
     (state.redirect_status, headers).into_response()
 }
 
-fn location_header(code: &str, url: &ShortenedUrl) -> Option<HeaderValue> {
+fn location_header(url: &ShortenedUrl) -> Option<HeaderValue> {
     match HeaderValue::try_from(&url.original_url) {
         Ok(location) => Some(location),
         Err(error) => {
             tracing::error!(
-                short_code = %code,
+                short_code = %url.short_code,
                 url = %url.original_url,
                 error = %error,
                 "Failed to create Location header - URL contains invalid characters"
