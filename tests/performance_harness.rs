@@ -75,7 +75,7 @@ impl Harness {
             StatusCode::PERMANENT_REDIRECT,
         );
         let (api_base, api_server) = serve(api).await?;
-        let (redirect_base, redirect_server) = serve(redirect).await?;
+        let (redirect_base, redirect_server) = serve_with_connect_info(redirect).await?;
         let client = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .redirect(Policy::none())
@@ -117,9 +117,10 @@ impl Harness {
         let url = format!("{}/{}", self.redirect_base, scenario.code(1));
         for _ in 0..100 {
             let response = self.client.get(&url).send().await?;
+            let status = response.status();
             ensure!(
-                response.status().is_redirection(),
-                "warm-up did not redirect"
+                status.is_redirection(),
+                "warm-up did not redirect: {status} from {url}"
             );
         }
         Ok(())
@@ -237,6 +238,24 @@ async fn serve(router: Router) -> Result<(String, JoinHandle<()>)> {
     Ok((format!("http://{address}"), server))
 }
 
+async fn serve_with_connect_info(router: Router) -> Result<(String, JoinHandle<()>)> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .context("bind performance harness server")?;
+    let address = listener.local_addr().context("read harness address")?;
+    let server = tokio::spawn(async move {
+        if let Err(error) = axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        {
+            panic!("performance harness server failed: {error}");
+        }
+    });
+    Ok((format!("http://{address}"), server))
+}
+
 fn harness_config(database_url: String) -> Config {
     Config {
         database: DatabaseConfig {
@@ -324,6 +343,9 @@ async fn representative_hot_path_flamegraphs() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::extract::ConnectInfo;
+    use axum::routing::get;
+    use std::net::SocketAddr;
 
     #[test]
     fn scenario_concurrency_is_nonzero() {
@@ -331,5 +353,20 @@ mod tests {
         for scenario in ProfileScenario::ALL {
             assert!(config.concurrency(scenario) >= NonZeroUsize::MIN);
         }
+    }
+
+    #[tokio::test]
+    async fn redirect_server_injects_peer_address() {
+        async fn peer_address(ConnectInfo(address): ConnectInfo<SocketAddr>) -> String {
+            address.ip().to_string()
+        }
+
+        let router = Router::new().route("/", get(peer_address));
+        let (base, server) = serve_with_connect_info(router).await.unwrap();
+        let response = reqwest::get(base).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.text().await.unwrap(), "127.0.0.1");
+        server.abort();
     }
 }
