@@ -2,9 +2,7 @@ use crate::analytics::{
     AnalyticsGroupBy, AnalyticsRollup, DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER,
 };
 use crate::models::{ShortenedUrl, UrlHistoryEntry};
-use crate::storage::{
-    LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageError, StorageResult,
-};
+use crate::storage::{SearchParams, SearchResult, Storage, StorageError, StorageResult};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -13,7 +11,6 @@ use std::convert::TryFrom;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Instant;
 
 pub struct SqliteStorage {
     pub pool: Arc<SqlitePool>,
@@ -1466,19 +1463,8 @@ impl Storage for SqliteStorage {
         Ok(Arc::new(url))
     }
 
-    async fn get(&self, short_code: &str) -> Result<LookupResult> {
-        let start = Instant::now();
-        let url = self.get_authoritative(short_code).await?;
-        let duration = start.elapsed();
-
-        Ok(LookupResult {
-            url,
-            metadata: LookupMetadata {
-                cache_hit: false,
-                cache_duration: None,
-                db_duration: Some(duration),
-            },
-        })
+    async fn get(&self, short_code: &str) -> Result<Option<Arc<ShortenedUrl>>> {
+        self.get_authoritative(short_code).await
     }
 
     async fn get_authoritative(&self, short_code: &str) -> Result<Option<Arc<ShortenedUrl>>> {

@@ -81,8 +81,22 @@ pub trait Storage: Send + Sync {
 
     // Additional helper methods may be added for automatic code generation if storage-backed.
 
-    /// Get a shortened URL by short code with metadata (cache hit/miss, timing info)
-    async fn get(&self, short_code: &str) -> Result<LookupResult>;
+    /// Get a shortened URL by short code without observability metadata.
+    async fn get(&self, short_code: &str) -> Result<Option<Arc<ShortenedUrl>>>;
+
+    /// Get a shortened URL with cache and database timing metadata.
+    async fn get_with_metadata(&self, short_code: &str) -> Result<LookupResult> {
+        let start = std::time::Instant::now();
+        let url = self.get(short_code).await?;
+        Ok(LookupResult {
+            url,
+            metadata: LookupMetadata {
+                cache_hit: false,
+                cache_duration: None,
+                db_duration: Some(start.elapsed()),
+            },
+        })
+    }
 
     /// Get a shortened URL by short code with authoritative statistics
     async fn get_authoritative(&self, short_code: &str) -> Result<Option<Arc<ShortenedUrl>>>;

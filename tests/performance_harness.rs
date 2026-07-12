@@ -67,14 +67,7 @@ impl Harness {
         );
 
         let api = create_api_router(Arc::clone(&storage), auth, config, None);
-        let redirect = create_redirect_router(
-            storage,
-            None,
-            None,
-            None,
-            false,
-            StatusCode::PERMANENT_REDIRECT,
-        );
+        let redirect = create_redirect_router(storage, None, false, StatusCode::PERMANENT_REDIRECT);
         let (api_base, api_server) = serve(api).await?;
         let (redirect_base, redirect_server) = serve_with_connect_info(redirect).await?;
         let client = reqwest::Client::builder()

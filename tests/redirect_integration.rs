@@ -5,14 +5,16 @@
 
 use axum::{
     body::Body,
+    extract::ConnectInfo,
     http::{Request, StatusCode},
 };
-use lynx::redirect::{self, middleware::RequestStart};
+use lynx::analytics::AnalyticsAggregator;
+use lynx::config::AnalyticsConfig;
+use lynx::redirect::{self, RedirectAnalytics};
 use lynx::storage::{SqliteStorage, Storage};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
-use tower::{Layer, ServiceExt};
+use tower::ServiceExt;
 
 /// Default redirect status code for tests (308 Permanent Redirect)
 const DEFAULT_REDIRECT_STATUS: StatusCode = StatusCode::PERMANENT_REDIRECT;
@@ -24,49 +26,10 @@ async fn create_test_storage() -> Arc<dyn Storage> {
     Arc::new(storage)
 }
 
-/// Helper layer to inject ConnectInfo for tests
-#[derive(Clone)]
-struct TestConnectInfoLayer;
-
-impl<S> Layer<S> for TestConnectInfoLayer {
-    type Service = TestConnectInfoMiddleware<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        TestConnectInfoMiddleware { inner }
-    }
-}
-
-#[derive(Clone)]
-struct TestConnectInfoMiddleware<S> {
-    inner: S,
-}
-
-impl<S, B> tower::Service<Request<B>> for TestConnectInfoMiddleware<S>
-where
-    S: tower::Service<Request<B>> + Clone,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: Request<B>) -> Self::Future {
-        // Insert test ConnectInfo extension
-        let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
-        req.extensions_mut()
-            .insert(axum::extract::connect_info::ConnectInfo(addr));
-
-        // Insert RequestStart extension
-        req.extensions_mut().insert(RequestStart(Instant::now()));
-
-        self.inner.call(req)
-    }
+#[tokio::test]
+async fn disabled_analytics_cannot_create_redirect_capability() {
+    let aggregator = Arc::new(AnalyticsAggregator::new());
+    assert!(RedirectAnalytics::from_enabled(AnalyticsConfig::default(), aggregator).is_none());
 }
 
 #[tokio::test]
@@ -83,12 +46,9 @@ async fn test_redirect_active_url() {
     let app = redirect::routes::create_redirect_router(
         storage.clone(),
         None,
-        None,
-        None,
         false,
         DEFAULT_REDIRECT_STATUS,
-    )
-    .layer(TestConnectInfoLayer);
+    );
 
     let request = Request::builder()
         .uri("/redirect_test")
@@ -116,6 +76,78 @@ async fn test_redirect_active_url() {
 }
 
 #[tokio::test]
+async fn test_timing_route_adds_observability_headers() {
+    let storage = create_test_storage().await;
+    storage
+        .create_with_code("timed", "https://example.com/timed", None)
+        .await
+        .unwrap();
+    let app =
+        redirect::routes::create_redirect_router(storage, None, true, DEFAULT_REDIRECT_STATUS);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/timed")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), DEFAULT_REDIRECT_STATUS);
+    for header in [
+        "x-lynx-cache-hit",
+        "x-lynx-timing-total-ms",
+        "x-lynx-timing-cache-ms",
+        "x-lynx-timing-db-ms",
+        "x-lynx-timing-handler-ms",
+    ] {
+        assert!(response.headers().contains_key(header), "missing {header}");
+    }
+}
+
+#[tokio::test]
+async fn test_analytics_route_records_without_geoip() {
+    let storage = create_test_storage().await;
+    storage
+        .create_with_code("observed", "https://example.com/observed", None)
+        .await
+        .unwrap();
+    let aggregator = Arc::new(AnalyticsAggregator::new());
+    let analytics = RedirectAnalytics::from_enabled(
+        AnalyticsConfig {
+            enabled: true,
+            ..AnalyticsConfig::default()
+        },
+        Arc::clone(&aggregator),
+    )
+    .unwrap();
+    let app = redirect::routes::create_redirect_router(
+        storage,
+        Some(analytics),
+        false,
+        DEFAULT_REDIRECT_STATUS,
+    );
+    let mut request = Request::builder()
+        .uri("/observed")
+        .body(Body::empty())
+        .unwrap();
+    request
+        .extensions_mut()
+        .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))));
+
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), DEFAULT_REDIRECT_STATUS);
+    assert!(!response.headers().contains_key("x-lynx-cache-hit"));
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+    let events = aggregator.drain_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].short_code, "observed");
+}
+
+#[tokio::test]
 async fn test_redirect_inactive_url() {
     // Test that inactive URLs return 404
     let storage = create_test_storage().await;
@@ -131,12 +163,9 @@ async fn test_redirect_inactive_url() {
     let app = redirect::routes::create_redirect_router(
         storage.clone(),
         None,
-        None,
-        None,
         false,
         DEFAULT_REDIRECT_STATUS,
-    )
-    .layer(TestConnectInfoLayer);
+    );
 
     let request = Request::builder()
         .uri("/inactive_test")
@@ -160,12 +189,9 @@ async fn test_redirect_nonexistent_url() {
     let app = redirect::routes::create_redirect_router(
         storage.clone(),
         None,
-        None,
-        None,
         false,
         DEFAULT_REDIRECT_STATUS,
-    )
-    .layer(TestConnectInfoLayer);
+    );
 
     let request = Request::builder()
         .uri("/nonexistent")
@@ -195,12 +221,9 @@ async fn test_concurrent_redirects() {
     let app = redirect::routes::create_redirect_router(
         storage.clone(),
         None,
-        None,
-        None,
         false,
         DEFAULT_REDIRECT_STATUS,
-    )
-    .layer(TestConnectInfoLayer);
+    );
 
     // Spawn many concurrent redirect requests
     let mut handles = vec![];
@@ -255,12 +278,9 @@ async fn test_redirect_during_deactivation() {
     let app = redirect::routes::create_redirect_router(
         storage.clone(),
         None,
-        None,
-        None,
         false,
         DEFAULT_REDIRECT_STATUS,
-    )
-    .layer(TestConnectInfoLayer);
+    );
 
     // Spawn redirect tasks
     let mut redirect_handles = vec![];
@@ -330,12 +350,9 @@ async fn test_redirect_multiple_different_urls() {
     let app = redirect::routes::create_redirect_router(
         storage.clone(),
         None,
-        None,
-        None,
         false,
         DEFAULT_REDIRECT_STATUS,
-    )
-    .layer(TestConnectInfoLayer);
+    );
 
     // Spawn concurrent redirects to different URLs
     let mut handles = vec![];
@@ -391,15 +408,8 @@ async fn test_configurable_redirect_status_codes() {
     ];
 
     for (status_code, description) in test_cases {
-        let app = redirect::routes::create_redirect_router(
-            storage.clone(),
-            None,
-            None,
-            None,
-            false,
-            status_code,
-        )
-        .layer(TestConnectInfoLayer);
+        let app =
+            redirect::routes::create_redirect_router(storage.clone(), None, false, status_code);
 
         let request = Request::builder()
             .uri("/status_test")

@@ -4,7 +4,7 @@ use axum::{
         header::{HeaderMap, HeaderValue, LOCATION},
         StatusCode,
     },
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Extension, Json,
 };
 use serde::Serialize;
@@ -13,128 +13,218 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::middleware::RequestStart;
-use crate::analytics::{AnalyticsAggregator, GeoIpService};
+use crate::analytics::AnalyticsAggregator;
 use crate::config::AnalyticsConfig;
-use crate::storage::Storage;
+use crate::models::ShortenedUrl;
+use crate::storage::{LookupMetadata, Storage};
 
-pub struct RedirectState {
-    pub storage: Arc<dyn Storage>,
-    pub analytics_config: Option<AnalyticsConfig>,
-    pub geoip_service: Option<Arc<GeoIpService>>,
-    pub analytics_aggregator: Option<Arc<AnalyticsAggregator>>,
-    pub enable_timing_headers: bool,
-    /// Configurable redirect status code (301/302/303/307/308).
-    /// Stored as StatusCode for zero-cost access during redirects.
-    pub redirect_status: StatusCode,
+#[derive(Clone)]
+pub struct RedirectAnalytics {
+    config: AnalyticsConfig,
+    aggregator: Arc<AnalyticsAggregator>,
 }
 
-/// Redirect to original URL
+impl RedirectAnalytics {
+    pub fn from_enabled(
+        config: AnalyticsConfig,
+        aggregator: Arc<AnalyticsAggregator>,
+    ) -> Option<Self> {
+        config.enabled.then_some(Self { config, aggregator })
+    }
+
+    fn record(&self, short_code: &str, headers: &HeaderMap, socket_ip: std::net::IpAddr) {
+        record_analytics(
+            short_code,
+            headers,
+            socket_ip,
+            &self.config,
+            &self.aggregator,
+        );
+    }
+}
+
+pub struct RedirectState {
+    pub(super) storage: Arc<dyn Storage>,
+    pub(super) analytics: Option<RedirectAnalytics>,
+    /// Configurable redirect status code (301/302/303/307/308).
+    /// Stored as StatusCode for zero-cost access during redirects.
+    pub(super) redirect_status: StatusCode,
+}
+
+/// Minimal redirect path used when analytics and timing headers are disabled.
 pub async fn redirect_url(
+    State(state): State<Arc<RedirectState>>,
+    Path(code): Path<String>,
+) -> Response {
+    match prepare_redirect(&state, &code).await {
+        Ok(url) => redirect_response(&state, &code, &url),
+        Err(response) => response,
+    }
+}
+
+/// Redirect path with analytics but without timing instrumentation.
+pub async fn redirect_url_with_analytics(
+    State(state): State<Arc<RedirectState>>,
+    Path(code): Path<String>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Response {
+    match prepare_redirect(&state, &code).await {
+        Ok(url) => {
+            state
+                .analytics
+                .as_ref()
+                .expect("analytics handler requires analytics runtime")
+                .record(&code, &headers, addr.ip());
+            redirect_response(&state, &code, &url)
+        }
+        Err(response) => response,
+    }
+}
+
+/// Redirect path with timing headers but without analytics extractors.
+pub async fn redirect_url_with_timing(
+    State(state): State<Arc<RedirectState>>,
+    Path(code): Path<String>,
+    Extension(RequestStart(request_start)): Extension<RequestStart>,
+) -> Response {
+    let handler_start = Instant::now();
+    match prepare_measured_redirect(&state, &code).await {
+        Ok((url, metadata)) => {
+            timed_redirect_response(&state, &code, &url, metadata, handler_start, request_start)
+        }
+        Err(response) => response,
+    }
+}
+
+/// Fully instrumented redirect path with analytics and timing headers.
+pub async fn redirect_url_with_analytics_and_timing(
     State(state): State<Arc<RedirectState>>,
     Path(code): Path<String>,
     Extension(RequestStart(request_start)): Extension<RequestStart>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-) -> impl IntoResponse {
+) -> Response {
     let handler_start = Instant::now();
-
-    // Get URL with metadata
-    let lookup_result = state.storage.get(&code).await;
-
-    match lookup_result {
-        Ok(result) => {
-            let cache_hit = result.metadata.cache_hit;
-            let cache_time_ms = result
-                .metadata
-                .cache_duration
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let db_time_ms = result
-                .metadata
-                .db_duration
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-
-            match result.url {
-                Some(url) => {
-                    // Check if URL is active
-                    if !url.is_active {
-                        return (StatusCode::GONE, "This link has been deactivated")
-                            .into_response();
-                    }
-
-                    if let Err(err) = state.storage.increment_click(&code).await {
-                        tracing::warn!(short_code = %code, error = %err, "failed to buffer click increment");
-                    }
-
-                    // Record analytics if enabled.
-                    // GeoIP presence gates recording; the lookup itself is deferred to
-                    // flush time, so `record_analytics` does not need the service.
-                    if let (Some(config), Some(_), Some(aggregator)) = (
-                        &state.analytics_config,
-                        &state.geoip_service,
-                        &state.analytics_aggregator,
-                    ) {
-                        if config.enabled {
-                            record_analytics(&code, &headers, addr.ip(), config, aggregator);
-                        }
-                    }
-
-                    // Pre-calculate the Location header value.
-                    // This does the same work as Redirect::permanent (HeaderValue::try_from).
-                    // We handle the error gracefully instead of panicking.
-                    let location_val = match HeaderValue::try_from(&url.original_url) {
-                        Ok(val) => val,
-                        Err(e) => {
-                            tracing::error!(
-                                short_code = %code,
-                                url = %url.original_url,
-                                error = %e,
-                                "Failed to create Location header - URL contains invalid characters"
-                            );
-                            // Use a generic error message to avoid information disclosure
-                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                                .into_response();
-                        }
-                    };
-
-                    let handler_time = handler_start.elapsed();
-                    let total_time = request_start.elapsed();
-
-                    // Create headers with tracing info (optional for maximum performance)
-                    if state.enable_timing_headers {
-                        let mut response_headers = HeaderMap::new();
-                        response_headers.insert(LOCATION, location_val);
-                        response_headers.insert(
-                            "x-lynx-cache-hit",
-                            HeaderValue::from_static(if cache_hit { "true" } else { "false" }),
-                        );
-                        response_headers.insert(
-                            "x-lynx-timing-total-ms",
-                            HeaderValue::from(total_time.as_millis() as u64),
-                        );
-                        response_headers
-                            .insert("x-lynx-timing-cache-ms", HeaderValue::from(cache_time_ms));
-                        response_headers
-                            .insert("x-lynx-timing-db-ms", HeaderValue::from(db_time_ms));
-                        response_headers.insert(
-                            "x-lynx-timing-handler-ms",
-                            HeaderValue::from(handler_time.as_millis() as u64),
-                        );
-
-                        // Use the configured status code and the populated HeaderMap
-                        (state.redirect_status, response_headers).into_response()
-                    } else {
-                        // Fast path: Construct response directly with an array of headers.
-                        // This avoids allocating a HeaderMap and is the fastest possible way to return a redirect.
-                        (state.redirect_status, [(LOCATION, location_val)]).into_response()
-                    }
-                }
-                None => (StatusCode::NOT_FOUND, "URL not found").into_response(),
-            }
+    match prepare_measured_redirect(&state, &code).await {
+        Ok((url, metadata)) => {
+            state
+                .analytics
+                .as_ref()
+                .expect("analytics handler requires analytics runtime")
+                .record(&code, &headers, addr.ip());
+            timed_redirect_response(&state, &code, &url, metadata, handler_start, request_start)
         }
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response(),
+        Err(response) => response,
     }
+}
+
+async fn prepare_redirect(
+    state: &RedirectState,
+    code: &str,
+) -> Result<Arc<ShortenedUrl>, Response> {
+    let url = state
+        .storage
+        .get(code)
+        .await
+        .map_err(|_| internal_error())?;
+    accept_redirect(state, code, url).await
+}
+
+async fn prepare_measured_redirect(
+    state: &RedirectState,
+    code: &str,
+) -> Result<(Arc<ShortenedUrl>, LookupMetadata), Response> {
+    let result = state
+        .storage
+        .get_with_metadata(code)
+        .await
+        .map_err(|_| internal_error())?;
+    let url = accept_redirect(state, code, result.url).await?;
+    Ok((url, result.metadata))
+}
+
+async fn accept_redirect(
+    state: &RedirectState,
+    code: &str,
+    url: Option<Arc<ShortenedUrl>>,
+) -> Result<Arc<ShortenedUrl>, Response> {
+    let Some(url) = url else {
+        return Err((StatusCode::NOT_FOUND, "URL not found").into_response());
+    };
+    if !url.is_active {
+        return Err((StatusCode::GONE, "This link has been deactivated").into_response());
+    }
+
+    if let Err(err) = state.storage.increment_click(code).await {
+        tracing::warn!(short_code = %code, error = %err, "failed to buffer click increment");
+    }
+    Ok(url)
+}
+
+fn redirect_response(state: &RedirectState, code: &str, url: &ShortenedUrl) -> Response {
+    match location_header(code, url) {
+        Some(location) => (state.redirect_status, [(LOCATION, location)]).into_response(),
+        None => internal_error(),
+    }
+}
+
+fn timed_redirect_response(
+    state: &RedirectState,
+    code: &str,
+    url: &ShortenedUrl,
+    metadata: LookupMetadata,
+    handler_start: Instant,
+    request_start: Instant,
+) -> Response {
+    let location = match location_header(code, url) {
+        Some(location) => location,
+        None => return internal_error(),
+    };
+    let cache_time_ms = metadata
+        .cache_duration
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    let db_time_ms = metadata
+        .db_duration
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    let mut headers = HeaderMap::new();
+    headers.insert(LOCATION, location);
+    headers.insert(
+        "x-lynx-cache-hit",
+        HeaderValue::from_static(if metadata.cache_hit { "true" } else { "false" }),
+    );
+    headers.insert(
+        "x-lynx-timing-total-ms",
+        HeaderValue::from(request_start.elapsed().as_millis() as u64),
+    );
+    headers.insert("x-lynx-timing-cache-ms", HeaderValue::from(cache_time_ms));
+    headers.insert("x-lynx-timing-db-ms", HeaderValue::from(db_time_ms));
+    headers.insert(
+        "x-lynx-timing-handler-ms",
+        HeaderValue::from(handler_start.elapsed().as_millis() as u64),
+    );
+    (state.redirect_status, headers).into_response()
+}
+
+fn location_header(code: &str, url: &ShortenedUrl) -> Option<HeaderValue> {
+    match HeaderValue::try_from(&url.original_url) {
+        Ok(location) => Some(location),
+        Err(error) => {
+            tracing::error!(
+                short_code = %code,
+                url = %url.original_url,
+                error = %error,
+                "Failed to create Location header - URL contains invalid characters"
+            );
+            None
+        }
+    }
+}
+
+fn internal_error() -> Response {
+    (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 
 fn record_analytics(

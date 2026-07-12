@@ -2,16 +2,13 @@ use crate::analytics::{
     AnalyticsGroupBy, AnalyticsRollup, DEFAULT_IP_VERSION, DROPPED_DIMENSION_MARKER,
 };
 use crate::models::{ShortenedUrl, UrlHistoryEntry};
-use crate::storage::{
-    LookupMetadata, LookupResult, SearchParams, SearchResult, Storage, StorageError, StorageResult,
-};
+use crate::storage::{SearchParams, SearchResult, Storage, StorageError, StorageResult};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::convert::TryFrom;
 use std::sync::Arc;
-use std::time::Instant;
 
 pub struct PostgresStorage {
     pub pool: Arc<PgPool>,
@@ -1326,19 +1323,8 @@ impl Storage for PostgresStorage {
         Ok(Arc::new(row))
     }
 
-    async fn get(&self, short_code: &str) -> Result<LookupResult> {
-        let start = Instant::now();
-        let url = self.get_authoritative(short_code).await?;
-        let duration = start.elapsed();
-
-        Ok(LookupResult {
-            url,
-            metadata: LookupMetadata {
-                cache_hit: false,
-                cache_duration: None,
-                db_duration: Some(duration),
-            },
-        })
+    async fn get(&self, short_code: &str) -> Result<Option<Arc<ShortenedUrl>>> {
+        self.get_authoritative(short_code).await
     }
 
     async fn get_authoritative(&self, short_code: &str) -> Result<Option<Arc<ShortenedUrl>>> {

@@ -258,8 +258,19 @@ impl Storage for CachedStorage {
         Ok(result)
     }
 
-    async fn get(&self, short_code: &str) -> Result<LookupResult> {
-        // Try to get from cache first
+    async fn get(&self, short_code: &str) -> Result<Option<Arc<ShortenedUrl>>> {
+        if let Some(cached) = self.read_cache.get(short_code).await {
+            return Ok(cached);
+        }
+
+        let url = self.inner.get(short_code).await?;
+        self.read_cache
+            .insert(short_code.to_string(), url.clone())
+            .await;
+        Ok(url)
+    }
+
+    async fn get_with_metadata(&self, short_code: &str) -> Result<LookupResult> {
         let cache_start = Instant::now();
         if let Some(cached) = self.read_cache.get(short_code).await {
             let cache_duration = cache_start.elapsed();
@@ -276,16 +287,16 @@ impl Storage for CachedStorage {
 
         // Cache miss - fetch from underlying storage
         let db_start = Instant::now();
-        let result = self.inner.get(short_code).await?;
+        let url = self.inner.get(short_code).await?;
         let db_duration = db_start.elapsed();
 
         // Cache the result from database (for both Some and None)
         self.read_cache
-            .insert(short_code.to_string(), result.url.clone())
+            .insert(short_code.to_string(), url.clone())
             .await;
 
         Ok(LookupResult {
-            url: result.url,
+            url,
             metadata: LookupMetadata {
                 cache_hit: false,
                 cache_duration: Some(cache_duration),

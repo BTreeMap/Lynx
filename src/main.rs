@@ -571,7 +571,7 @@ async fn run_server() -> Result<()> {
     );
 
     // Initialize analytics if enabled
-    let (analytics_config, geoip_service, analytics_aggregator) = if config.analytics.enabled {
+    let analytics_aggregator = if config.analytics.enabled {
         use lynx::analytics::{AnalyticsAggregator, AnalyticsRollup, GeoIpService};
 
         info!("📊 Analytics enabled");
@@ -675,10 +675,10 @@ async fn run_server() -> Result<()> {
             config.analytics.flush_interval_secs
         );
 
-        (Some(config.analytics.clone()), geoip, Some(aggregator))
+        Some(aggregator)
     } else {
         info!("📊 Analytics disabled");
-        (None, None, None)
+        None
     };
 
     let api_router = lynx::api::create_api_router(
@@ -697,11 +697,15 @@ async fn run_server() -> Result<()> {
     let redirect_status: axum::http::StatusCode = config.redirect_status.into();
     info!("🔀 Redirect status code: {}", redirect_status.as_u16());
 
+    let redirect_analytics = analytics_aggregator.as_ref().and_then(|aggregator| {
+        lynx::redirect::RedirectAnalytics::from_enabled(
+            config.analytics.clone(),
+            Arc::clone(aggregator),
+        )
+    });
     let redirect_router = lynx::redirect::create_redirect_router(
         Arc::clone(&storage),
-        analytics_config,
-        geoip_service,
-        analytics_aggregator,
+        redirect_analytics,
         enable_timing_headers,
         redirect_status,
     );
