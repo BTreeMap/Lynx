@@ -546,7 +546,6 @@ jobs:
     name: Analytics Performance Impact Benchmark
     runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
-    needs: benchmark-postgres
 
     steps:
       - name: Checkout repository
