@@ -16,11 +16,13 @@ WORKDIR /usr/src/lynx
 COPY . .
 
 # Build the application. BuildKit persists only this trusted build cache between
-# CI runs; Cargo still validates every dependency and source input itself.
+# CI runs; Cargo still validates every dependency and source input itself. Copy
+# the final binary outside the mount because mount contents never enter a layer.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/src/lynx/target \
-    cargo build --release --locked
+    cargo build --release --locked && \
+    cp target/release/lynx /tmp/lynx
 
 # Use a minimal image for the final stage
 FROM debian:trixie-slim
@@ -45,7 +47,7 @@ ENV DATABASE_BACKEND=sqlite \
     AUTH_MODE=none
 
 # Copy the built binary from the builder stage
-COPY --from=builder /usr/src/lynx/target/release/lynx /opt/lynx
+COPY --from=builder /tmp/lynx /opt/lynx
 
 # Set the user
 USER lynx
