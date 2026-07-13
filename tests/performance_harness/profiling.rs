@@ -125,29 +125,15 @@ impl FlamegraphConfig {
         self.output_dir.join(scenario.file_name())
     }
 
-    pub(super) fn write_guide(&self) -> Result<()> {
+    pub(super) fn write_report(&self, metrics: &[ProfileMetric]) -> Result<()> {
         std::fs::create_dir_all(&self.output_dir).with_context(|| {
             format!("create flamegraph directory {}", self.output_dir.display())
         })?;
-        let guide = format!(
-            "# Lynx Hot-Path Flamegraphs\n\n\
-             These interactive SVGs were sampled in-process from a release-optimized Lynx\n\
-             build with symbols and frame pointers. The normal release build is unchanged.\n\n\
-             | Scenario | Representative workload | Sampling |\n\
-             |---|---|---|\n\
-             | Cached redirect | {} concurrent readers of one warmed short code | {}s at {} Hz |\n\
-             | Mixed API | {} concurrent workers alternating creates and reads | {}s at {} Hz |\n\n\
-             Open an SVG in a browser, click frames to zoom, and search for `lynx::redirect`,\n\
-             `lynx::storage`, `moka`, `sqlx`, allocation, locking, and Tokio scheduler frames.\n",
-            self.redirect_concurrency,
-            self.duration.as_secs(),
-            self.frequency_hz,
-            self.api_concurrency,
-            self.duration.as_secs(),
-            self.frequency_hz,
-        );
-        std::fs::write(self.output_dir.join("README.md"), guide)
-            .context("write flamegraph interpretation guide")
+        std::fs::write(
+            self.output_dir.join("README.md"),
+            render_report(self, metrics),
+        )
+        .context("write flamegraph report")
     }
 
     pub(super) fn write_metrics(&self, metrics: &[ProfileMetric]) -> Result<()> {
@@ -165,6 +151,58 @@ impl FlamegraphConfig {
         std::fs::write(self.output_dir.join("metrics.json"), output)
             .context("write profile metrics")
     }
+}
+
+fn render_report(config: &FlamegraphConfig, metrics: &[ProfileMetric]) -> String {
+    let mut report = format!(
+            "# Lynx Hot-Path Flamegraphs\n\n\
+             These interactive SVGs were sampled in-process from a release-optimized Lynx\n\
+             build with symbols and frame pointers. The normal release build is unchanged.\n\n\
+             ## Workloads\n\n\
+             | Scenario | Representative workload | Sampling | SVG |\n\
+             |---|---|---|---|\n\
+             | Cached redirect | {} concurrent readers of one warmed short code | {}s at {} Hz | `flamegraph-redirect-cached.svg` |\n\
+             | Mixed API | {} concurrent workers alternating creates and reads | {}s at {} Hz | `flamegraph-api-operations.svg` |\n\n",
+            config.redirect_concurrency,
+            config.duration.as_secs(),
+            config.frequency_hz,
+            config.api_concurrency,
+            config.duration.as_secs(),
+            config.frequency_hz,
+        );
+
+    if metrics.is_empty() {
+        report.push_str(
+            "## Capture Status\n\n\
+             Profiling did not complete, so no workload metrics are available. Check the\n\
+             workflow log for the first capture error; any completed SVGs remain available.\n\n",
+        );
+    } else {
+        report.push_str(
+            "## Capture Summary\n\n\
+             | Scenario | Requests | Errors | Requests/s | Duration | Concurrency |\n\
+             |---|---:|---:|---:|---:|---:|\n",
+        );
+        for metric in metrics {
+            report.push_str(&format!(
+                "| {} | {} | {} | {:.1} | {}s | {} |\n",
+                metric.scenario,
+                metric.requests,
+                metric.errors,
+                metric.requests_per_second,
+                metric.duration_seconds,
+                metric.concurrency,
+            ));
+        }
+        report.push_str("\nRaw machine-readable measurements: `metrics.json`.\n\n");
+    }
+
+    report.push_str(
+        "## Interpretation\n\n\
+         Open an SVG in a browser, click frames to zoom, and search for `lynx::redirect`,\n\
+         `lynx::storage`, `moka`, `sqlx`, allocation, locking, and Tokio scheduler frames.\n",
+    );
+    report
 }
 
 fn env_scenarios(key: &str) -> Result<Vec<ProfileScenario>> {
@@ -400,5 +438,34 @@ mod tests {
                 "accepted invalid duration {raw:?}"
             );
         }
+    }
+
+    #[test]
+    fn flamegraph_report_explains_incomplete_capture() {
+        let report = render_report(&FlamegraphConfig::default(), &[]);
+
+        assert!(report.contains("## Capture Status"));
+        assert!(report.contains("Profiling did not complete"));
+        assert!(report.contains("`flamegraph-redirect-cached.svg`"));
+        assert!(!report.contains("]("));
+    }
+
+    #[test]
+    fn flamegraph_report_includes_capture_metrics() {
+        let metrics = [ProfileMetric {
+            scenario: "redirect-cached",
+            requests: 42,
+            errors: 0,
+            requests_per_second: 2.5,
+            duration_seconds: 15,
+            concurrency: 256,
+            frequency_hz: 99,
+        }];
+        let report = render_report(&FlamegraphConfig::default(), &metrics);
+
+        assert!(report.contains("## Capture Summary"));
+        assert!(report.contains("| redirect-cached | 42 | 0 | 2.5 | 15s | 256 |"));
+        assert!(report.contains("`metrics.json`"));
+        assert!(!report.contains("]("));
     }
 }

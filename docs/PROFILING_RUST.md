@@ -74,7 +74,7 @@ The harness writes these artifacts:
 
 - `target/flamegraphs/flamegraph-redirect-cached.svg`
 - `target/flamegraphs/flamegraph-api-operations.svg`
-- `target/flamegraphs/README.md`
+- `target/flamegraphs/README.md`: developer-facing workload and capture report
 - `target/flamegraphs/metrics.json`
 
 The metrics file records requests, errors, requests per second, duration,
@@ -139,10 +139,14 @@ The job:
 2. Starts both Axum servers and generates both workloads in-process against a
    PostgreSQL 18 service at 99 Hz.
 3. Fails on setup, request, sampling, SVG generation, or validation errors.
-4. Uploads the two interactive SVGs and the generated interpretation guide in
-   a commit-addressed artifact retained for 90 days.
-5. Reports workload metadata, graph sizes, and the artifact link in the GitHub
-   Actions job summary.
+4. Uploads the two interactive SVGs, the generated Markdown report, and typed
+   metrics in a commit-addressed artifact retained for 90 days.
+5. Publishes the Markdown report, generated-file sizes, and the artifact name
+   with a workflow-run link in the GitHub Actions job summary.
+
+The report is intentionally not committed: flamegraphs and throughput depend on
+the runner and sampled workload. The artifact and job summary keep every report
+reviewable with the exact commit while avoiding nondeterministic Git history.
 
 ## Troubleshooting
 

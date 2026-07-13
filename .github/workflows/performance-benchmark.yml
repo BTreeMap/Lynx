@@ -331,6 +331,34 @@ jobs:
           PERF_FLAMEGRAPH_REDIRECT_CONCURRENCY: '256'
           PERF_FLAMEGRAPH_API_CONCURRENCY: '64'
 
+      - name: Publish flamegraph Markdown report
+        if: always()
+        env:
+          FLAMEGRAPH_ARTIFACT: flamegraphs-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          report=target/flamegraphs/README.md
+          if [[ -f "$report" ]]; then
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          # Lynx Hot-Path Flamegraphs
+
+          > Profiling did not produce a Markdown report. Inspect the first
+          > failure in the capture step; any partial files are listed below.
+          EOF
+          fi
+
+          {
+            printf '\n## Artifact\n\n'
+            printf 'Download `%s` from [this workflow run](%s/%s/actions/runs/%s).\n' \
+              "$FLAMEGRAPH_ARTIFACT" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            if [[ -d target/flamegraphs ]]; then
+              printf '\n### Generated files\n\n```text\n'
+              find target/flamegraphs -maxdepth 1 -type f -printf '%f\t%k KiB\n' | sort
+              printf '```\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload flamegraph artifacts
         if: always()
         uses: actions/upload-artifact@v7

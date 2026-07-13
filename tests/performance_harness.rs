@@ -313,6 +313,7 @@ fn harness_config(database_url: String) -> Config {
 #[ignore = "CPU profiling harness; run in the dedicated performance workflow"]
 async fn representative_hot_path_flamegraphs() -> Result<()> {
     let config = FlamegraphConfig::from_env()?;
+    config.write_report(&[])?;
     let harness = Harness::start().await?;
     let mut metrics = Vec::new();
 
@@ -354,8 +355,8 @@ async fn representative_hot_path_flamegraphs() -> Result<()> {
         metrics.push(ProfileMetric::new(&config, scenario, &snapshot));
     }
 
-    config.write_guide()?;
     config.write_metrics(&metrics)?;
+    config.write_report(&metrics)?;
     harness.cached_storage.shutdown().await;
 
     Ok(())

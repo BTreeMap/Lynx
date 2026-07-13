@@ -12,7 +12,7 @@ parse HTTP responses, generate traffic, or encode test behavior.
 | Existing `tests/*_integration.rs` targets | Storage, routing, cache, analytics, and API-component behavior | `cargo test --tests` |
 | `external_harness` | Real HTTP API/redirect behavior, concurrent operations, and exact restart durability | Ignored; requires a running service |
 | `benchmark_harness` | Deadline-bound native Rust traffic, latency sampling, and JSON/Markdown reports | Ignored; requires a running service |
-| `performance_harness` | In-process CPU-flamegraph capture | Ignored; run in profiling CI |
+| `performance_harness` | In-process CPU-flamegraph capture with SVG, Markdown, and JSON reports | Ignored; run in profiling CI |
 
 ## External HTTP and Lifecycle Harness
 
