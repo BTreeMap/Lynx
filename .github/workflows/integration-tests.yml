@@ -29,15 +29,14 @@ jobs:
         id: image
         run: echo "reference=ghcr.io/${GITHUB_REPOSITORY,,}:${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Set up cached frontend dependencies
+        uses: ./.github/actions/setup-frontend
         with:
-          node-version: '24'
+          save_cache: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch == github.event.repository.default_branch }}
 
       - name: Build frontend
         working-directory: frontend
         run: |
-          npm ci
           npm run build
 
       - name: Install Rust
@@ -123,15 +122,12 @@ jobs:
         id: image
         run: echo "reference=ghcr.io/${GITHUB_REPOSITORY,,}:${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
+      - name: Set up cached frontend dependencies
+        uses: ./.github/actions/setup-frontend
 
       - name: Build frontend
         working-directory: frontend
         run: |
-          npm ci
           npm run build
 
       - name: Install Rust

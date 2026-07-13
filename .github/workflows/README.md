@@ -135,6 +135,14 @@ trusted `push` runs on the default branch, trusted downstream `workflow_run`
 runs whose head is that branch in this repository, and published releases can
 write caches. This prevents a PR from becoming a cache producer.
 
+Frontend jobs use the reusable `setup-frontend` action to cache npm's global
+download store only. Its key includes the lockfile hash, OS, architecture, and
+Node 24; `node_modules` and frontend build outputs are never cached. The action
+runs `npm ci`, which verifies lockfile integrity before using cached tarballs.
+PR and manual-dispatch callers restore only. Explicit trusted callers use the
+same default-branch, downstream-run, or published-release conditions as the
+Rust cache writers before saving a cache.
+
 Docker builds use separate BuildKit cache scopes per architecture. PR builds
 may restore the trusted amd64 scope but never export to it. Main-branch and
 published-release builds are the only Docker cache exporters. The Dockerfile
