@@ -113,7 +113,7 @@ redirect value-level costs without pretending to reproduce production request
 throughput:
 
 ```bash
-cargo bench --bench redirect_hot_path
+cargo bench --profile profiling --bench redirect_hot_path
 ```
 The case definitions and dated observed-result snapshots are tracked in
 [docs/benchmarks/](benchmarks/README.md). Add a snapshot whenever a local

@@ -231,6 +231,7 @@ jobs:
           docker run --detach --name lynx \
             --publish 8080:8080 --publish 3000:3000 \
             --env DATABASE_BACKEND=sqlite --env DATABASE_URL \
+            --env RUST_LOG=info \
             --env AUTH_MODE=none \
             --env ANALYTICS_ENABLED=true --env ANALYTICS_FLUSH_INTERVAL_SECS=1 \
             --env API_HOST=0.0.0.0 --env API_PORT=8080 \
@@ -304,6 +305,7 @@ jobs:
         run: |
           docker run --detach --name lynx --network host \
             --env DATABASE_BACKEND=postgres --env DATABASE_URL \
+            --env RUST_LOG=info \
             --env AUTH_MODE=none \
             --env ANALYTICS_ENABLED=true --env ANALYTICS_FLUSH_INTERVAL_SECS=1 \
             --env API_HOST=0.0.0.0 --env API_PORT=8080 \

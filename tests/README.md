@@ -73,7 +73,8 @@ BENCHMARK_LABEL=local \
 BENCHMARK_OUTPUT_DIR=benchmark-results \
 BENCHMARK_DURATION_SECS=30 \
 BENCHMARK_MAX_CONCURRENCY=10000 \
-cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
+cargo test --profile profiling --locked --test benchmark_harness \
+  native_external_benchmark -- --ignored --nocapture
 ```
 
 Use `BENCHMARK_SUITE=analytics` for analytics traffic. A second run can compare
@@ -83,7 +84,8 @@ itself to a baseline report without shell parsing:
 BENCHMARK_SUITE=analytics \
 BENCHMARK_LABEL=analytics \
 BENCHMARK_COMPARE_BASELINE=benchmark-results/native-benchmark-baseline.json \
-cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
+cargo test --profile profiling --locked --test benchmark_harness \
+  native_external_benchmark -- --ignored --nocapture
 ```
 
 ## CI

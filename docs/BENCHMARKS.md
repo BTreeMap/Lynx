@@ -53,7 +53,8 @@ BENCHMARK_LABEL=local \
 BENCHMARK_OUTPUT_DIR=benchmark-results \
 BENCHMARK_DURATION_SECS=30 \
 BENCHMARK_MAX_CONCURRENCY=10000 \
-cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
+cargo test --profile profiling --locked --test benchmark_harness \
+   native_external_benchmark -- --ignored --nocapture
 ```
 
 All variables are parsed and validated by Rust:

@@ -528,7 +528,8 @@ cargo test --test external_harness -- --ignored --test-threads=1 --nocapture
 
 # Native Rust benchmark traffic and reports (requires a running service)
 BENCHMARK_SUITE=standard \
-cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
+cargo test --profile profiling --locked --test benchmark_harness \
+  native_external_benchmark -- --ignored --nocapture
 ```
 
 See [tests/README.md](tests/README.md) for comprehensive testing documentation.

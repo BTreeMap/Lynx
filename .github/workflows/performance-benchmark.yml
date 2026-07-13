@@ -99,7 +99,8 @@ jobs:
       - name: Run native benchmark suite
         run: |
           ulimit -n 65535
-          cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
+          cargo test --profile profiling --locked --test benchmark_harness \
+            native_external_benchmark -- --ignored --nocapture
         env:
           BENCHMARK_SUITE: standard
           BENCHMARK_LABEL: postgres
@@ -206,7 +207,8 @@ jobs:
             --env ANALYTICS_ENABLED=false \
             "${{ steps.image.outputs.reference }}"
           ulimit -n 65535
-          cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
+          cargo test --profile profiling --locked --test benchmark_harness \
+            native_external_benchmark -- --ignored --nocapture
         env:
           BENCHMARK_SUITE: analytics
           BENCHMARK_LABEL: baseline
@@ -236,7 +238,8 @@ jobs:
             --env ANALYTICS_FLUSH_INTERVAL_SECS=60 \
             "${{ steps.image.outputs.reference }}"
           ulimit -n 65535
-          cargo test --test benchmark_harness native_external_benchmark -- --ignored --nocapture
+          cargo test --profile profiling --locked --test benchmark_harness \
+            native_external_benchmark -- --ignored --nocapture
         env:
           BENCHMARK_SUITE: analytics
           BENCHMARK_LABEL: analytics

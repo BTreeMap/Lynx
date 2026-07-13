@@ -8,7 +8,7 @@ changes.
 Run every case with:
 
 ```text
-cargo bench --bench redirect_hot_path
+cargo bench --profile profiling --bench redirect_hot_path
 ```
 
 ## Evidence rules
