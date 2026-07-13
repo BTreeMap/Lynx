@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # Use the official Rust image as the builder stage
 FROM rust:1.97-slim AS builder
 
@@ -13,8 +15,12 @@ WORKDIR /usr/src/lynx
 # Copy the entire project
 COPY . .
 
-# Build the application
-RUN cargo build --release
+# Build the application. BuildKit persists only this trusted build cache between
+# CI runs; Cargo still validates every dependency and source input itself.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/src/lynx/target \
+    cargo build --release --locked
 
 # Use a minimal image for the final stage
 FROM debian:trixie-slim

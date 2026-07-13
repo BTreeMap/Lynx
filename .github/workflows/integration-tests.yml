@@ -6,15 +6,16 @@ on:
     types: [completed]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: read
+permissions: {}
 
 jobs:
   test-sqlite:
     name: External Harness (SQLite)
     runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      packages: read
     env:
       DATABASE_URL: sqlite:///home/lynx/lynx.db
     steps:
@@ -32,8 +33,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend
         working-directory: frontend
@@ -44,15 +43,14 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v6
+      - name: Restore and save trusted debug Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-external-harness-${{ hashFiles('**/Cargo.lock') }}
+          prefix-key: v1-lynx-rust
+          shared-key: debug
+          cache-targets: true
+          cache-bin: false
+          save-if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch == github.event.repository.default_branch }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -95,6 +93,9 @@ jobs:
     name: External Harness (PostgreSQL)
     runs-on: ubuntu-24.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      packages: read
     env:
       DATABASE_URL: postgresql://lynx:lynx_password@localhost:5432/lynx
     services:
@@ -126,8 +127,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend
         working-directory: frontend
@@ -138,15 +137,14 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v6
+      - name: Restore trusted debug Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-external-harness-${{ hashFiles('**/Cargo.lock') }}
+          prefix-key: v1-lynx-rust
+          shared-key: debug
+          cache-targets: true
+          cache-bin: false
+          save-if: false
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4

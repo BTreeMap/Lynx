@@ -7,9 +7,12 @@ on:
   push:
     branches: [ "main" ]
 
+permissions: {}
+
 jobs:
   set-env:
     runs-on: ubuntu-24.04
+    permissions: {}
     outputs:
       DOCKER_IMAGE_NAME: ${{ steps.env_vars.outputs.DOCKER_IMAGE_NAME }}
       SHA_VAR: ${{ steps.env_vars.outputs.SHA_VAR }}
@@ -36,7 +39,6 @@ jobs:
     needs: set-env
     permissions:
       contents: read
-      packages: write
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -62,7 +64,7 @@ jobs:
       - name: Build frontend
         run: |
           cd frontend
-          npm install
+          npm ci
           npm run build
           cd ..
 
@@ -82,6 +84,48 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Build Docker image archive
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: lynx-build:${{ matrix.variant }}
+          cache-from: type=gha,scope=lynx-docker-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=lynx-docker-${{ matrix.variant }}
+        env:
+          SOURCE_DATE_EPOCH: ${{ needs.set-env.outputs.SOURCE_DATE_EPOCH_VAR }}
+
+      - name: Save Docker image archive
+        run: docker save lynx-build:${{ matrix.variant }} -o /tmp/lynx-${{ matrix.variant }}.tar
+
+      - name: Upload Docker image archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: docker-image-${{ matrix.variant }}
+          path: /tmp/lynx-${{ matrix.variant }}.tar
+          retention-days: 1
+
+  publish-matrix:
+    needs: [set-env, build-matrix]
+    permissions:
+      packages: write
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        variant: [amd64, arm64]
+
+    steps:
+      - name: Download Docker image archive
+        uses: actions/download-artifact@v8
+        with:
+          name: docker-image-${{ matrix.variant }}
+          path: /tmp
+
+      - name: Load Docker image archive
+        run: docker load -i /tmp/lynx-${{ matrix.variant }}.tar
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
         with:
@@ -89,26 +133,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: ${{ matrix.platform }}
-          push: true
-          tags: |
-            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:latest.${{ matrix.variant }}
-            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:${{ needs.set-env.outputs.DATE_VAR }}.${{ matrix.variant }}
-            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:${{ needs.set-env.outputs.DATE_TIME_VAR }}.${{ matrix.variant }}
-            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:${{ needs.set-env.outputs.SHA_VAR }}.${{ matrix.variant }}
-            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:${{ needs.set-env.outputs.SHA_VAR }}.${{ needs.set-env.outputs.DATE_VAR }}.${{ matrix.variant }}
-            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:${{ needs.set-env.outputs.SHA_VAR }}.${{ needs.set-env.outputs.DATE_TIME_VAR }}.${{ matrix.variant }}
-          outputs: "type=registry,compression=zstd,force-compression=true,compression-level=3,rewrite-timestamp=true,oci-mediatypes=true"
+      - name: Tag and push Docker image
+        run: |
+          source_image="lynx-build:${{ matrix.variant }}"
+          tags=(
+            "latest.${{ matrix.variant }}"
+            "${DATE_VAR}.${{ matrix.variant }}"
+            "${DATE_TIME_VAR}.${{ matrix.variant }}"
+            "${SHA_VAR}.${{ matrix.variant }}"
+            "${SHA_VAR}.${DATE_VAR}.${{ matrix.variant }}"
+            "${SHA_VAR}.${DATE_TIME_VAR}.${{ matrix.variant }}"
+          )
+          for tag in "${tags[@]}"; do
+            destination="${DOCKER_IMAGE_NAME}:${tag}"
+            docker tag "$source_image" "$destination"
+            docker push "$destination"
+          done
         env:
-          SOURCE_DATE_EPOCH: ${{ needs.set-env.outputs.SOURCE_DATE_EPOCH_VAR }}
+          DOCKER_IMAGE_NAME: ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}
+          DATE_VAR: ${{ needs.set-env.outputs.DATE_VAR }}
+          DATE_TIME_VAR: ${{ needs.set-env.outputs.DATE_TIME_VAR }}
+          SHA_VAR: ${{ needs.set-env.outputs.SHA_VAR }}
 
   create-manifest:
-    needs: [set-env, build-matrix]
+    needs: [set-env, publish-matrix]
     permissions:
       packages: write
     runs-on: ubuntu-24.04

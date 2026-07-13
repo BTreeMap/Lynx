@@ -5,8 +5,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: pr-quality-gate-${{ github.event.pull_request.number || github.ref }}
@@ -16,6 +15,8 @@ jobs:
   rust-fast-gate:
     name: Rust Fast Gate
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -24,8 +25,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Build and lint frontend
         working-directory: frontend
@@ -38,16 +37,14 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v6
+      - name: Restore trusted debug Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          prefix-key: v1-lynx-rust
+          shared-key: debug
+          cache-targets: true
+          cache-bin: false
+          save-if: false
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -62,6 +59,8 @@ jobs:
     name: Rust Integration Tests (SQLite)
     runs-on: ubuntu-24.04
     needs: rust-fast-gate
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -70,8 +69,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend
         working-directory: frontend
@@ -81,15 +78,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v6
+      - name: Restore trusted debug Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          prefix-key: v1-lynx-rust
+          shared-key: debug
+          cache-targets: true
+          cache-bin: false
+          save-if: false
 
       - name: Run SQLite integration tests
         run: DATABASE_BACKEND=sqlite cargo test --tests
@@ -100,6 +96,8 @@ jobs:
     name: Rust Integration Tests (PostgreSQL)
     runs-on: ubuntu-24.04
     needs: rust-fast-gate
+    permissions:
+      contents: read
     env:
       DATABASE_URL: postgresql://lynx:lynx_password@localhost:5432/lynx
     services:
@@ -124,8 +122,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend
         working-directory: frontend
@@ -135,15 +131,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust dependencies
-        uses: actions/cache@v6
+      - name: Restore trusted debug Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          prefix-key: v1-lynx-rust
+          shared-key: debug
+          cache-targets: true
+          cache-bin: false
+          save-if: false
 
       - name: Run PostgreSQL integration tests
         run: DATABASE_BACKEND=postgres cargo test --tests
@@ -154,6 +149,8 @@ jobs:
     name: Build Docker Image
     runs-on: ubuntu-24.04
     needs: rust-fast-gate
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -162,8 +159,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend
         working-directory: frontend
@@ -181,8 +176,7 @@ jobs:
           push: false
           load: true
           tags: lynx-pr:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=lynx-docker-amd64
 
       - name: Upload Docker image
         run: docker save lynx-pr:${{ github.sha }} -o /tmp/lynx-pr-image.tar
@@ -197,6 +191,8 @@ jobs:
     name: External Harness (SQLite)
     runs-on: ubuntu-24.04
     needs: build-docker-image
+    permissions:
+      contents: read
     env:
       DATABASE_URL: sqlite:///home/lynx/lynx.db
     steps:
@@ -215,8 +211,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend
         working-directory: frontend
@@ -225,6 +219,15 @@ jobs:
           npm run build
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore trusted debug Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-lynx-rust
+          shared-key: debug
+          cache-targets: true
+          cache-bin: false
+          save-if: false
 
       - name: Start Lynx container
         run: |
@@ -258,6 +261,8 @@ jobs:
     name: External Harness (PostgreSQL)
     runs-on: ubuntu-24.04
     needs: build-docker-image
+    permissions:
+      contents: read
     env:
       DATABASE_URL: postgresql://lynx:lynx_password@localhost:5432/lynx
     services:
@@ -290,8 +295,6 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend
         working-directory: frontend
@@ -300,6 +303,15 @@ jobs:
           npm run build
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore trusted debug Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-lynx-rust
+          shared-key: debug
+          cache-targets: true
+          cache-bin: false
+          save-if: false
 
       - name: Start Lynx container
         run: |

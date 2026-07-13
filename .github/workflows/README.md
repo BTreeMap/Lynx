@@ -116,3 +116,32 @@ cargo build --release
 # Build Docker image
 docker build -t lynx:local .
 ```
+
+## Cache and Capability Boundaries
+
+Rust jobs use `Swatinem/rust-cache@v2` only after selecting their toolchain.
+The cache namespaces are deliberately disjoint:
+
+- `debug` for component and external-harness tests;
+- `profiling` for native traffic benchmarks;
+- `profiling-flamegraph` for the frame-pointer and `pprof` build;
+- `release-<target>` for each release target triple.
+
+None of these caches retain `${CARGO_HOME}/bin`: CI does not install Cargo CLI
+tools, so caching executable files would add risk without improving reuse.
+
+PR and manual-dispatch Rust jobs restore caches but never save them. Only
+trusted `push` runs on the default branch, trusted downstream `workflow_run`
+runs whose head is that branch in this repository, and published releases can
+write caches. This prevents a PR from becoming a cache producer.
+
+Docker builds use separate BuildKit cache scopes per architecture. PR builds
+may restore the trusted amd64 scope but never export to it. Main-branch and
+published-release builds are the only Docker cache exporters. The Dockerfile
+uses locked Cargo builds and BuildKit cache mounts for Cargo registry, Git, and
+release target data.
+
+Every workflow begins with `permissions: {}`. Build/test jobs receive only
+`contents: read`; package-publish and release-asset upload permissions live in
+separate jobs that do not check out or execute repository source. This avoids
+giving build-time dependency code authority to publish a release or container.

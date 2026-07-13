@@ -4,12 +4,14 @@ on:
   release:
     types: [published]
 
+permissions: {}
+
 jobs:
   build-binaries:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     permissions:
-      contents: write
+      contents: read
     strategy:
       matrix:
         include:
@@ -48,7 +50,7 @@ jobs:
       - name: Build frontend
         run: |
           cd frontend
-          npm install
+          npm ci
           npm run build
           cd ..
 
@@ -71,6 +73,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Restore and save trusted release Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-lynx-rust
+          shared-key: release-${{ matrix.target }}
+          cache-targets: true
+          cache-bin: false
+          save-if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
+
       - name: Build binary
         run: cargo build --release --target ${{ matrix.target }}
         shell: bash
@@ -84,18 +95,47 @@ jobs:
           fi
         shell: bash
 
+      - name: Upload release asset archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-asset-${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+          retention-days: 1
+
+  upload-release-assets:
+    needs: build-binaries
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - asset_name: lynx-linux-amd64
+          - asset_name: lynx-linux-arm64
+          - asset_name: lynx-macos-amd64
+          - asset_name: lynx-macos-arm64
+          - asset_name: lynx-windows-amd64.exe
+
+    steps:
+      - name: Download release asset archive
+        uses: actions/download-artifact@v8
+        with:
+          name: release-asset-${{ matrix.asset_name }}
+          path: /tmp/release-assets
+
       - name: Upload release asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./${{ matrix.asset_name }}
+          asset_path: /tmp/release-assets/${{ matrix.asset_name }}
           asset_name: ${{ matrix.asset_name }}
           asset_content_type: application/octet-stream
 
   set-env:
     runs-on: ubuntu-24.04
+    permissions: {}
     outputs:
       DOCKER_IMAGE_NAME: ${{ steps.env_vars.outputs.DOCKER_IMAGE_NAME }}
       TAG_NAME: ${{ steps.env_vars.outputs.TAG_NAME }}
@@ -118,7 +158,6 @@ jobs:
     needs: set-env
     permissions:
       contents: read
-      packages: write
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -144,7 +183,7 @@ jobs:
       - name: Build frontend
         run: |
           cd frontend
-          npm install
+          npm ci
           npm run build
           cd ..
 
@@ -165,6 +204,48 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Build Docker image archive
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: lynx-release-build:${{ matrix.variant }}
+          cache-from: type=gha,scope=lynx-docker-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=lynx-docker-${{ matrix.variant }}
+        env:
+          SOURCE_DATE_EPOCH: ${{ needs.set-env.outputs.SOURCE_DATE_EPOCH_VAR }}
+
+      - name: Save Docker image archive
+        run: docker save lynx-release-build:${{ matrix.variant }} -o /tmp/lynx-release-${{ matrix.variant }}.tar
+
+      - name: Upload Docker image archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-docker-image-${{ matrix.variant }}
+          path: /tmp/lynx-release-${{ matrix.variant }}.tar
+          retention-days: 1
+
+  publish-docker-release:
+    needs: [set-env, build-docker-release]
+    permissions:
+      packages: write
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        variant: [amd64, arm64]
+
+    steps:
+      - name: Download Docker image archive
+        uses: actions/download-artifact@v8
+        with:
+          name: release-docker-image-${{ matrix.variant }}
+          path: /tmp
+
+      - name: Load Docker image archive
+        run: docker load -i /tmp/lynx-release-${{ matrix.variant }}.tar
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
         with:
@@ -172,21 +253,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: ${{ matrix.platform }}
-          push: true
-          tags: |
-            ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}:${{ needs.set-env.outputs.TAG_NAME }}.${{ matrix.variant }}
-          outputs: "type=registry,compression=zstd,force-compression=true,compression-level=3,rewrite-timestamp=true,oci-mediatypes=true"
+      - name: Tag and push Docker image
+        run: |
+          destination="${DOCKER_IMAGE_NAME}:${TAG_NAME}.${{ matrix.variant }}"
+          docker tag lynx-release-build:${{ matrix.variant }} "$destination"
+          docker push "$destination"
         env:
-          SOURCE_DATE_EPOCH: ${{ needs.set-env.outputs.SOURCE_DATE_EPOCH_VAR }}
+          DOCKER_IMAGE_NAME: ${{ needs.set-env.outputs.DOCKER_IMAGE_NAME }}
+          TAG_NAME: ${{ needs.set-env.outputs.TAG_NAME }}
 
   create-docker-manifest:
-    needs: [set-env, build-docker-release]
+    needs: [set-env, publish-docker-release]
     permissions:
       packages: write
     runs-on: ubuntu-24.04
