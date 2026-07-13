@@ -320,7 +320,7 @@ jobs:
           RUSTFLAGS: -C force-frame-pointers=yes
           PERF_FLAMEGRAPH_OUTPUT_DIR: target/flamegraphs
           PERF_FLAMEGRAPH_FREQUENCY_HZ: '99'
-          PERF_FLAMEGRAPH_DURATION: ${{ github.event.inputs.duration_seconds || '30' }}
+          PERF_FLAMEGRAPH_DURATION: ${{ github.event.inputs.duration_seconds || '30' }}s
           PERF_FLAMEGRAPH_REDIRECT_CONCURRENCY: '256'
           PERF_FLAMEGRAPH_API_CONCURRENCY: '64'
 

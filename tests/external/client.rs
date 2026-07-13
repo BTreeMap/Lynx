@@ -410,7 +410,11 @@ impl ExternalService {
     }
 
     fn redirect_url(&self, code: &str) -> Result<reqwest::Url> {
-        self.redirect.url(&encode_code(code))
+        // Redirect routes consume the public short code directly. API routes
+        // Base64URL-encode their path parameter so arbitrary codes remain one
+        // management-route segment, but applying that representation here
+        // makes the redirect lookup search for the wrong code.
+        self.redirect.url(code)
     }
 }
 
@@ -432,4 +436,32 @@ async fn decode_expected<T: DeserializeOwned>(
         bail!("{operation} returned {status}, expected {expected}: {detail}");
     }
     serde_json::from_str(&body).with_context(|| format!("decode {operation} success response"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::num::NonZeroUsize;
+
+    fn test_config() -> ExternalConfig {
+        ExternalConfig {
+            api: Endpoint::parse("http://api.test", "TEST_API_URL").unwrap(),
+            redirect: Endpoint::parse("http://redirect.test", "TEST_REDIRECT_URL").unwrap(),
+            request_timeout: Duration::from_secs(1),
+            readiness_timeout: Duration::from_secs(1),
+            concurrency: NonZeroUsize::new(1).unwrap(),
+            container_name: None,
+            analytics_expected: false,
+        }
+    }
+
+    #[test]
+    fn redirect_url_uses_the_raw_short_code() {
+        let service = ExternalService::new(&test_config()).unwrap();
+
+        assert_eq!(
+            service.redirect_url("redirect-code").unwrap().as_str(),
+            "http://redirect.test/redirect-code"
+        );
+    }
 }
