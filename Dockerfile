@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.25
 
 # Use the official Rust image as the builder stage
 FROM rust:1.97-slim AS builder
