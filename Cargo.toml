@@ -25,14 +25,14 @@ profiling = ["dep:pprof"]
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "fs"] }
+tower-http = { version = "0.7", features = ["cors", "fs"] }
 
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "postgres", "migrate"] }
+sqlx = { version = "0.9", features = ["runtime-tokio-rustls", "sqlite", "postgres", "migrate"] }
 
 # Caching and concurrent data structures
 dashmap = "6"
@@ -52,7 +52,7 @@ async-trait = "0.1"
 
 # URL shortening
 rand = { version = "0.10", features = ["thread_rng"] }
-statrs = "0.18"
+statrs = "0.19"
 
 # Environment variables
 dotenvy = "0.15"
@@ -60,11 +60,11 @@ dotenvy = "0.15"
 # Authentication
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
-base64 = { version = "0.22", default-features = false, features = ["std"] }
+base64 = { version = "0.23", default-features = false, features = ["std"] }
 
 # Cursor pagination
-sha2 = "0.10"
-hmac = "0.12"
+sha2 = "0.11"
+hmac = "0.13"
 subtle = "2.6"
 
 # Static file embedding
@@ -76,7 +76,7 @@ clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 
 # Analytics - GeoIP
-maxminddb = { version = "0.27", features = ["mmap", "simdutf8"] }
+maxminddb = { version = "0.30", features = ["mmap", "simdutf8"] }
 
 # IP address and CIDR manipulation
 ipnet = "2"
@@ -85,7 +85,7 @@ ipnet = "2"
 pprof = { version = "0.15", default-features = false, features = ["flamegraph"], optional = true }
 
 [build-dependencies]
-statrs = "0.18"
+statrs = "0.19"
 
 [profile.release]
 opt-level = 3
