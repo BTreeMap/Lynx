@@ -58,7 +58,7 @@ statrs = "0.18"
 dotenvy = "0.15"
 
 # Authentication
-jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+jsonwebtoken = { version = "11", features = ["rust_crypto"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 base64 = { version = "0.22", default-features = false, features = ["std"] }
 
