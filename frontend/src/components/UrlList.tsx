@@ -1,19 +1,17 @@
-import React, { useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { BarChart3, ExternalLink, PowerOff, RotateCcw } from 'lucide-react';
-import { apiClient } from '../api';
 import type { ShortenedUrl } from '../types';
-import { buildShortLink, encodeShortCodeForApi } from '../utils/url';
-import { formatDate } from '../utils/date';
-import { extractErrorMessage } from '../utils/errorHandling';
+import { buildShortLink } from '../utils/url';
 import { cn } from '../lib/cn';
-import { Badge } from './ui/Badge';
-import { Button } from './ui/Button';
-import { CopyButton } from './ui/CopyButton';
 import { Alert } from './ui/Alert';
+import { Button } from './ui/Button';
 import { Dialog } from './ui/Dialog';
-import { Table, TBody, TD, TH, THead, TR, TableScroll } from './ui/Table';
+import { Table, TBody, TH, THead, TR, TableScroll } from './ui/Table';
+import { stickyHeaderCell } from './ui/tableStyles';
+import { UrlCard } from './urls/UrlCard';
+import { UrlTableRow } from './urls/UrlTableRow';
+import { minTableWidth, visibleLinkColumns } from './urls/linkColumns';
+import { useUrlActions } from './urls/urlActions';
 
 interface UrlListProps {
     urls: ShortenedUrl[];
@@ -21,324 +19,157 @@ interface UrlListProps {
     onUrlsChanged: () => void;
 }
 
-type PendingAction = { code: string; type: 'deactivate' | 'reactivate' } | null;
+/** Matches the row height the table actually renders; refined by `measureElement`. */
+const ESTIMATED_ROW_HEIGHT = 57;
 
 const UrlList: React.FC<UrlListProps> = ({ urls, isAdmin, onUrlsChanged }) => {
-    const [actionInProgress, setActionInProgress] = useState<string | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [pending, setPending] = useState<PendingAction>(null);
+    const controller = useUrlActions(onUrlsChanged);
+    const { phase } = controller;
     const listRef = useRef<HTMLDivElement>(null);
+
+    const columns = visibleLinkColumns(isAdmin);
+
+    /*
+      The list's distance from the top of the document, which page-scroll
+      virtualization measures rows against. Held in state and measured in a layout
+      effect rather than read from the ref during render: everything above the list
+      (the error alert, the stat cards, the filter panel) can change height after
+      mount, and a margin sampled once during the first render leaves every virtual
+      row positioned against a stale offset.
+    */
+    const [scrollMargin, setScrollMargin] = useState(0);
+    useLayoutEffect(() => {
+        const node = listRef.current;
+        if (!node) return;
+        const measure = () => setScrollMargin(node.offsetTop);
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(document.body);
+        return () => observer.disconnect();
+    }, []);
 
     // Only the rows in (or near) the viewport are mounted in the DOM. The full
     // dataset stays in `urls` (cheap JS objects); virtualizing against the page
     // scroll keeps the DOM small even after "Load all" pulls in thousands of rows.
     const rowVirtualizer = useWindowVirtualizer({
         count: urls.length,
-        estimateSize: () => 57,
+        estimateSize: () => ESTIMATED_ROW_HEIGHT,
         overscan: 12,
-        scrollMargin: listRef.current?.offsetTop ?? 0,
+        scrollMargin,
     });
     const virtualItems = rowVirtualizer.getVirtualItems();
     const totalSize = rowVirtualizer.getTotalSize();
-    const scrollMargin = rowVirtualizer.options.scrollMargin;
     const paddingTop = virtualItems.length ? virtualItems[0].start - scrollMargin : 0;
     const paddingBottom = virtualItems.length
         ? totalSize - (virtualItems[virtualItems.length - 1].end - scrollMargin)
         : 0;
-    const colCount = isAdmin ? 7 : 6;
-
-    const runAction = async () => {
-        if (!pending) return;
-        const { code, type } = pending;
-        setPending(null);
-        setActionInProgress(code);
-        setError(null);
-        try {
-            if (type === 'deactivate') {
-                await apiClient.deactivateUrl(code);
-            } else {
-                await apiClient.reactivateUrl(code);
-            }
-            onUrlsChanged();
-        } catch (err: unknown) {
-            setError(extractErrorMessage(err, `Failed to ${type} URL`));
-        } finally {
-            setActionInProgress(null);
-        }
-    };
-
-    const linkFor = (item: ShortenedUrl) => buildShortLink(item.short_code, item.redirect_base_url);
 
     return (
         <div ref={listRef} className="space-y-3 sm:space-y-4">
-            {error && <Alert tone="error">{error}</Alert>}
+            {controller.error && <Alert tone="error">{controller.error}</Alert>}
 
             <div className="space-y-3 md:hidden">
-                {urls.map((url) => {
-                    const link = linkFor(url);
-                    const busy = actionInProgress === url.short_code;
-                    return (
-                        <div
-                            key={url.id}
-                            className="space-y-4 rounded-2xl border border-border bg-surface p-4 shadow-soft"
-                        >
-                            <div className="flex items-start justify-between gap-3">
-                                <Link
-                                    to={`/url/${encodeShortCodeForApi(url.short_code)}`}
-                                    className="min-w-0 font-mono text-base font-semibold text-primary hover:underline"
-                                >
-                                    {url.short_code}
-                                </Link>
-                                <Badge tone={url.is_active ? 'success' : 'danger'} dot>
-                                    {url.is_active ? 'Active' : 'Inactive'}
-                                </Badge>
-                            </div>
-
-                            <div className="space-y-1.5">
-                                <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
-                                    Destination
-                                </p>
-                                <a
-                                    href={url.original_url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title={url.original_url}
-                                    className="inline-flex max-w-full items-start gap-1.5 break-all text-sm text-fg-muted hover:text-fg hover:underline"
-                                >
-                                    <span className="break-all">{url.original_url}</span>
-                                    <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-60" />
-                                </a>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3 rounded-xl border border-border/70 bg-surface-2/40 p-3">
-                                <div className="space-y-1">
-                                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
-                                        Clicks
-                                    </p>
-                                    <p className="text-lg font-semibold tracking-tight text-fg">
-                                        {url.clicks.toLocaleString()}
-                                    </p>
-                                </div>
-                                <div className="space-y-1">
-                                    <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
-                                        Created
-                                    </p>
-                                    <p className="text-sm font-medium text-fg-muted">
-                                        {formatDate(url.created_at)}
-                                    </p>
-                                </div>
-                                {isAdmin && (
-                                    <div className="col-span-2 space-y-1">
-                                        <p className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
-                                            Created by
-                                        </p>
-                                        <p className="break-all font-mono text-sm text-fg-muted">
-                                            {url.created_by || '—'}
-                                        </p>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-2">
-                                {link && (
-                                    <CopyButton
-                                        value={link}
-                                        variant="secondary"
-                                        size="sm"
-                                        idleLabel="Copy link"
-                                        copiedLabel="Copied"
-                                        className="w-full"
-                                    />
-                                )}
-                                <Link
-                                    to={`/url/${encodeShortCodeForApi(url.short_code)}`}
-                                    className={cn(
-                                        'inline-flex h-8 items-center justify-center gap-2 rounded-lg border border-border px-2.5 text-xs font-medium text-fg transition-all duration-150 hover:border-primary hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:px-3',
-                                        link ? '' : 'col-span-2',
-                                    )}
-                                >
-                                    <BarChart3 className="h-4 w-4" />
-                                    View analytics
-                                </Link>
-                                {isAdmin && (
-                                    <div className="col-span-2">
-                                        {url.is_active ? (
-                                            <Button
-                                                variant="danger"
-                                                size="sm"
-                                                fullWidth
-                                                isLoading={busy}
-                                                onClick={() => setPending({ code: url.short_code, type: 'deactivate' })}
-                                                leftIcon={!busy ? <PowerOff className="h-4 w-4" /> : undefined}
-                                            >
-                                                Deactivate
-                                            </Button>
-                                        ) : (
-                                            <Button
-                                                variant="success"
-                                                size="sm"
-                                                fullWidth
-                                                isLoading={busy}
-                                                onClick={() => setPending({ code: url.short_code, type: 'reactivate' })}
-                                                leftIcon={!busy ? <RotateCcw className="h-4 w-4" /> : undefined}
-                                            >
-                                                Reactivate
-                                            </Button>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    );
-                })}
+                {urls.map((url) => (
+                    <UrlCard
+                        key={url.id}
+                        url={url}
+                        shortLink={buildShortLink(url.short_code, url.redirect_base_url)}
+                        isAdmin={isAdmin}
+                        controller={controller}
+                    />
+                ))}
             </div>
 
             <TableScroll className="hidden md:block">
-                <Table>
+                {/*
+                  `table-fixed` plus the declared `<colgroup>` widths is what stops
+                  content from setting the layout. `minWidth` is the floor below which
+                  the table scrolls horizontally instead of squeezing — and at that
+                  point the pinned first and last columns keep a row's identity and its
+                  controls on screen simultaneously, which the previous auto-sized
+                  table could not do at any width.
+                */}
+                <Table className="table-fixed" style={{ minWidth: minTableWidth(columns) }}>
+                    <colgroup>
+                        {columns.map((column) => (
+                            <col
+                                key={column.key}
+                                style={column.width === 'flex' ? undefined : { width: column.width }}
+                            />
+                        ))}
+                    </colgroup>
                     <THead>
                         <TR className="border-b-0">
-                            <TH>Short code</TH>
-                            <TH>Destination</TH>
-                            <TH className="text-right">Clicks</TH>
-                            <TH>Status</TH>
-                            <TH>Created</TH>
-                            {isAdmin && <TH>Created by</TH>}
-                            <TH className="text-right">Actions</TH>
+                            {columns.map((column) => (
+                                <TH
+                                    key={column.key}
+                                    className={cn(
+                                        column.align === 'end' && 'text-right',
+                                        column.pin && stickyHeaderCell(column.pin),
+                                    )}
+                                >
+                                    {column.header}
+                                </TH>
+                            ))}
                         </TR>
                     </THead>
                     <TBody>
                         {paddingTop > 0 && (
                             <tr aria-hidden>
-                                <td colSpan={colCount} style={{ height: paddingTop }} />
+                                <td colSpan={columns.length} style={{ height: paddingTop }} />
                             </tr>
                         )}
                         {virtualItems.map((virtualRow) => {
                             const url = urls[virtualRow.index];
-                            const link = linkFor(url);
-                            const busy = actionInProgress === url.short_code;
                             return (
-                                <tr
+                                <UrlTableRow
                                     key={url.id}
-                                    data-index={virtualRow.index}
-                                    ref={rowVirtualizer.measureElement}
-                                    className="border-b border-border/60 transition-colors hover:bg-surface-2/50"
-                                >
-                                    <TD>
-                                        <Link
-                                            to={`/url/${encodeShortCodeForApi(url.short_code)}`}
-                                            className="inline-flex items-center gap-1.5 font-mono text-sm font-semibold text-primary hover:underline"
-                                        >
-                                            {url.short_code}
-                                        </Link>
-                                    </TD>
-                                    <TD className="max-w-72 sm:max-w-96">
-                                        <a
-                                            href={url.original_url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            title={url.original_url}
-                                            className="inline-flex max-w-full items-center gap-1.5 truncate text-fg-muted hover:text-fg hover:underline"
-                                        >
-                                            <span className="truncate">{url.original_url}</span>
-                                            <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                                        </a>
-                                    </TD>
-                                    <TD className="text-right font-medium tabular-nums">
-                                        {url.clicks.toLocaleString()}
-                                    </TD>
-                                    <TD>
-                                        <Badge tone={url.is_active ? 'success' : 'danger'} dot>
-                                            {url.is_active ? 'Active' : 'Inactive'}
-                                        </Badge>
-                                    </TD>
-                                    <TD className="whitespace-nowrap text-fg-muted">{formatDate(url.created_at)}</TD>
-                                    {isAdmin && (
-                                        <TD className="whitespace-nowrap text-fg-muted">{url.created_by || '—'}</TD>
-                                    )}
-                                    <TD>
-                                        <div className="flex items-center justify-end gap-1.5 sm:gap-2">
-                                            {link && (
-                                                <CopyButton
-                                                    value={link}
-                                                    iconOnly
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    idleLabel="Copy link"
-                                                    copiedLabel="Copied"
-                                                    className="px-2"
-                                                />
-                                            )}
-                                            <Link
-                                                to={`/url/${encodeShortCodeForApi(url.short_code)}`}
-                                                aria-label="View analytics"
-                                                title="View analytics"
-                                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                                            >
-                                                <BarChart3 className="h-4 w-4" />
-                                            </Link>
-                                            {isAdmin &&
-                                                (url.is_active ? (
-                                                    <Button
-                                                        variant="danger"
-                                                        size="sm"
-                                                        isLoading={busy}
-                                                        onClick={() => setPending({ code: url.short_code, type: 'deactivate' })}
-                                                        leftIcon={!busy ? <PowerOff className="h-4 w-4" /> : undefined}
-                                                    >
-                                                        Deactivate
-                                                    </Button>
-                                                ) : (
-                                                    <Button
-                                                        variant="success"
-                                                        size="sm"
-                                                        isLoading={busy}
-                                                        onClick={() => setPending({ code: url.short_code, type: 'reactivate' })}
-                                                        leftIcon={!busy ? <RotateCcw className="h-4 w-4" /> : undefined}
-                                                    >
-                                                        Reactivate
-                                                    </Button>
-                                                ))}
-                                        </div>
-                                    </TD>
-                                </tr>
+                                    url={url}
+                                    shortLink={buildShortLink(url.short_code, url.redirect_base_url)}
+                                    isAdmin={isAdmin}
+                                    controller={controller}
+                                    index={virtualRow.index}
+                                    measureRef={rowVirtualizer.measureElement}
+                                />
                             );
                         })}
                         {paddingBottom > 0 && (
                             <tr aria-hidden>
-                                <td colSpan={colCount} style={{ height: paddingBottom }} />
+                                <td colSpan={columns.length} style={{ height: paddingBottom }} />
                             </tr>
                         )}
                     </TBody>
                 </Table>
             </TableScroll>
 
-            <Dialog
-                open={pending !== null}
-                onClose={() => setPending(null)}
-                title={pending?.type === 'deactivate' ? 'Deactivate link?' : 'Reactivate link?'}
-                description={
-                    pending?.type === 'deactivate'
-                        ? 'Visitors will no longer be redirected. You can reactivate it later.'
-                        : 'The link will start redirecting visitors again.'
-                }
-                footer={
-                    <>
-                        <Button variant="secondary" onClick={() => setPending(null)}>
-                            Cancel
-                        </Button>
-                        <Button
-                            variant={pending?.type === 'deactivate' ? 'danger' : 'success'}
-                            onClick={runAction}
-                        >
-                            {pending?.type === 'deactivate' ? 'Deactivate' : 'Reactivate'}
-                        </Button>
-                    </>
-                }
-            >
-                <p className="rounded-lg border border-border bg-surface-2/60 px-3 py-2 font-mono text-sm text-fg">
-                    {pending?.code}
-                </p>
-            </Dialog>
+            {/*
+              Rendered only in the `confirming` phase, so the dialog's copy is read
+              from an action that definitely exists. The previous version derived it
+              from a nullable with `pending?.type === 'deactivate' ? … : …`, which
+              silently resolved to the reactivate wording whenever nothing was pending.
+            */}
+            {phase.tag === 'confirming' && (
+                <Dialog
+                    open
+                    onClose={controller.cancel}
+                    title={phase.spec.confirmTitle}
+                    description={phase.spec.confirmBody}
+                    footer={
+                        <>
+                            <Button variant="secondary" onClick={controller.cancel}>
+                                Cancel
+                            </Button>
+                            <Button variant={phase.spec.tone} onClick={controller.confirm}>
+                                {phase.spec.label}
+                            </Button>
+                        </>
+                    }
+                >
+                    <p className="rounded-lg border border-border bg-surface-2/60 px-3 py-2 font-mono text-sm break-all text-fg">
+                        {phase.code}
+                    </p>
+                </Dialog>
+            )}
         </div>
     );
 };

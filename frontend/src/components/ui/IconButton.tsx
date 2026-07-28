@@ -1,40 +1,41 @@
 import React from 'react';
-import { cn } from '../../lib/cn';
+import { Spinner } from './Spinner';
+import {
+    iconButtonClass,
+    type IconButtonStyleOptions,
+} from './iconButtonStyles';
 
-export interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-    size?: 'sm' | 'md';
-    variant?: 'ghost' | 'outline';
+export interface IconButtonProps
+    extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+        Omit<IconButtonStyleOptions, 'className'> {
     label: string;
+    isLoading?: boolean;
 }
 
-const sizes = {
-    sm: 'h-8 w-8',
-    md: 'h-10 w-10',
-};
-
-const variants = {
-    ghost: 'text-fg-muted hover:bg-surface-2 hover:text-fg',
-    outline: 'border border-border text-fg-muted hover:border-border-strong hover:text-fg',
-};
-
 export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
-    ({ size = 'md', variant = 'ghost', label, className, children, ...props }, ref) => (
+    (
+        {
+            size = 'md',
+            variant = 'ghost',
+            label,
+            isLoading = false,
+            className,
+            children,
+            disabled,
+            ...props
+        },
+        ref,
+    ) => (
         <button
             ref={ref}
             type="button"
             aria-label={label}
             title={label}
-            className={cn(
-                'inline-flex items-center justify-center rounded-lg transition-colors duration-150 cursor-pointer',
-                'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-                'disabled:cursor-not-allowed disabled:opacity-55',
-                sizes[size],
-                variants[variant],
-                className,
-            )}
+            disabled={disabled || isLoading}
+            className={iconButtonClass({ size, variant, className })}
             {...props}
         >
-            {children}
+            {isLoading ? <Spinner /> : children}
         </button>
     ),
 );

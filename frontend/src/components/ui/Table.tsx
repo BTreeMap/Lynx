@@ -27,15 +27,18 @@ export const Table: React.FC<React.TableHTMLAttributes<HTMLTableElement>> = ({
     </table>
 );
 
+/**
+ * Opaque rather than translucent on purpose: a pinned header cell (see
+ * `stickyHeaderCell`) paints its own background over horizontally scrolled content,
+ * and only a solid colour can be reproduced exactly by that cell. A translucent
+ * header would force pinned and unpinned cells to composite differently.
+ */
 export const THead: React.FC<React.HTMLAttributes<HTMLTableSectionElement>> = ({
     className,
     children,
     ...props
 }) => (
-    <thead
-        className={cn('border-b border-border bg-surface-2/60', className)}
-        {...props}
-    >
+    <thead className={cn('border-b border-border bg-surface-2', className)} {...props}>
         {children}
     </thead>
 );
@@ -94,3 +97,6 @@ export const TD: React.FC<React.TdHTMLAttributes<HTMLTableCellElement>> = ({
         {children}
     </td>
 );
+
+/* Pinned-column classes live in `./tableStyles`, whose backgrounds must stay in step
+   with `THead`'s solid tint above and with `ROW_HOVER`. */
