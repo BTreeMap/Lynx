@@ -7,7 +7,9 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // `src` holds the domain suites; `tests` holds node-side checks of
+    // repository files, which need node types the app tsconfig withholds.
+    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
     // Explicit imports from 'vitest' instead of injected globals, so the test files
     // typecheck under the same `tsconfig.app.json` as the code they cover.
     globals: false,

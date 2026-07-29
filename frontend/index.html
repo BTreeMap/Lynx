@@ -9,16 +9,20 @@
   <meta name="description" content="Lynx — a fast, modern URL shortener with privacy-first analytics." />
 
   <!--
-    One mark, three declarations. `favicon.svg` is the primary icon — it scales to every
-    tab, bookmark and OS surface from a single file — with the PNGs supplied for the two
-    consumers that will not take an SVG: iOS home screens and installed-app icons.
-    All are generated from the same paths as the in-app logo (src/components/layout/Logo.tsx).
+    One mark, four declarations, all generated from the paths in
+    src/components/layout/Logo.tsx by scripts/render-icons.py.
+
+    The ICO is not legacy baggage: Safari ignored SVG favicons entirely until 26.0
+    (Sept 2025), so every Safari still inside normal support falls back to it. Browsers
+    that understand the SVG prefer it and never fetch the ICO. The PNGs cover the two
+    consumers that take neither: iOS home screens and installed-app icons.
   -->
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" href="/favicon.ico" sizes="32x32" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.json" />
 
-  <!-- Browser chrome follows the app's own background in each theme (see --bg in src/index.css). -->
+  <!-- Browser chrome follows the app's own background in each theme (the bg token in src/index.css). -->
   <meta name="theme-color" content="#f5f6f9" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#141e27" media="(prefers-color-scheme: dark)" />
 </head>

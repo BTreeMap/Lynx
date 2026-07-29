@@ -1,14 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Lynx">
-  <!--
-    The Lynx mark. Identical geometry to the header logo
-    (src/components/layout/Logo.tsx): the same three 24×24 paths, centred and scaled
-    into a 64-unit tile, on the brand's baltic-blue-500 (#416788, --color-baltic-blue-500
-    in src/index.css). Change one and change the other.
-
-    Solid rather than theme-aware on purpose: a favicon is composited against browser
-    chrome, not against the app's background, so it must carry its own contrast in both
-    light and dark UI.
-  -->
+  <!-- Lynx mark: same paths as src/components/layout/Logo.tsx, scaled into a 64-unit
+       tile on baltic blue 500 (#416788). Solid, not theme-aware: a favicon sits on
+       browser chrome, so it carries its own contrast. Change one, change the other. -->
   <rect width="64" height="64" rx="14" fill="#416788" />
   <g transform="translate(14.4 14.4) scale(1.4666667)" fill="none" stroke="#ffffff" stroke-width="2"
     stroke-linecap="round" stroke-linejoin="round">

@@ -128,6 +128,27 @@ tokens live in [`frontend/src/index.css`](../../frontend/src/index.css):
 The mark is defined once as SVG paths in
 [`src/components/layout/Logo.tsx`](../../frontend/src/components/layout/Logo.tsx)
 and reproduced in [`public/favicon.svg`](../../frontend/public/favicon.svg).
-`public/` also carries `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`
-and `manifest.json`, all wired up in `index.html`. Changing the mark means
-regenerating the PNGs from the same geometry.
+The rasters — `favicon.ico`, `apple-touch-icon.png`, `icon-192.png`,
+`icon-512.png` — are generated from that same geometry by
+[`scripts/render-icons.py`](../../frontend/scripts/render-icons.py), run by hand
+(it needs Pillow, which CI's Node-only job does not have):
+
+```bash
+cd frontend && python3 scripts/render-icons.py public
+```
+
+**An SVG favicon is not sufficient on its own.** Safari ignored SVG favicons
+entirely until 26.0 (September 2025) — desktop *and* iOS — so every Safari still
+inside normal support falls back to `favicon.ico`. Browsers that understand the
+SVG prefer it and never fetch the ICO. Keep all four declarations in
+`index.html`; `tests/publicAssets.test.ts` fails if one is dropped or points at
+a file that is not shipped.
+
+Two more traps that suite covers, both of which have already bitten:
+
+- A standalone `.svg` is parsed as **XML**, strictly. `--` inside a comment is
+  illegal, so naming a CSS custom property in one makes the browser render a
+  parser-error page instead of the icon. Nothing in the build catches it.
+- The 16px ICO frame is deliberately *not* pixel-faithful to the SVG: at that
+  size the true stroke is sub-pixel and antialiases to grey mush, so the
+  renderer draws it heavier. That is optical sizing, not drift.
