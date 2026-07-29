@@ -82,19 +82,20 @@ export type ActionPhase =
  * stays on screen while the user opens the next confirmation, which is the existing
  * behaviour and the useful one.
  */
-interface ActionState {
+export interface ActionState {
     readonly phase: ActionPhase;
     readonly error: string | null;
 }
 
-type ActionEvent =
+export type ActionEvent =
     | { readonly type: 'requested'; readonly code: string; readonly spec: UrlActionSpec }
     | { readonly type: 'cancelled' }
     | { readonly type: 'started' }
     | { readonly type: 'succeeded' }
     | { readonly type: 'failed'; readonly message: string };
 
-const IDLE: ActionState = { phase: { tag: 'idle' }, error: null };
+/** No action offered, nothing running, nothing to report. */
+export const IDLE_ACTION_STATE: ActionState = { phase: { tag: 'idle' }, error: null };
 
 /**
  * Total over every state x event pair, and framework-free so it can be tested
@@ -118,7 +119,7 @@ export const urlActionReducer = (state: ActionState, event: ActionEvent): Action
                   }
                 : state;
         case 'succeeded':
-            return state.phase.tag === 'running' ? IDLE : state;
+            return state.phase.tag === 'running' ? IDLE_ACTION_STATE : state;
         case 'failed':
             return state.phase.tag === 'running'
                 ? { phase: { tag: 'idle' }, error: event.message }
@@ -153,7 +154,7 @@ export interface UrlActionsController {
  * effect keyed on state, because it is caused by a user event and nothing else.
  */
 export const useUrlActions = (onUrlsChanged: () => void): UrlActionsController => {
-    const [state, dispatch] = useReducer(urlActionReducer, IDLE);
+    const [state, dispatch] = useReducer(urlActionReducer, IDLE_ACTION_STATE);
     const { phase, error } = state;
 
     const request = useCallback((url: ShortenedUrl) => {

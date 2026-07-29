@@ -6,8 +6,26 @@ changes.
 
 ## Tooling
 
-- Package manager: **npm** (`npm ci` / `npm run build` / `npm run lint`).
-- Build: `tsc -b && vite build`. Lint: `eslint .`.
+- Package manager: **npm** (`npm ci` / `npm run build` / `npm run lint` /
+  `npm test`).
+- Build: `tsc -b && vite build`. Lint: `eslint .`. Test: `vitest run`
+  (`npm run test:watch` while working).
+
+## Tests
+
+`src/**/*.test.ts`, colocated with the module under test and configured in
+[`vitest.config.ts`](../../frontend/vitest.config.ts). The suite covers the
+**domain modules only** — reducers, parsers, selectors, codecs — which is why it
+runs in a `node` environment with no DOM and no React plugin: that layer is
+framework-free by construction, and it is where the invariants live.
+
+Add a case for every new sum-type variant, every transition that must *not*
+apply (a stale settlement, a dismissal mid-flight), and every rejection path of
+a parser. Rendering is not covered; a component test needs a config that
+supplies a renderer.
+
+> CI's PR Quality Gate currently runs `npm run build` and `npm run lint` only.
+> Until `npm test` is added there, run it locally before pushing.
 
 ## Platform baseline
 
