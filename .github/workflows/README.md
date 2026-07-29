@@ -135,13 +135,21 @@ trusted `push` runs on the default branch, trusted downstream `workflow_run`
 runs whose head is that branch in this repository, and published releases can
 write caches. This prevents a PR from becoming a cache producer.
 
-Frontend jobs use the reusable `setup-frontend` action to cache npm's global
-download store only. Its key includes the lockfile hash, OS, architecture, and
-Node 24; `node_modules` and frontend build outputs are never cached. The action
-runs `npm ci`, which verifies lockfile integrity before using cached tarballs.
-PR and manual-dispatch callers restore only. Explicit trusted callers use the
-same default-branch, downstream-run, or published-release conditions as the
-Rust cache writers before saving a cache.
+Frontend jobs use the reusable `build-frontend` action, which installs, builds,
+lints, and tests the frontend in one step — every flow that needs
+`frontend/dist` therefore verifies it on the way to producing it, so no commit
+can be published, imaged, or benchmarked without having been checked. The
+action runs `npm run verify` (build → lint → test), the same command a
+developer runs locally.
+
+It caches npm's global download store only. The key includes the lockfile hash,
+OS, architecture, and Node 24; `node_modules` and frontend build outputs are
+never cached. `npm ci` verifies lockfile integrity before using cached
+tarballs. The cache is saved directly after installation rather than after
+verification, since it holds resolved dependencies and a lint or test failure
+says nothing about those. PR and manual-dispatch callers restore only. Explicit
+trusted callers use the same default-branch, downstream-run, or
+published-release conditions as the Rust cache writers before saving a cache.
 
 Docker builds use separate BuildKit cache scopes per architecture. PR builds
 may restore the trusted amd64 scope but never export to it. Main-branch and

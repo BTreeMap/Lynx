@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "verify": "npm run build && npm run lint && npm test"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.3",

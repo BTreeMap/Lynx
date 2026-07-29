@@ -6,10 +6,15 @@ changes.
 
 ## Tooling
 
-- Package manager: **npm** (`npm ci` / `npm run build` / `npm run lint` /
-  `npm test`).
-- Build: `tsc -b && vite build`. Lint: `eslint .`. Test: `vitest run`
-  (`npm run test:watch` while working).
+- Package manager: **npm**. `npm run verify` is the gate — build → lint → test,
+  in that order.
+- The individual steps stay available: `npm run build` (`tsc -b && vite build`),
+  `npm run lint` (`eslint .`), `npm test` (`vitest run`), and
+  `npm run test:watch` while working.
+- CI does not spell the sequence out. Every workflow that needs
+  `frontend/dist` calls the `build-frontend` action, which runs `npm run
+  verify`, so the command in your shell and the command in CI are the same one —
+  and no flow can build the frontend without checking it.
 
 ## Tests
 
@@ -24,8 +29,9 @@ apply (a stale settlement, a dismissal mid-flight), and every rejection path of
 a parser. Rendering is not covered; a component test needs a config that
 supplies a renderer.
 
-The PR Quality Gate runs `npm test` alongside the build and lint, so a failing
-reducer blocks the merge.
+`npm run verify` runs the suite, and every CI flow runs `npm run verify`, so a
+failing reducer blocks the merge — and also blocks a release, an image publish,
+and a benchmark run.
 
 ## Platform baseline
 

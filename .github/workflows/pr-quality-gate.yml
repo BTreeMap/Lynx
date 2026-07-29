@@ -22,15 +22,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up cached frontend dependencies
-        uses: ./.github/actions/setup-frontend
-
-      - name: Build, lint, and test frontend
-        working-directory: frontend
-        run: |
-          npm run build
-          npm run lint
-          npm test
+      - name: Build and verify frontend
+        uses: ./.github/actions/build-frontend
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -65,13 +58,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up cached frontend dependencies
-        uses: ./.github/actions/setup-frontend
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm run build
+      - name: Build and verify frontend
+        uses: ./.github/actions/build-frontend
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -116,13 +104,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up cached frontend dependencies
-        uses: ./.github/actions/setup-frontend
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm run build
+      - name: Build and verify frontend
+        uses: ./.github/actions/build-frontend
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -151,13 +134,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up cached frontend dependencies
-        uses: ./.github/actions/setup-frontend
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm run build
+      - name: Build and verify frontend
+        uses: ./.github/actions/build-frontend
 
       - uses: docker/setup-buildx-action@v4
 
@@ -201,13 +179,8 @@ jobs:
       - name: Load Docker image
         run: docker load -i /tmp/lynx-pr-image.tar
 
-      - name: Set up cached frontend dependencies
-        uses: ./.github/actions/setup-frontend
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm run build
+      - name: Build and verify frontend
+        uses: ./.github/actions/build-frontend
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -283,13 +256,8 @@ jobs:
       - name: Load Docker image
         run: docker load -i /tmp/lynx-pr-image.tar
 
-      - name: Set up cached frontend dependencies
-        uses: ./.github/actions/setup-frontend
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm run build
+      - name: Build and verify frontend
+        uses: ./.github/actions/build-frontend
 
       - uses: dtolnay/rust-toolchain@stable
 

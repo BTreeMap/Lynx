@@ -52,15 +52,10 @@ jobs:
         id: image
         run: echo "reference=ghcr.io/${GITHUB_REPOSITORY,,}:${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up cached frontend dependencies
-        uses: ./.github/actions/setup-frontend
+      - name: Build and verify frontend
+        uses: ./.github/actions/build-frontend
         with:
           save_cache: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch == github.event.repository.default_branch }}
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm run build
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -162,13 +157,8 @@ jobs:
         id: image
         run: echo "reference=ghcr.io/${GITHUB_REPOSITORY,,}:${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up cached frontend dependencies
-        uses: ./.github/actions/setup-frontend
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm run build
+      - name: Build and verify frontend
+        uses: ./.github/actions/build-frontend
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -297,13 +287,8 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           submodules: recursive
 
-      - name: Set up cached frontend dependencies
-        uses: ./.github/actions/setup-frontend
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm run build
+      - name: Build and verify frontend
+        uses: ./.github/actions/build-frontend
 
       - uses: dtolnay/rust-toolchain@stable
 

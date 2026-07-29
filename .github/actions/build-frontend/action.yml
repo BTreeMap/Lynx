@@ -1,5 +1,16 @@
-name: Set up frontend
-description: Install locked frontend dependencies with an explicitly controlled npm cache.
+name: Build frontend
+description: >-
+  Install locked frontend dependencies with an explicitly controlled npm cache,
+  then build, lint, and test the frontend.
+
+# Every workflow that needs `frontend/dist` uses this action, and it verifies on the
+# way to producing it. Building without linting and testing was previously possible —
+# and was in fact what every flow except the PR gate's fast job did — so the same
+# commit could be published as a binary, baked into an image, and benchmarked without
+# anything having checked it. One definition means no flow can drift into that state.
+#
+# `npm run verify` (build -> lint -> test) is defined in frontend/package.json, so CI
+# and a developer's shell run the identical sequence.
 
 inputs:
   save_cache:
@@ -34,9 +45,17 @@ runs:
       working-directory: frontend
       run: npm ci
 
+    # Saved before verification, not after: the cache holds resolved dependencies, which
+    # a lint or test failure says nothing about. Moving this later would throw away a
+    # valid download cache every time a test failed.
     - name: Save trusted npm dependency cache
       if: ${{ inputs.save_cache == 'true' && steps.npm-cache.outputs.cache-hit != 'true' }}
       uses: actions/cache/save@v6
       with:
         path: ${{ steps.npm-cache-path.outputs.path }}
         key: ${{ steps.npm-cache.outputs.cache-primary-key }}
+
+    - name: Build, lint, and test frontend
+      shell: bash
+      working-directory: frontend
+      run: npm run verify

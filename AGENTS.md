@@ -18,8 +18,8 @@ intentionally short; load the linked domain docs just-in-time for deeper work.
   `git submodule update --init --recursive` on an existing checkout.
 
 ```bash
-# Frontend
-cd frontend && npm ci && npm run build && npm run lint && npm test
+# Frontend (matches CI — every workflow runs this same command)
+cd frontend && npm ci && npm run verify
 
 # Backend quality gate (matches CI)
 cargo fmt --all -- --check
