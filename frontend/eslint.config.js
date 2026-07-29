@@ -16,7 +16,10 @@ export default defineConfig([
       reactRefresh.configs.vite,
     ],
     languageOptions: {
-      ecmaVersion: 2020,
+      // The build targets current browsers (see tsconfig `target`/`lib`), so the parser
+      // is told the same thing rather than being pinned to a decade-old edition.
+      ecmaVersion: 'latest',
+      sourceType: 'module',
       globals: globals.browser,
     },
   },

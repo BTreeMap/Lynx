@@ -70,10 +70,35 @@ Regular users can:
 - View their own URLs and statistics
 - See click counts and active status
 
+## Project structure
+
+Domain logic is kept out of components: a pure module holds the state machine, a hook
+interprets it against the network, and components render the result.
+
+```
+src/
+  api.ts                  Every HTTP call. Base URL, bearer injection, short-code encoding.
+  types.ts                Wire types (declarations only — they validate nothing).
+  auth/                   Auth mode + session machine, OIDC/PKCE flow, token storage.
+  lib/                    Framework-free helpers: RemoteData, base64url, cn, assertNever.
+  hooks/                  useRemoteQuery (abortable reads), useAuth, useTheme.
+  components/
+    ui/                   Presentational primitives (Button, Card, Dialog, Table, …).
+    layout/               App shell: header, page scaffolding, logo.
+    urls/                 Link collection + row actions + destination editing.
+    analytics/            Dimension model, charts, analytics queries.
+    dashboard/            Dashboard-only presentation.
+```
+
+See [docs/agents/frontend.md](../docs/agents/frontend.md) for the conventions these
+follow.
+
 ## Technology Stack
 
-- React 18
+- React 19
 - TypeScript
-- Vite
+- Vite (Rolldown)
+- Tailwind CSS v4
 - Axios for API calls
 - React Router DOM
+- Recharts for analytics charts

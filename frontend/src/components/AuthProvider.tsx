@@ -1,131 +1,126 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer } from 'react';
 import type { ReactNode } from 'react';
 import { apiClient } from '../api';
-import { beginAuthorizationFlow, completeAuthorizationFlow, selectBearerToken } from '../lib/oidc';
-import type { OAuthFrontendConfig, UserInfo } from '../types';
-import { AuthContext } from '../contexts/AuthContext';
+import {
+    authReducer,
+    FALLBACK_SERVER_CONFIG,
+    INITIALIZING,
+    oauthClient,
+    parseServerConfig,
+    pendingCredential,
+} from '../auth/model';
+import { beginAuthorizationFlow, completeAuthorizationFlow, selectBearerToken } from '../auth/oidc';
+import { clearToken, readToken, writeToken } from '../auth/tokenStore';
+import { AuthContext, type AuthContextValue } from '../contexts/AuthContext';
 
-const DEFAULT_SHORT_CODE_MAX_LENGTH = 50;
-
+/**
+ * Interprets the authentication machine against the network and browser storage.
+ *
+ * The reducer decides which transitions exist; this decides when a request goes out.
+ * Both effects below are *synchronisations* — "read the server's configuration", "read
+ * the identity this credential names" — which is what an effect is for. Everything
+ * caused by a user action happens instead inside the command that action invokes.
+ */
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [authMode, setAuthMode] = useState<string | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('auth_token'));
-  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [oauthConfig, setOauthConfig] = useState<OAuthFrontendConfig | null>(null);
-  const [shortCodeMaxLength, setShortCodeMaxLength] = useState<number>(
-    DEFAULT_SHORT_CODE_MAX_LENGTH
-  );
+    const [state, dispatch] = useReducer(authReducer, INITIALIZING);
 
-  const refreshUserInfo = useCallback(async () => {
-    if (token || authMode === 'none' || authMode === 'cloudflare') {
-      try {
-        const info = await apiClient.getUserInfo();
-        setUserInfo(info);
-      } catch (error) {
-        console.error('Failed to fetch user info:', error);
-        setUserInfo(null);
-      }
-    }
-  }, [token, authMode]);
+    // Read the server's auth configuration exactly once, on mount.
+    useEffect(() => {
+        const controller = new AbortController();
+        apiClient.getAuthMode({ signal: controller.signal }).then(
+            (response) => {
+                if (controller.signal.aborted) return;
+                dispatch({
+                    type: 'configured',
+                    config: parseServerConfig(response),
+                    token: readToken(),
+                });
+            },
+            (error: unknown) => {
+                if (controller.signal.aborted) return;
+                console.error('Failed to fetch auth mode:', error);
+                // Boot into the restrictive default rather than staying on the splash
+                // screen: an unreachable probe must not become a hung app.
+                dispatch({
+                    type: 'configured',
+                    config: FALLBACK_SERVER_CONFIG,
+                    token: readToken(),
+                });
+            },
+        );
+        return () => controller.abort();
+    }, []);
 
-  // Fetch auth mode on mount
-  useEffect(() => {
-    const fetchAuthMode = async () => {
-      try {
-        const response = await apiClient.getAuthMode();
-        setAuthMode(response.mode);
-        setOauthConfig(response.oauth ?? null);
-        setShortCodeMaxLength(response.short_code_max_length);
-      } catch (error) {
-        console.error('Failed to fetch auth mode:', error);
-        setAuthMode('oauth'); // Default to oauth if unable to fetch
-        setOauthConfig(null);
-        setShortCodeMaxLength(DEFAULT_SHORT_CODE_MAX_LENGTH);
-      }
-    };
-    fetchAuthMode();
-  }, []);
+    /*
+      The identity probe's dependency is the credential itself, flattened to a string so
+      that the effect re-runs on a *different* credential and never merely on a new
+      object. `null` means no probe is outstanding — the machine is still configuring,
+      or anonymous, or already identified.
+    */
+    const credential = pendingCredential(state);
+    const credentialKey =
+        credential === null
+            ? null
+            : credential.tag === 'bearer'
+              ? `bearer:${credential.token}`
+              : 'ambient';
 
-  useEffect(() => {
-    const loadUserInfo = async () => {
-      if (authMode === null) {
-        // Wait for auth mode to be loaded
-        return;
-      }
+    useEffect(() => {
+        if (credentialKey === null) return;
+        const controller = new AbortController();
+        apiClient.getUserInfo({ signal: controller.signal }).then(
+            (user) => {
+                if (!controller.signal.aborted) dispatch({ type: 'identified', user });
+            },
+            (error: unknown) => {
+                if (controller.signal.aborted) return;
+                console.error('Failed to fetch user info:', error);
+                // The credential stands even when the identity behind it cannot be read:
+                // the API authorises every request on its own, so a failed probe degrades
+                // the header and the admin affordances, not access itself.
+                dispatch({ type: 'identified', user: null });
+            },
+        );
+        return () => controller.abort();
+    }, [credentialKey]);
 
-      setIsLoading(true);
-      
-      // For auth=none or cloudflare, we don't need a token
-      if (authMode === 'none' || authMode === 'cloudflare') {
-        await refreshUserInfo();
-      } else if (token) {
-        // For oauth, we need a token
-        await refreshUserInfo();
-      }
-      
-      setIsLoading(false);
-    };
-    loadUserInfo();
-  }, [token, authMode, refreshUserInfo]);
+    const client = oauthClient(state);
 
-  const login = (newToken: string) => {
-    localStorage.setItem('auth_token', newToken);
-    setToken(newToken);
-  };
+    const signOut = useCallback(() => {
+        clearToken();
+        dispatch({ type: 'signedOut' });
+    }, []);
 
-  const logout = () => {
-    localStorage.removeItem('auth_token');
-    setToken(null);
-    setUserInfo(null);
-  };
+    const beginOAuthSignIn = useCallback(async () => {
+        if (!client) {
+            throw new Error('OAuth is not configured on this instance.');
+        }
+        await beginAuthorizationFlow(client);
+    }, [client]);
 
-  const startOAuthLogin = useCallback(async () => {
-    if (authMode !== 'oauth') {
-      return;
-    }
+    const completeOAuthSignIn = useCallback(
+        async (code: string, oauthState: string) => {
+            if (!client) {
+                throw new Error('OAuth is not configured on this instance.');
+            }
+            const tokenResponse = await completeAuthorizationFlow({
+                code,
+                state: oauthState,
+                config: client,
+            });
+            const token = selectBearerToken(tokenResponse);
+            // Storage first: the interceptor reads it there, and the dispatch below is
+            // what triggers the identity probe that will immediately need it.
+            writeToken(token);
+            dispatch({ type: 'signedIn', token });
+        },
+        [client],
+    );
 
-    if (!oauthConfig) {
-      throw new Error('OAuth is not configured on this instance.');
-    }
+    const value = useMemo<AuthContextValue>(
+        () => ({ state, signOut, beginOAuthSignIn, completeOAuthSignIn }),
+        [state, signOut, beginOAuthSignIn, completeOAuthSignIn],
+    );
 
-    await beginAuthorizationFlow(oauthConfig);
-  }, [authMode, oauthConfig]);
-
-  const completeOAuthLogin = useCallback(
-    async (code: string, state: string) => {
-      if (!oauthConfig) {
-        throw new Error('OAuth is not configured on this instance.');
-      }
-
-      const tokenResponse = await completeAuthorizationFlow({
-        code,
-        state,
-        config: oauthConfig,
-      });
-      const bearerToken = selectBearerToken(tokenResponse);
-      login(bearerToken);
-    },
-    [oauthConfig]
-  );
-
-  return (
-    <AuthContext.Provider
-      value={{
-        authMode,
-        token,
-        userInfo,
-        isLoading,
-        shortCodeMaxLength,
-        oauthConfig,
-        login,
-        logout,
-        startOAuthLogin,
-        completeOAuthLogin,
-        refreshUserInfo,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

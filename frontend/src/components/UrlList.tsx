@@ -14,9 +14,9 @@ import { minTableWidth, visibleLinkColumns } from './urls/linkColumns';
 import { useUrlActions } from './urls/urlActions';
 
 interface UrlListProps {
-    urls: ShortenedUrl[];
-    isAdmin: boolean;
-    onUrlsChanged: () => void;
+    readonly urls: readonly ShortenedUrl[];
+    readonly isAdmin: boolean;
+    readonly onUrlsChanged: () => void;
 }
 
 /** Matches the row height the table actually renders; refined by `measureElement`. */

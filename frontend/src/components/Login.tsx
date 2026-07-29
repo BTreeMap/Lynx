@@ -23,21 +23,32 @@ const highlights = [
   },
 ];
 
+/**
+ * Sign-in is a three-state flow, not a boolean beside a nullable message: "starting"
+ * ends either in a navigation away from this document or in a failure, so a spinner and
+ * an error can never be on screen together.
+ */
+type SignInPhase =
+  | { readonly tag: 'idle' }
+  | { readonly tag: 'starting' }
+  | { readonly tag: 'failed'; readonly message: string };
+
 const Login: React.FC = () => {
-  const [isSigningIn, setIsSigningIn] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const { startOAuthLogin } = useAuth();
+  const [phase, setPhase] = useState<SignInPhase>({ tag: 'idle' });
+  const { beginOAuthSignIn } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setIsSigningIn(true);
+    setPhase({ tag: 'starting' });
 
     try {
-      await startOAuthLogin();
+      // Resolves only if the redirect never happens; the success path leaves the page.
+      await beginOAuthSignIn();
     } catch (err) {
-      setIsSigningIn(false);
-      setError(err instanceof Error ? err.message : 'Failed to start OAuth login.');
+      setPhase({
+        tag: 'failed',
+        message: err instanceof Error ? err.message : 'Failed to start OAuth login.',
+      });
     }
   };
 
@@ -114,15 +125,15 @@ const Login: React.FC = () => {
                 type="submit"
                 size="lg"
                 fullWidth
-                isLoading={isSigningIn}
+                isLoading={phase.tag === 'starting'}
                 rightIcon={<ArrowRight className="h-4 w-4" />}
               >
                 Sign in with OAuth
               </Button>
 
-              {error && (
+              {phase.tag === 'failed' && (
                 <p className="rounded-xl border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
-                  {error}
+                  {phase.message}
                 </p>
               )}
             </form>

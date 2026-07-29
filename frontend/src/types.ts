@@ -1,120 +1,127 @@
+/**
+ * Wire types for the Lynx API.
+ *
+ * These describe what the server *says* it sends. They are declarations, not
+ * guarantees: TypeScript erases them, so nothing here validates a payload. Values that
+ * drive control flow — the auth mode, a short code from the URL bar — are parsed into
+ * domain types at a single boundary before use (`src/auth/model.ts`,
+ * `src/utils/url.ts`); the rest are rendered as data and are safe to take at face
+ * value.
+ *
+ * Every field is `readonly`: a response is a value, and nothing in the app mutates one
+ * in place. The modifier costs nothing at runtime and turns an accidental write into a
+ * compile error.
+ */
+
 export interface ShortenedUrl {
-  id: number;
-  short_code: string;
-  original_url: string;
-  created_at: number;
-  created_by: string | null;
-  clicks: number;
-  is_active: boolean;
-  redirect_base_url?: string | null;
+    readonly id: number;
+    readonly short_code: string;
+    readonly original_url: string;
+    readonly created_at: number;
+    readonly created_by: string | null;
+    readonly clicks: number;
+    readonly is_active: boolean;
+    readonly redirect_base_url?: string | null;
 }
 
 export interface PaginatedUrlsResponse {
-  urls: ShortenedUrl[];
-  next_cursor?: string | null;
-  has_more: boolean;
+    readonly urls: readonly ShortenedUrl[];
+    readonly next_cursor?: string | null;
+    readonly has_more: boolean;
 }
 
 export interface CreateUrlRequest {
-  url: string;
-  custom_code?: string;
-}
-
-export interface UpdateUrlRequest {
-  url: string;
+    readonly url: string;
+    readonly custom_code?: string;
 }
 
 export interface UrlHistoryEntry {
-  id: number;
-  short_code: string;
-  historic_url: string;
-  changed_at: number;
-  changed_by: string | null;
+    readonly id: number;
+    readonly short_code: string;
+    readonly historic_url: string;
+    readonly changed_at: number;
+    readonly changed_by: string | null;
 }
 
 export interface UserInfo {
-  user_id: string | null;
-  is_admin: boolean;
+    readonly user_id: string | null;
+    readonly is_admin: boolean;
 }
 
 export interface AuthModeResponse {
-  mode: string;
-  short_code_max_length: number;
-  oauth?: OAuthFrontendConfig;
+    readonly mode: string;
+    readonly short_code_max_length: number;
+    readonly oauth?: OAuthFrontendConfig;
 }
 
 export interface OAuthFrontendConfig {
-  issuer_url: string;
-  client_id: string;
-  scopes: string;
-  redirect_uri: string;
+    readonly issuer_url: string;
+    readonly client_id: string;
+    readonly scopes: string;
+    readonly redirect_uri: string;
 }
 
 export interface OidcDiscoveryResponse {
-  authorization_endpoint: string;
-  token_endpoint: string;
+    readonly authorization_endpoint: string;
+    readonly token_endpoint: string;
 }
 
 export interface OidcTokenResponse {
-  access_token: string;
-  token_type: string;
-  expires_in?: number;
-  id_token?: string;
-  scope?: string;
-  refresh_token?: string;
-}
-
-export interface ErrorResponse {
-  error: string;
+    readonly access_token: string;
+    readonly token_type: string;
+    readonly expires_in?: number;
+    readonly id_token?: string;
+    readonly scope?: string;
+    readonly refresh_token?: string;
 }
 
 export interface SuccessResponse {
-  message: string;
+    readonly message: string;
 }
 
 export interface AnalyticsEntry {
-  id: number;
-  short_code: string;
-  time_bucket: number;
-  country_code: string | null;
-  region: string | null;
-  city: string | null;
-  asn: number | null;
-  ip_version: number;
-  visit_count: number;
-  created_at: number;
-  updated_at: number;
+    readonly id: number;
+    readonly short_code: string;
+    readonly time_bucket: number;
+    readonly country_code: string | null;
+    readonly region: string | null;
+    readonly city: string | null;
+    readonly asn: number | null;
+    readonly ip_version: number;
+    readonly visit_count: number;
+    readonly created_at: number;
+    readonly updated_at: number;
 }
 
 export interface AnalyticsResponse {
-  entries: AnalyticsEntry[];
-  total: number;
-  clicks: number;
+    readonly entries: readonly AnalyticsEntry[];
+    readonly total: number;
+    readonly clicks: number;
 }
 
 export interface AnalyticsAggregate {
-  dimension: string;
-  visit_count: number;
+    readonly dimension: string;
+    readonly visit_count: number;
 }
 
 export interface AnalyticsAggregateResponse {
-  aggregates: AnalyticsAggregate[];
-  total: number;
-  clicks: number;
+    readonly aggregates: readonly AnalyticsAggregate[];
+    readonly total: number;
+    readonly clicks: number;
 }
 
 export interface SearchParams {
-  q: string;
-  created_by?: string;
-  created_from?: number;
-  created_to?: number;
-  is_active?: boolean;
-  limit?: number;
-  cursor?: string;
+    readonly q: string;
+    readonly created_by?: string;
+    readonly created_from?: number;
+    readonly created_to?: number;
+    readonly is_active?: boolean;
+    readonly limit?: number;
+    readonly cursor?: string;
 }
 
 export interface SearchResponse {
-  items: ShortenedUrl[];
-  next_cursor?: string | null;
-  has_more: boolean;
+    readonly items: readonly ShortenedUrl[];
+    readonly next_cursor?: string | null;
+    readonly has_more: boolean;
 }

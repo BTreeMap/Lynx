@@ -4,21 +4,22 @@ import { cn } from '../lib/cn';
 import { Button } from './ui/Button';
 import { IconButton } from './ui/IconButton';
 import { Field, Input, Select } from './ui/Input';
+import type { SearchFilters } from './urls/linkCollection';
 
-export interface SearchFilters {
-    q: string;
-    created_by?: string;
-    created_from?: number;
-    created_to?: number;
-    is_active?: boolean;
-}
-
+/*
+  `SearchFilters` is defined with the collection it queries, not here: this panel is one
+  producer of it, and the dashboard's paging code is another consumer. Owning the type at
+  the point of use would have made the presentation the authority on the domain.
+*/
 interface SearchPanelProps {
-    onSearch: (filters: SearchFilters) => void;
-    onClear: () => void;
-    isSearching: boolean;
-    isAdmin: boolean;
+    readonly onSearch: (filters: SearchFilters) => void;
+    readonly onClear: () => void;
+    readonly isSearching: boolean;
+    readonly isAdmin: boolean;
 }
+
+/** The status filter's three positions; `undefined` in the query means "either". */
+type StatusFilter = 'all' | 'active' | 'inactive';
 
 const toStartOfDayUnix = (value: string): number | undefined => {
     if (!value) return undefined;
@@ -44,7 +45,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
     const [createdBy, setCreatedBy] = useState('');
     const [createdFrom, setCreatedFrom] = useState('');
     const [createdTo, setCreatedTo] = useState('');
-    const [status, setStatus] = useState<'all' | 'active' | 'inactive'>('all');
+    const [status, setStatus] = useState<StatusFilter>('all');
 
     const hasActiveFilters =
         createdBy.trim() !== '' || createdFrom !== '' || createdTo !== '' || status !== 'all';
@@ -172,7 +173,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
                                 <Select
                                     id="status-filter"
                                     value={status}
-                                    onChange={(e) => setStatus(e.target.value as 'all' | 'active' | 'inactive')}
+                                    onChange={(e) => setStatus(e.target.value as StatusFilter)}
                                 >
                                     <option value="all">All statuses</option>
                                     <option value="active">Active</option>

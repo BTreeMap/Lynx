@@ -1,203 +1,74 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownToLine, Download, Link2, MousePointerClick, Search as SearchIcon, Signal } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { Download, Search as SearchIcon } from 'lucide-react';
+import { isAdmin as selectIsAdmin } from '../auth/model';
 import { useAuth } from '../hooks/useAuth';
-import { apiClient } from '../api';
-import { extractErrorMessage } from '../utils/errorHandling';
-import type { ShortenedUrl } from '../types';
 import CreateUrlForm from './CreateUrlForm';
-import SearchPanel, { type SearchFilters } from './SearchPanel';
+import SearchPanel from './SearchPanel';
 import UrlList from './UrlList';
+import { DashboardStats } from './dashboard/DashboardStats';
 import { AppHeader } from './layout/AppHeader';
 import { PageIntro, PageShell } from './layout/Page';
-import { Button } from './ui/Button';
 import { Alert } from './ui/Alert';
+import { Badge } from './ui/Badge';
+import { Button } from './ui/Button';
 import { EmptyState } from './ui/EmptyState';
 import { Skeleton } from './ui/Skeleton';
 import { Spinner } from './ui/Spinner';
-import { StatCard } from './ui/StatCard';
-import { Badge } from './ui/Badge';
+import {
+    ALL_LINKS,
+    activeFilters,
+    hasMorePages,
+    isDraining,
+    isLoadingList,
+    isPaging,
+    isSearching,
+    summarise,
+    type SearchFilters,
+} from './urls/linkCollection';
+import { useLinkExport } from './urls/exportLinks';
+import { PAGE_SIZE, useLinkCollection } from './urls/useLinkCollection';
 
-const PAGE_SIZE = 50;
-const PACE_MS = 200;
-const supportsIntersectionObserver =
-    typeof window !== 'undefined' && 'IntersectionObserver' in window;
-const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/** Distance from the sentinel at which the next page starts loading. */
+const PREFETCH_MARGIN = '320px 0px';
 
 const Dashboard: React.FC = () => {
-    const { userInfo } = useAuth();
-    const isAdmin = userInfo?.is_admin ?? false;
+    const { state: auth } = useAuth();
+    const isAdmin = selectIsAdmin(auth);
 
-    const [urls, setUrls] = useState<ShortenedUrl[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [isLoadingMore, setIsLoadingMore] = useState(false);
-    const [isLoadingAll, setIsLoadingAll] = useState(false);
-    const [isSearching, setIsSearching] = useState(false);
-    const [isExporting, setIsExporting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [nextCursor, setNextCursor] = useState<string | null>(null);
-    const [hasMore, setHasMore] = useState(false);
-    const [activeFilters, setActiveFilters] = useState<SearchFilters | null>(null);
+    const collection = useLinkCollection();
+    const { state, load, refresh, loadMore, loadAll } = collection;
+    const exporter = useLinkExport();
+
     const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-    const loadUrls = useCallback(async () => {
-        setIsLoading(true);
-        setActiveFilters(null);
-        setError(null);
-        try {
-            const data = await apiClient.listUrls(PAGE_SIZE);
-            setUrls(data.urls);
-            setNextCursor(data.next_cursor || null);
-            setHasMore(data.has_more);
-        } catch (err: unknown) {
-            setError(extractErrorMessage(err, 'Failed to load URLs'));
-            setUrls([]);
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
+    const filters = activeFilters(state);
+    const hasMore = hasMorePages(state);
+    const stats = useMemo(() => summarise(state.items), [state.items]);
 
-    const loadMoreUrls = useCallback(async () => {
-        if (!nextCursor || isLoadingMore || isLoadingAll) return;
-        setIsLoadingMore(true);
-        setError(null);
-        try {
-            if (activeFilters) {
-                const data = await apiClient.searchUrls({
-                    ...activeFilters,
-                    limit: PAGE_SIZE,
-                    cursor: nextCursor,
-                });
-                setUrls((prev) => [...prev, ...data.items]);
-                setNextCursor(data.next_cursor || null);
-                setHasMore(data.has_more);
-            } else {
-                const data = await apiClient.listUrls(PAGE_SIZE, nextCursor);
-                setUrls((prev) => [...prev, ...data.urls]);
-                setNextCursor(data.next_cursor || null);
-                setHasMore(data.has_more);
-            }
-        } catch (err: unknown) {
-            setError(extractErrorMessage(err, 'Failed to load more URLs'));
-        } finally {
-            setIsLoadingMore(false);
-        }
-    }, [nextCursor, isLoadingMore, isLoadingAll, activeFilters]);
+    const search = useCallback((next: SearchFilters) => load({ tag: 'search', filters: next }), [load]);
+    const clearSearch = useCallback(() => load(ALL_LINKS), [load]);
 
-    const loadAllRemaining = useCallback(async () => {
-        if (!nextCursor || isLoadingMore || isLoadingAll) return;
-        setIsLoadingAll(true);
-        setError(null);
-        try {
-            let cursor: string | null = nextCursor;
-            while (cursor) {
-                if (activeFilters) {
-                    const data = await apiClient.searchUrls({
-                        ...activeFilters,
-                        limit: PAGE_SIZE,
-                        cursor,
-                    });
-                    setUrls((prev) => [...prev, ...data.items]);
-                    cursor = data.next_cursor || null;
-                    setNextCursor(cursor);
-                    setHasMore(data.has_more);
-                } else {
-                    const data = await apiClient.listUrls(PAGE_SIZE, cursor);
-                    setUrls((prev) => [...prev, ...data.urls]);
-                    cursor = data.next_cursor || null;
-                    setNextCursor(cursor);
-                    setHasMore(data.has_more);
-                }
-                if (cursor) await delay(PACE_MS);
-            }
-        } catch (err: unknown) {
-            setError(extractErrorMessage(err, 'Failed to load all URLs'));
-        } finally {
-            setIsLoadingAll(false);
-        }
-    }, [nextCursor, isLoadingMore, isLoadingAll, activeFilters]);
-
-    const handleSearch = useCallback(async (filters: SearchFilters) => {
-        setIsSearching(true);
-        setError(null);
-        setActiveFilters(filters);
-        setUrls([]);
-        setNextCursor(null);
-        try {
-            const data = await apiClient.searchUrls({ ...filters, limit: PAGE_SIZE });
-            setUrls(data.items);
-            setNextCursor(data.next_cursor || null);
-            setHasMore(data.has_more);
-        } catch (err: unknown) {
-            setError(extractErrorMessage(err, 'Search failed'));
-        } finally {
-            setIsSearching(false);
-        }
-    }, []);
-
-    const handleClearSearch = useCallback(() => {
-        loadUrls();
-    }, [loadUrls]);
-
-    const exportToJson = useCallback(async () => {
-        setIsExporting(true);
-        setError(null);
-        try {
-            const allUrls: ShortenedUrl[] = [];
-            let cursor: string | null = null;
-            let hasMoreData = true;
-            while (hasMoreData) {
-                const data = await apiClient.listUrls(PAGE_SIZE, cursor || undefined);
-                allUrls.push(...data.urls);
-                cursor = data.next_cursor || null;
-                hasMoreData = data.has_more;
-            }
-            const jsonStr = JSON.stringify(allUrls, null, 2);
-            const blob = new Blob([jsonStr], { type: 'application/json' });
-            const objectUrl = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = objectUrl;
-            link.download = `lynx-urls-export-${new Date().toISOString().split('T')[0]}.json`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(objectUrl);
-        } catch (err: unknown) {
-            setError(extractErrorMessage(err, 'Failed to export URLs'));
-        } finally {
-            setIsExporting(false);
-        }
-    }, []);
-
+    // Infinite scroll. The observer is re-attached whenever the pager changes identity,
+    // which is what keeps it paging the query currently on screen.
     useEffect(() => {
-        loadUrls();
-    }, [loadUrls]);
-
-    useEffect(() => {
-        if (!supportsIntersectionObserver) return;
         const node = sentinelRef.current;
         if (!node || !hasMore) return;
         const observer = new IntersectionObserver(
             (entries) => {
-                if (entries[0]?.isIntersecting) {
-                    loadMoreUrls();
-                }
+                if (entries[0]?.isIntersecting) loadMore();
             },
-            { rootMargin: '320px 0px' },
+            { rootMargin: PREFETCH_MARGIN },
         );
         observer.observe(node);
         return () => observer.disconnect();
-    }, [hasMore, loadMoreUrls]);
+    }, [hasMore, loadMore]);
 
-    const stats = useMemo(() => {
-        const totalClicks = urls.reduce((sum, u) => sum + u.clicks, 0);
-        const active = urls.filter((u) => u.is_active).length;
-        return {
-            count: urls.length,
-            totalClicks,
-            active,
-            inactive: urls.length - active,
-        };
-    }, [urls]);
+    /*
+      Both error channels render in the same slot, as they did when they shared one
+      `error` cell — but they are now owned by the machines that produce them, so a
+      failed export cannot be cleared by a successful page load.
+    */
+    const error = state.error ?? exporter.error;
 
     return (
         <div className="min-h-screen bg-bg">
@@ -206,9 +77,11 @@ const Dashboard: React.FC = () => {
                     <Button
                         variant="secondary"
                         size="sm"
-                        onClick={exportToJson}
-                        isLoading={isExporting}
-                        leftIcon={!isExporting ? <Download className="h-4 w-4" /> : undefined}
+                        onClick={exporter.exportJson}
+                        isLoading={exporter.isExporting}
+                        leftIcon={
+                            !exporter.isExporting ? <Download className="h-4 w-4" /> : undefined
+                        }
                     >
                         <span className="hidden sm:inline">Export JSON</span>
                         <span className="sm:hidden">Export</span>
@@ -222,78 +95,38 @@ const Dashboard: React.FC = () => {
                     description="Create, manage, and track your short links."
                 />
 
-                <section className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-                    <StatCard
-                        label={activeFilters ? 'Links found' : 'Links loaded'}
-                        value={stats.count.toLocaleString()}
-                        icon={<Link2 className="h-5 w-5" />}
-                        tone="primary"
-                        className="h-full"
-                        hint={
-                            hasMore ? (
-                                <button
-                                    type="button"
-                                    onClick={loadAllRemaining}
-                                    disabled={isLoadingAll || isLoadingMore}
-                                    className="inline-flex items-center gap-1 rounded font-medium text-primary underline-offset-2 transition hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:no-underline disabled:opacity-70"
-                                >
-                                    {isLoadingAll ? (
-                                        <>
-                                            <Spinner className="h-3 w-3" />
-                                            Loading all… {stats.count.toLocaleString()} loaded
-                                        </>
-                                    ) : (
-                                        <>
-                                            <ArrowDownToLine className="h-3 w-3" />
-                                            Load all
-                                        </>
-                                    )}
-                                </button>
-                            ) : undefined
-                        }
-                    />
-                    <StatCard
-                        label="Clicks (shown)"
-                        value={stats.totalClicks.toLocaleString()}
-                        icon={<MousePointerClick className="h-5 w-5" />}
-                        tone="accent"
-                        className="h-full"
-                    />
-                    <StatCard
-                        label="Active / Inactive"
-                        value={
-                            <span className="flex items-baseline gap-2">
-                                {stats.active.toLocaleString()}
-                                <span className="text-base font-normal text-fg-subtle">
-                                    / {stats.inactive.toLocaleString()}
-                                </span>
-                            </span>
-                        }
-                        icon={<Signal className="h-5 w-5" />}
-                        tone="success"
-                        className="h-full"
-                    />
-                </section>
+                <DashboardStats
+                    stats={stats}
+                    filtered={filters !== null}
+                    hasMore={hasMore}
+                    isDraining={isDraining(state)}
+                    canLoadAll={!isPaging(state)}
+                    onLoadAll={loadAll}
+                />
 
-                <CreateUrlForm onUrlCreated={loadUrls} />
+                {/* A new link is shown by returning to the unfiltered list: it need not
+                    match the search that happens to be active. */}
+                <CreateUrlForm onUrlCreated={clearSearch} />
 
                 <section className="space-y-3 sm:space-y-4">
                     <div className="flex flex-wrap items-end justify-between gap-2.5 sm:gap-3">
                         <div>
-                            <h2 className="text-lg font-semibold tracking-tight text-fg">Your links</h2>
+                            <h2 className="text-lg font-semibold tracking-tight text-fg">
+                                Your links
+                            </h2>
                             <p className="mt-1 text-sm text-fg-muted">
-                                {activeFilters
-                                    ? `Showing results for “${activeFilters.q}”`
+                                {filters
+                                    ? `Showing results for “${filters.q}”`
                                     : 'All links you have created.'}
                             </p>
                         </div>
-                        {activeFilters && (
+                        {filters && (
                             <Badge tone="primary" className="gap-2 py-1 pl-2.5 pr-1.5">
                                 {stats.count}
                                 {hasMore ? '+' : ''} result{stats.count === 1 ? '' : 's'}
                                 <button
                                     type="button"
-                                    onClick={handleClearSearch}
+                                    onClick={clearSearch}
                                     className="rounded-full px-2 py-0.5 text-xs font-medium text-primary-soft-fg/80 underline-offset-2 hover:underline"
                                 >
                                     Clear
@@ -303,32 +136,32 @@ const Dashboard: React.FC = () => {
                     </div>
 
                     <SearchPanel
-                        onSearch={handleSearch}
-                        onClear={handleClearSearch}
-                        isSearching={isSearching}
+                        onSearch={search}
+                        onClear={clearSearch}
+                        isSearching={isSearching(state)}
                         isAdmin={isAdmin}
                     />
 
                     {error && <Alert tone="error">{error}</Alert>}
 
-                    {isLoading ? (
+                    {isLoadingList(state) ? (
                         <div className="space-y-3">
-                            {Array.from({ length: 4 }).map((_, i) => (
-                                <Skeleton key={i} className="h-16 w-full" />
+                            {Array.from({ length: 4 }, (_, index) => (
+                                <Skeleton key={index} className="h-16 w-full" />
                             ))}
                         </div>
-                    ) : urls.length === 0 ? (
+                    ) : state.items.length === 0 ? (
                         <EmptyState
                             icon={<SearchIcon className="h-6 w-6" />}
-                            title={activeFilters ? 'No matching links' : 'No links yet'}
+                            title={filters ? 'No matching links' : 'No links yet'}
                             description={
-                                activeFilters
+                                filters
                                     ? 'Try a different search term or adjust your filters.'
                                     : 'Create your first short link using the form above.'
                             }
                             action={
-                                activeFilters ? (
-                                    <Button variant="secondary" size="sm" onClick={handleClearSearch}>
+                                filters ? (
+                                    <Button variant="secondary" size="sm" onClick={clearSearch}>
                                         Clear search
                                     </Button>
                                 ) : undefined
@@ -336,35 +169,25 @@ const Dashboard: React.FC = () => {
                         />
                     ) : (
                         <>
-                            <UrlList urls={urls} isAdmin={isAdmin} onUrlsChanged={loadUrls} />
+                            {/* A status change refreshes the query in place, so toggling a
+                                link does not discard the search that surfaced it. */}
+                            <UrlList urls={state.items} isAdmin={isAdmin} onUrlsChanged={refresh} />
                             {hasMore ? (
-                                supportsIntersectionObserver ? (
-                                    <div
-                                        ref={sentinelRef}
-                                        className="flex min-h-10 items-center justify-center pt-2"
-                                    >
-                                        {(isLoadingMore || isLoadingAll) && (
-                                            <span className="inline-flex items-center gap-2 text-sm text-fg-muted">
-                                                <Spinner className="h-4 w-4" />
-                                                {isLoadingAll
-                                                    ? `Loading all… ${stats.count.toLocaleString()} loaded`
-                                                    : 'Loading more…'}
-                                            </span>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <div className="flex justify-center pt-2">
-                                        <Button
-                                            variant="secondary"
-                                            onClick={loadMoreUrls}
-                                            isLoading={isLoadingMore}
-                                        >
-                                            {isLoadingMore ? 'Loading…' : 'Load more'}
-                                        </Button>
-                                    </div>
-                                )
+                                <div
+                                    ref={sentinelRef}
+                                    className="flex min-h-10 items-center justify-center pt-2"
+                                >
+                                    {isPaging(state) && (
+                                        <span className="inline-flex items-center gap-2 text-sm text-fg-muted">
+                                            <Spinner className="h-4 w-4" />
+                                            {isDraining(state)
+                                                ? `Loading all… ${stats.count.toLocaleString()} loaded`
+                                                : 'Loading more…'}
+                                        </span>
+                                    )}
+                                </div>
                             ) : (
-                                urls.length > PAGE_SIZE && (
+                                stats.count > PAGE_SIZE && (
                                     <p className="pt-2 text-center text-xs text-fg-subtle">
                                         You’ve reached the end · {stats.count.toLocaleString()} link
                                         {stats.count === 1 ? '' : 's'}

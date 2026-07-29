@@ -1,5 +1,6 @@
 import React from 'react';
 import { LogOut, ShieldCheck, UserRound } from 'lucide-react';
+import { authMode, currentUser } from '../../auth/model';
 import { useAuth } from '../../hooks/useAuth';
 import { cn } from '../../lib/cn';
 import { Badge } from '../ui/Badge';
@@ -14,8 +15,11 @@ export interface AppHeaderProps {
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({ actions, className }) => {
-    const { userInfo, authMode, logout } = useAuth();
-    const userId = userInfo?.user_id;
+    const { state, signOut } = useAuth();
+    const user = currentUser(state);
+    // Only OAuth has a credential to surrender; the pass-through modes would offer a
+    // control that cannot do anything.
+    const canSignOut = authMode(state) === 'oauth';
 
     return (
         <header
@@ -30,19 +34,19 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ actions, className }) => {
                 <div className="flex items-center gap-2 sm:gap-3">
                     {actions}
 
-                    {userInfo && (
+                    {user && (
                         <div className="hidden items-center gap-2 rounded-full border border-border bg-surface py-1 pl-1 pr-3 sm:flex">
                             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary-soft text-primary-soft-fg">
-                                {userInfo.is_admin ? (
+                                {user.is_admin ? (
                                     <ShieldCheck className="h-4 w-4" />
                                 ) : (
                                     <UserRound className="h-4 w-4" />
                                 )}
                             </span>
                             <span className="max-w-48 truncate text-sm font-medium text-fg">
-                                {userId || 'Anonymous'}
+                                {user.user_id || 'Anonymous'}
                             </span>
-                            {userInfo.is_admin && (
+                            {user.is_admin && (
                                 <Badge tone="primary" className="ml-0.5">
                                     Admin
                                 </Badge>
@@ -52,11 +56,11 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ actions, className }) => {
 
                     <ThemeToggle />
 
-                    {authMode === 'oauth' && (
+                    {canSignOut && (
                         <Button
                             variant="ghost"
                             size="sm"
-                            onClick={logout}
+                            onClick={signOut}
                             leftIcon={<LogOut className="h-4 w-4" />}
                             aria-label="Log out"
                         >
