@@ -25,11 +25,12 @@ jobs:
       - name: Set up cached frontend dependencies
         uses: ./.github/actions/setup-frontend
 
-      - name: Build and lint frontend
+      - name: Build, lint, and test frontend
         working-directory: frontend
         run: |
           npm run build
           npm run lint
+          npm test
 
       - uses: dtolnay/rust-toolchain@stable
         with:

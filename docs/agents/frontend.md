@@ -24,8 +24,8 @@ apply (a stale settlement, a dismissal mid-flight), and every rejection path of
 a parser. Rendering is not covered; a component test needs a config that
 supplies a renderer.
 
-> CI's PR Quality Gate currently runs `npm run build` and `npm run lint` only.
-> Until `npm test` is added there, run it locally before pushing.
+The PR Quality Gate runs `npm test` alongside the build and lint, so a failing
+reducer blocks the merge.
 
 ## Platform baseline
 
