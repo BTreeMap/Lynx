@@ -97,7 +97,7 @@ jobs:
 
   upload-release-assets:
     needs: build-binaries
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     strategy:
@@ -127,7 +127,7 @@ jobs:
           asset_content_type: application/octet-stream
 
   set-env:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions: {}
     outputs:
       DOCKER_IMAGE_NAME: ${{ steps.env_vars.outputs.DOCKER_IMAGE_NAME }}
@@ -217,7 +217,7 @@ jobs:
     needs: [set-env, build-docker-release]
     permissions:
       packages: write
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         variant: [amd64, arm64]
@@ -252,7 +252,7 @@ jobs:
     needs: [set-env, publish-docker-release]
     permissions:
       packages: write
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
