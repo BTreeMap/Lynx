@@ -14,7 +14,7 @@ concurrency:
 jobs:
   rust-fast-gate:
     name: Rust Fast Gate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:
@@ -49,7 +49,7 @@ jobs:
 
   rust-integration-sqlite:
     name: Rust Integration Tests (SQLite)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: rust-fast-gate
     permissions:
       contents: read
@@ -79,7 +79,7 @@ jobs:
 
   rust-integration-postgres:
     name: Rust Integration Tests (PostgreSQL)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: rust-fast-gate
     permissions:
       contents: read
@@ -125,7 +125,7 @@ jobs:
 
   build-docker-image:
     name: Build Docker Image
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: rust-fast-gate
     permissions:
       contents: read
@@ -160,7 +160,7 @@ jobs:
 
   e2e-sqlite:
     name: External Harness (SQLite)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: build-docker-image
     permissions:
       contents: read
@@ -223,7 +223,7 @@ jobs:
 
   e2e-postgres:
     name: External Harness (PostgreSQL)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: build-docker-image
     permissions:
       contents: read
