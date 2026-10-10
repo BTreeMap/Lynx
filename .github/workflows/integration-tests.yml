@@ -11,7 +11,7 @@ permissions: {}
 jobs:
   test-sqlite:
     name: External Harness (SQLite)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
@@ -85,7 +85,7 @@ jobs:
 
   test-postgres:
     name: External Harness (PostgreSQL)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
