@@ -20,7 +20,7 @@ permissions: {}
 jobs:
   benchmark-postgres:
     name: Native Benchmark (PostgreSQL)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
@@ -29,7 +29,7 @@ jobs:
       DATABASE_URL: postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
     services:
       postgres:
-        image: postgres:18-alpine
+        image: postgres:19-alpine
         env:
           POSTGRES_USER: lynx
           POSTGRES_PASSWORD: lynx_benchmark_pass
@@ -125,7 +125,7 @@ jobs:
 
   benchmark-analytics:
     name: Native Analytics Impact Benchmark
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
@@ -134,7 +134,7 @@ jobs:
       DATABASE_URL: postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
     services:
       postgres:
-        image: postgres:18-alpine
+        image: postgres:19-alpine
         env:
           POSTGRES_USER: lynx
           POSTGRES_PASSWORD: lynx_benchmark_pass
@@ -258,7 +258,7 @@ jobs:
 
   flamegraph-postgres:
     name: CPU Flamegraphs (PostgreSQL)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     timeout-minutes: 30
     permissions:
@@ -268,7 +268,7 @@ jobs:
       DATABASE_URL: postgresql://lynx:lynx_benchmark_pass@localhost:5432/lynx
     services:
       postgres:
-        image: postgres:18-alpine
+        image: postgres:19-alpine
         env:
           POSTGRES_USER: lynx
           POSTGRES_PASSWORD: lynx_benchmark_pass
