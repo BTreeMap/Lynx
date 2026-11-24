@@ -11,7 +11,7 @@ permissions: {}
 jobs:
   test-sqlite:
     name: External Harness (SQLite)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
@@ -85,7 +85,7 @@ jobs:
 
   test-postgres:
     name: External Harness (PostgreSQL)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
@@ -94,7 +94,7 @@ jobs:
       DATABASE_URL: postgresql://lynx:lynx_password@localhost:5432/lynx
     services:
       postgres:
-        image: postgres:18-alpine
+        image: postgres:19-alpine
         env:
           POSTGRES_USER: lynx
           POSTGRES_PASSWORD: lynx_password
